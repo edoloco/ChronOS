@@ -43,6 +43,8 @@ public class Hub implements Link.Listener {
     private boolean started, imeReady, remoteImeReady, remoteImeSelected;
     private long lastNotify = 0;
     public int acksOk = 0, acksFail = 0;
+    /** Hay una pantalla de Mesa Doble visible en este teléfono (permite abrir apps directo). */
+    public boolean foreground;
 
     private Hub(Context c) {
         app = c;
@@ -161,6 +163,11 @@ public class Hub implements Link.Listener {
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
         if ("media".equals(t)) { media(m.optString("k")); return; }
+        if ("launch".equals(t)) {
+            int r = launchHere(m.optString("pkg"), m.optString("label"));
+            send("launchAck", "r", r, "label", m.optString("label"));
+            return;
+        }
         if ("kbAsk".equals(t)) { sendImeState(); if (!imeSelected(app)) notifySwitch(); return; }
         if ("kbState".equals(t)) { remoteImeReady = m.optBoolean("ready"); remoteImeSelected = m.optBoolean("sel"); }
         if ("kbAck".equals(t)) { if (m.optBoolean("ok")) acksOk++; else acksFail++; }
@@ -171,6 +178,37 @@ public class Hub implements Link.Listener {
             send("kbAck", "ok", imeReady, "sel", sel);
             if (!imeReady && !sel) notifySwitch();
         }
+    }
+
+    public static final int LAUNCHED = 0, NOTIFIED = 1, NOT_INSTALLED = 2;
+
+    /**
+     * Abre una app en ESTE teléfono. Si Mesa Doble no está a la vista, Android no deja abrir apps
+     * desde segundo plano (salvo con el permiso "mostrar sobre otras apps"); en ese caso deja un aviso
+     * que se abre con un toque.
+     */
+    public int launchHere(String pkg, String label) {
+        Intent i = app.getPackageManager().getLaunchIntentForPackage(pkg);
+        if (i == null) return NOT_INSTALLED;
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+        if (foreground || Settings.canDrawOverlays(app)) {
+            try { app.startActivity(i); return LAUNCHED; } catch (Exception ignored) { }
+        }
+        NotificationManager nm = (NotificationManager) app.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm == null) return NOTIFIED;
+        if (nm.getNotificationChannel("avisos") == null)
+            nm.createNotificationChannel(new NotificationChannel("avisos", "Avisos del teclado", NotificationManager.IMPORTANCE_HIGH));
+        PendingIntent pi = PendingIntent.getActivity(app, pkg.hashCode(), i, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        int icon = app.getResources().getIdentifier("ic_stat", "drawable", app.getPackageName());
+        Notification n = new Notification.Builder(app, "avisos")
+                .setSmallIcon(icon != 0 ? icon : android.R.drawable.stat_notify_more)
+                .setContentTitle("Abrir " + (label.isEmpty() ? "la app" : label))
+                .setContentText("Toca para abrirla en este teléfono")
+                .setContentIntent(pi)
+                .setAutoCancel(true)
+                .build();
+        try { nm.notify(3, n); } catch (Exception ignored) { }
+        return NOTIFIED;
     }
 
     /** Multimedia y volumen: funcionan aunque el teclado receptor no esté activo. */

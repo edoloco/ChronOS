@@ -13,14 +13,16 @@ import java.util.UUID;
 
 /** Un elemento del escritorio. x va de 0 a 2 (anchos de pantalla), y de 0 a 1 (alto de pantalla). */
 public class Item {
-    public static final String NOTE = "note", IMG = "img", LINK = "link";
+    public static final String NOTE = "note", IMG = "img", LINK = "link", APP = "app";
 
     public String id = UUID.randomUUID().toString();
     public String kind = NOTE;
     public String text = "";
     public String url = "";
     public String title = "";
-    public String img = "";      // JPEG en base64
+    public String img = "";      // JPEG (foto) o PNG (ícono de app) en base64
+    public String ik = "";       // huella de la imagen: viaja con cada cambio; la imagen, solo una vez
+    public String pkg = "";      // paquete de la app (elementos tipo APP)
     public int color = 0xFFF6E6A2;
     public double x, y, w = 0.62;
     public long z = System.currentTimeMillis();
@@ -33,14 +35,20 @@ public class Item {
     public float hPx = 0;                         // alto medido en píxeles
     public final RectF sendBtn = new RectF(), delBtn = new RectF(), openBtn = new RectF();
     public Bitmap bmp;
+    public volatile boolean decoding;
     public StaticLayout layout;
     public String layoutKey = "";
 
-    public JSONObject toJson() {
+    /** Para guardar en el teléfono (con imagen). */
+    public JSONObject toJson() { return toJson(true); }
+
+    /** withImg=false para la red: la imagen pesa mucho y se manda aparte, una sola vez. */
+    public JSONObject toJson(boolean withImg) {
         JSONObject o = new JSONObject();
         try {
             o.put("id", id); o.put("kind", kind); o.put("text", text); o.put("url", url);
-            o.put("title", title); o.put("img", img); o.put("color", color);
+            o.put("title", title); o.put("color", color); o.put("pkg", pkg); o.put("ik", ik);
+            if (withImg) o.put("img", img);
             o.put("x", x); o.put("y", y); o.put("w", w); o.put("z", z); o.put("u", u); o.put("rev", rev); o.put("rot", (double) rot);
         } catch (JSONException ignored) { }
         return o;
@@ -54,6 +62,9 @@ public class Item {
         it.url = o.optString("url", "");
         it.title = o.optString("title", "");
         it.img = o.optString("img", "");
+        it.pkg = o.optString("pkg", "");
+        it.ik = o.optString("ik", "");
+        if (it.ik.isEmpty() && !it.img.isEmpty()) it.ik = keyOf(it.img);
         it.color = o.optInt("color", 0xFFF6E6A2);
         it.x = o.optDouble("x", 0.2);
         it.y = o.optDouble("y", 0.2);
@@ -73,10 +84,23 @@ public class Item {
 
     /** Copia los datos compartidos de otro elemento, conservando la animación local. */
     public void copyFrom(Item o) {
-        boolean imgChanged = !img.equals(o.img);
-        kind = o.kind; text = o.text; url = o.url; title = o.title; img = o.img; color = o.color;
+        kind = o.kind; text = o.text; url = o.url; title = o.title; color = o.color; pkg = o.pkg;
+        if (!o.img.isEmpty()) { if (!o.img.equals(img)) bmp = null; img = o.img; ik = o.ik; }
+        else if (!o.ik.equals(ik)) { img = ""; ik = o.ik; bmp = null; }   // cambió la imagen: llegará aparte
         x = o.x; y = o.y; w = o.w; z = o.z; u = o.u; rev = o.rev; rot = o.rot;
-        if (imgChanged) bmp = null;
+    }
+
+    public void setImage(String b64) {
+        img = b64;
+        ik = keyOf(b64);
+        bmp = null;
+    }
+
+    /** ¿Tiene huella de imagen pero aún no tiene la imagen? */
+    public boolean missingImage() { return !ik.isEmpty() && img.isEmpty(); }
+
+    public static String keyOf(String b64) {
+        return b64 == null || b64.isEmpty() ? "" : b64.length() + "-" + Integer.toHexString(b64.hashCode());
     }
 
     /** Marca un cambio local. */

@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -17,6 +18,7 @@ import android.os.Looper;
 import android.text.InputType;
 import android.util.Base64;
 import android.view.Gravity;
+import android.view.OrientationEventListener;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
@@ -37,6 +39,11 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Matcher;
@@ -53,9 +60,15 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private SharedPreferences prefs;
     private DeskView desk;
     private Hub hub;
-    private TextView status;
     private LinearLayout bar;
-    private Button sideBtn;
+    private SquareButton statusBtn;
+    private final List<SquareButton> squares = new ArrayList<>();
+    private OrientationEventListener orient;
+    private int snapped = -1;
+    private String statusText = "";
+    // imágenes: viajan una sola vez, aparte de los movimientos
+    private final Set<String> requested = new HashSet<>();
+    private final Map<String, String[]> pendingImg = new HashMap<>();
     private boolean night;
     private int side = -1, otherSide = -1, linkState = Link.IDLE, colorIdx = 0;
     private long lastDragSend = 0, waitingSince = 0;
@@ -75,32 +88,25 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         desk.setHost(this);
         root.addView(desk, new FrameLayout.LayoutParams(-1, -1));
 
-        status = new TextView(this);
-        status.setTextSize(12);
-        status.setPadding(dp(12), dp(6), dp(12), dp(6));
-        status.setBackground(pill(night ? 0xE0182129 : 0xE6FFFFFF));
-        status.setTextColor(night ? 0xFF93A4B5 : 0xFF5B6B7A);
-        status.setOnClickListener(v -> showConnection());
-        root.addView(status, new FrameLayout.LayoutParams(-2, -2));
-
         bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setPadding(dp(6), dp(6), dp(6), dp(6));
         bar.setBackground(pill(night ? 0xE6182129 : 0xEEFFFFFF));
         bar.setElevation(dp(6));
-        Button note = barButton("+ Nota", true);
-        note.setOnClickListener(v -> addNote());
-        Button img = barButton("Imagen", false);
-        img.setOnClickListener(v -> pickImage());
-        sideBtn = barButton("Lado", false);
-        sideBtn.setOnClickListener(v -> chooseSide());
-        Button kb = barButton("Teclado", false);
-        kb.setOnClickListener(v -> keyboardMenu());
-        Button conn = barButton("Red", false);
-        conn.setOnClickListener(v -> showConnection());
-        bar.addView(note); bar.addView(img); bar.addView(kb); bar.addView(sideBtn); bar.addView(conn);
+        addSquare(SquareButton.NOTE, "Nota", true, v -> addNote());
+        addSquare(SquareButton.IMAGE, "Imagen", false, v -> pickImage());
+        addSquare(SquareButton.APPS, "Apps", false, v -> showApps());
+        addSquare(SquareButton.KEYBOARD, "Teclado", false, v -> keyboardMenu());
+        addSquare(SquareButton.SETTINGS, "Ajustes", false, v -> settingsMenu());
+        statusBtn = addSquare(SquareButton.STATUS, "Red", false, v -> showConnection());
         root.addView(bar, new FrameLayout.LayoutParams(-2, -2));
 
+        // la mesa queda fija; solo los íconos giran según cómo se sostiene el teléfono
+        setRequestedOrientation(prefs.getInt("orient", 0) == 0
+                ? ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE : ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+        orient = new OrientationEventListener(this) {
+            @Override public void onOrientationChanged(int o) { onPhysicalOrientation(o); }
+        };
         setContentView(root);
         hub = Hub.get(this);
         loadItems();
@@ -120,6 +126,106 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         super.onNewIntent(intent);
         handleShare(intent);
     }
+
+    @Override protected void onResume() {
+        super.onResume();
+        hub.foreground = true;
+        if (orient.canDetectOrientation()) orient.enable();
+    }
+
+    @Override protected void onPause() {
+        hub.foreground = false;
+        orient.disable();
+        super.onPause();
+    }
+
+    private SquareButton addSquare(int kind, String label, boolean primary, View.OnClickListener l) {
+        SquareButton b = new SquareButton(this, kind, label, primary, night);
+        b.setOnClickListener(l);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.setMarginEnd(dp(6));
+        bar.addView(b, lp);
+        squares.add(b);
+        return b;
+    }
+
+    /** Gira los íconos para que se lean derechos, sin mover nada de lugar. */
+    private void onPhysicalOrientation(int o) {
+        if (o == OrientationEventListener.ORIENTATION_UNKNOWN) return;
+        int q = ((o + 45) / 90 * 90) % 360;
+        if (snapped >= 0 && q != snapped) {
+            int diff = Math.abs(o - snapped); diff = Math.min(diff, 360 - diff);
+            if (diff < 60) return;   // margen para que no titubee entre dos posiciones
+        }
+        if (q == snapped) return;
+        snapped = q;
+        int r = getWindowManager().getDefaultDisplay().getRotation() * 90;
+        float glyph = -((q + r) % 360);
+        if (glyph < -180) glyph += 360;
+        for (SquareButton b : squares) b.setGlyphRotation(glyph);
+        desk.setGlyphRotation(glyph);
+    }
+
+    // ---------------- ajustes y apps ----------------
+
+    private void settingsMenu() {
+        String[] opts = {
+                "Este teléfono está a la " + (side == 0 ? "IZQUIERDA" : "DERECHA") + " (cambiar)",
+                "Mesa en " + (prefs.getInt("orient", 0) == 0 ? "HORIZONTAL" : "VERTICAL") + " (cambiar)",
+                "Conexión y dirección IP",
+                "Teclado: recibir en este teléfono"};
+        new AlertDialog.Builder(this)
+                .setTitle("Ajustes")
+                .setItems(opts, (d, w) -> {
+                    if (w == 0) chooseSide();
+                    else if (w == 1) {
+                        int o = prefs.getInt("orient", 0) == 0 ? 1 : 0;
+                        prefs.edit().putInt("orient", o).apply();
+                        snapped = -1;
+                        setRequestedOrientation(o == 0 ? ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE : ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+                        Toast.makeText(this, "Elige la misma orientación en el otro teléfono", Toast.LENGTH_LONG).show();
+                    }
+                    else if (w == 2) showConnection();
+                    else setupReceiver();
+                })
+                .show();
+    }
+
+    private void showApps() {
+        AppsDialog.show(this, night, new AppsDialog.Host() {
+            @Override public void openHere(String pkg) { openApp(pkg, ""); }
+            @Override public void openThere(String pkg, String label) {
+                if (!hub.connected()) { Toast.makeText(MainActivity.this, "El otro teléfono no está conectado", Toast.LENGTH_SHORT).show(); return; }
+                hub.send("launch", "pkg", pkg, "label", label);
+            }
+            @Override public void putOnDesk(String pkg, String label, String iconPng) {
+                Item it = new Item();
+                it.kind = Item.APP; it.pkg = pkg; it.title = label; it.w = 0.24;
+                it.setImage(iconPng);
+                double[] p = desk.spot(it.w);
+                it.x = p[0]; it.y = p[1];
+                addItem(it);
+                sendImage(it);
+            }
+        });
+    }
+
+    private void openApp(String pkg, String label) {
+        int r = hub.launchHere(pkg, label);
+        if (r == Hub.NOT_INSTALLED) {
+            new AlertDialog.Builder(this)
+                    .setTitle("No está instalada en este teléfono")
+                    .setMessage("Cada teléfono abre sus propias apps. ¿Quieres buscarla en Play Store?")
+                    .setPositiveButton("Buscar", (d, w) -> {
+                        try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=" + pkg))); }
+                        catch (Exception e) { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=" + pkg))); }
+                    })
+                    .setNegativeButton("Cancelar", null)
+                    .show();
+        }
+    }
+
+    @Override public void onOpenApp(Item it) { openApp(it.pkg, it.title); }
 
     @Override protected void onDestroy() {
         hub.remove(this);   // la conexión sigue viva para el teclado
@@ -227,11 +333,6 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         bp.gravity = Gravity.BOTTOM | g;
         bp.setMargins(dp(12), 0, dp(12), dp(14));
         bar.setLayoutParams(bp);
-        FrameLayout.LayoutParams sp = (FrameLayout.LayoutParams) status.getLayoutParams();
-        sp.gravity = Gravity.TOP | g;
-        sp.setMargins(dp(12), dp(12), dp(12), 0);
-        status.setLayoutParams(sp);
-        sideBtn.setText(side == 0 ? "Izq." : "Der.");
         otherSide = -1;
         hub.setSide(side);
         waitingSince = System.currentTimeMillis();
@@ -272,11 +373,12 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         } else if (side == 0) {
             t = "Esperando al otro teléfono · IP " + Link.localIp();
         } else if (System.currentTimeMillis() - waitingSince > 12000) {
-            t = "No encuentro el teléfono izquierdo. Toca aquí para conectar por IP";
+            t = "No encuentro el teléfono izquierdo. Puedes conectar escribiendo su IP.";
         } else {
             t = "Buscando el teléfono izquierdo…";
         }
-        status.setText(t);
+        statusText = t;
+        statusBtn.setStatus(linkState == Link.CONNECTED ? (otherSide == side ? 1 : 2) : linkState == Link.WAITING ? 1 : 0);
         desk.setConnected(linkState == Link.CONNECTED);
         main.removeCallbacks(statusTick);
         if (linkState != Link.CONNECTED) main.postDelayed(statusTick, 4000);
@@ -292,7 +394,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         LinearLayout box = new LinearLayout(this);
         box.setPadding(dp(22), dp(4), dp(22), 0);
         box.addView(ip, new LinearLayout.LayoutParams(-1, -2));
-        String state = linkState == Link.CONNECTED ? "Conectado." : "Sin conexión.";
+        String state = statusText;
         AlertDialog.Builder b = new AlertDialog.Builder(this).setTitle("Conexión");
         if (side == 0) {
             b.setMessage(state + "\n\nEste teléfono es el izquierdo y espera la conexión.\nSu IP es " + Link.localIp()
@@ -384,7 +486,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     @Override public void onItemChanged(Item it) {
         JSONObject m = new JSONObject();
-        try { m.put("t", "up"); m.put("item", it.toJson()); } catch (JSONException ignored) { }
+        try { m.put("t", "up"); m.put("item", it.toJson(false)); } catch (JSONException ignored) { }
         hub.send(m);
         scheduleSave();
     }
@@ -432,11 +534,12 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             main.post(() -> {
                 if (b64 == null) { Toast.makeText(this, "No pude abrir esa imagen", Toast.LENGTH_SHORT).show(); return; }
                 Item it = new Item();
-                it.kind = Item.IMG; it.img = b64; it.w = 0.7;
+                it.kind = Item.IMG; it.setImage(b64); it.w = 0.5;
                 double[] p = desk.spot(it.w);
                 it.x = p[0]; it.y = p[1];
                 it.rot = (float) (Math.random() * 3 - 1.5);
                 addItem(it);
+                sendImage(it);
             });
         });
     }
@@ -503,13 +606,13 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             try {
                 hello.put("t", "hello"); hello.put("side", side);
                 JSONArray arr = new JSONArray();
-                for (Item it : desk.items) arr.put(it.toJson());
+                for (Item it : desk.items) arr.put(it.toJson(false));
                 full.put("t", "full"); full.put("items", arr);
             } catch (JSONException ignored) { }
             hub.send(hello);
             hub.send(full);
         }
-        if (state != Link.CONNECTED) { otherSide = -1; desk.clearAllRemoteDrags(); }
+        if (state != Link.CONNECTED) { otherSide = -1; desk.clearAllRemoteDrags(); requested.clear(); }
         updateStatus();
     }
 
@@ -546,7 +649,43 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             case "dragEnd":
                 desk.clearRemoteDrag(m.optString("id"));
                 break;
+            case "needImg": {
+                Item it = desk.find(m.optString("id"));
+                if (it != null) sendImage(it);
+                break;
+            }
+            case "img": {
+                String id = m.optString("id"), ik = m.optString("ik"), data = m.optString("img");
+                Item it = desk.find(id);
+                requested.remove(id);
+                if (it == null) { pendingImg.put(id, new String[]{ik, data}); break; }
+                if (ik.equals(it.ik) || it.ik.isEmpty()) { it.img = data; it.ik = ik; it.bmp = null; desk.invalidate(); scheduleSave(); }
+                break;
+            }
+            case "launchAck": {
+                int r = m.optInt("r");
+                String label = m.optString("label");
+                String msg = r == Hub.LAUNCHED ? "Abriendo " + label + " en el otro teléfono"
+                        : r == Hub.NOTIFIED ? "Toca el aviso en el otro teléfono para abrir " + label
+                        : label + " no está instalada en el otro teléfono";
+                Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+                break;
+            }
         }
+    }
+
+    /** Manda la imagen de un elemento una sola vez (los movimientos ya no la incluyen). */
+    private void sendImage(Item it) {
+        if (it.img.isEmpty()) return;
+        JSONObject m = new JSONObject();
+        try { m.put("t", "img"); m.put("id", it.id); m.put("ik", it.ik); m.put("img", it.img); } catch (JSONException ignored) { }
+        hub.send(m);
+    }
+
+    private void requestImageIfMissing(Item it) {
+        String[] p = pendingImg.remove(it.id);
+        if (p != null && p[0].equals(it.ik)) { it.img = p[1]; it.bmp = null; return; }
+        if (it.missingImage() && requested.add(it.id)) hub.send("needImg", "id", it.id);
     }
 
     /**
@@ -557,9 +696,10 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
      */
     private void merge(Item in, boolean live) {
         Item cur = desk.find(in.id);
-        if (cur == null) { desk.items.add(in); return; }
+        if (cur == null) { desk.items.add(in); requestImageIfMissing(in); return; }
         if (live && dragging(cur)) return;
         if (live || in.rev > cur.rev || (in.rev == cur.rev && in.u > cur.u)) cur.copyFrom(in);
+        requestImageIfMissing(cur);
     }
 
     private boolean dragging(Item it) { return desk.isDragging(it); }

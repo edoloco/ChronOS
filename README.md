@@ -11,12 +11,19 @@ App de Android que une dos teléfonos en un solo escritorio: arrastras notas, im
 
 ## Uso
 
+La mesa queda fija (horizontal por defecto; se cambia en *Ajustes*). Los botones son cuadrados y sus íconos
+giran en su lugar según cómo sostengas el teléfono.
+
 - **+ Nota**: crea una nota. Tócala para editarla.
 - **Imagen**: elige una foto de la galería.
+- **Apps**: abre una app en este teléfono, en el otro, o déjala en la mesa como ícono. Al tocar ese ícono se abre
+  en el teléfono donde está (cada teléfono abre sus propias apps).
+- **Girar y cambiar tamaño**: mantén presionado un elemento y usa los controles (círculo de arriba para girar,
+  esquina para el tamaño), o usa dos dedos sobre el elemento.
 - **Pasar al otro teléfono**: arrastra hacia el borde interior y suelta, lánzala con el dedo hacia ese borde, o toca la flecha del elemento.
 - **Compartir desde otras apps**: en Chrome, Fotos, WhatsApp, etc., usa *Compartir → Poner en Mesa Doble*.
 - **Teclado**: escribe en el otro teléfono desde este. Ver abajo.
-- **Red**: si el teléfono derecho no encuentra al izquierdo solo, escribe la IP que muestra el izquierdo.
+- **Red** (cuadro de estado): si el teléfono derecho no encuentra al izquierdo solo, escribe la IP que muestra el izquierdo.
 
 Los teléfonos se hablan directo por la red local (puerto 47820); no se usa internet.
 
