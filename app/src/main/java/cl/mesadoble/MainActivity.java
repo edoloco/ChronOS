@@ -94,9 +94,11 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         img.setOnClickListener(v -> pickImage());
         sideBtn = barButton("Lado", false);
         sideBtn.setOnClickListener(v -> chooseSide());
-        Button conn = barButton("Conexión", false);
+        Button kb = barButton("Teclado", false);
+        kb.setOnClickListener(v -> startActivity(new Intent(this, KeyboardActivity.class)));
+        Button conn = barButton("Red", false);
         conn.setOnClickListener(v -> showConnection());
-        bar.addView(note); bar.addView(img); bar.addView(sideBtn); bar.addView(conn);
+        bar.addView(note); bar.addView(img); bar.addView(kb); bar.addView(sideBtn); bar.addView(conn);
         root.addView(bar, new FrameLayout.LayoutParams(-2, -2));
 
         setContentView(root);
@@ -174,7 +176,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         sp.gravity = Gravity.TOP | g;
         sp.setMargins(dp(12), dp(12), dp(12), 0);
         status.setLayoutParams(sp);
-        sideBtn.setText(side == 0 ? "Lado: Izq." : "Lado: Der.");
+        sideBtn.setText(side == 0 ? "Izq." : "Der.");
         otherSide = -1;
         link.start(side == 0);
         waitingSince = System.currentTimeMillis();
