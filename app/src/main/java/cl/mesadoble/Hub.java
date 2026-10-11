@@ -11,6 +11,8 @@ import android.provider.Settings;
 import android.view.inputmethod.InputMethodInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.media.AudioManager;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.view.KeyEvent;
 
@@ -45,6 +47,10 @@ public class Hub implements Link.Listener {
     public int acksOk = 0, acksFail = 0;
     /** Hay una pantalla de Mesa Doble visible en este teléfono (permite abrir apps directo). */
     public boolean foreground;
+    /** La pantalla de teclado está abierta en este teléfono. */
+    public boolean keyboardVisible;
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private final Runnable restoreIme = () -> { if (!connected() && MesaAccess.instance != null) MesaAccess.instance.restorePrevious(); };
 
     private Hub(Context c) {
         app = c;
@@ -54,6 +60,9 @@ public class Hub implements Link.Listener {
     }
 
     public int side() { return side; }
+    /** Lado 1 = derecha = PRINCIPAL (donde corren las apps). Lado 0 = izquierda = EXTENDIDO. */
+    public boolean isPrincipal() { return side == 1; }
+    public boolean autoKeyboard() { return prefs.getBoolean("autoKb", true); }
     public int state() { return state; }
     public boolean connected() { return state == Link.CONNECTED; }
     public boolean remoteImeReady() { return remoteImeReady; }
@@ -155,8 +164,15 @@ public class Hub implements Link.Listener {
     @Override public void onState(int st, String inf) {
         state = st;
         info = inf;
-        if (st == Link.CONNECTED) sendImeState();
-        else remoteImeReady = false;
+        if (st == Link.CONNECTED) {
+            sendImeState();
+            main.removeCallbacks(restoreIme);
+            if (isPrincipal() && MesaAccess.instance != null) MesaAccess.instance.switchToMesa();
+        } else {
+            remoteImeReady = false;
+            // sin el extendido no hay teclado: si la conexión no vuelve pronto, devolver el teclado normal
+            if (isPrincipal()) { main.removeCallbacks(restoreIme); main.postDelayed(restoreIme, 6000); }
+        }
         for (Link.Listener l : listeners) l.onState(st, inf);
     }
 
@@ -169,7 +185,13 @@ public class Hub implements Link.Listener {
             return;
         }
         if ("kbAsk".equals(t)) { sendImeState(); if (!imeSelected(app)) notifySwitch(); return; }
-        if ("kbState".equals(t)) { remoteImeReady = m.optBoolean("ready"); remoteImeSelected = m.optBoolean("sel"); }
+        if ("kbState".equals(t)) {
+            boolean wasReady = remoteImeReady;
+            remoteImeReady = m.optBoolean("ready"); remoteImeSelected = m.optBoolean("sel");
+            // el principal tocó un campo de texto: mostrar el teclado aquí, en el extendido
+            if (!isPrincipal() && remoteImeReady && !wasReady && autoKeyboard()) openKeyboard();
+        }
+        if ("openKb".equals(t) && !isPrincipal() && autoKeyboard()) openKeyboard();
         if ("kbAck".equals(t)) { if (m.optBoolean("ok")) acksOk++; else acksFail++; }
         for (Link.Listener l : listeners) l.onMessage(m);
         if ("kb".equals(t)) {
@@ -178,6 +200,30 @@ public class Hub implements Link.Listener {
             send("kbAck", "ok", imeReady, "sel", sel);
             if (!imeReady && !sel) notifySwitch();
         }
+    }
+
+    /** Abre la pantalla de teclado en este teléfono (extendido). */
+    public void openKeyboard() {
+        if (keyboardVisible) return;
+        Intent i = new Intent(app, KeyboardActivity.class)
+                .putExtra("auto", true)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        if (foreground || Settings.canDrawOverlays(app)) {
+            try { app.startActivity(i); return; } catch (Exception ignored) { }
+        }
+        NotificationManager nm = (NotificationManager) app.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm == null) return;
+        if (nm.getNotificationChannel("avisos") == null)
+            nm.createNotificationChannel(new NotificationChannel("avisos", "Avisos del teclado", NotificationManager.IMPORTANCE_HIGH));
+        PendingIntent pi = PendingIntent.getActivity(app, 4, i, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        int icon = app.getResources().getIdentifier("ic_stat", "drawable", app.getPackageName());
+        try {
+            nm.notify(4, new Notification.Builder(app, "avisos")
+                    .setSmallIcon(icon != 0 ? icon : android.R.drawable.stat_notify_more)
+                    .setContentTitle("Teclado listo")
+                    .setContentText("Toca para escribir en el principal")
+                    .setContentIntent(pi).setAutoCancel(true).build());
+        } catch (Exception ignored) { }
     }
 
     public static final int LAUNCHED = 0, NOTIFIED = 1, NOT_INSTALLED = 2;

@@ -101,9 +101,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         statusBtn = addSquare(SquareButton.STATUS, "Red", false, v -> showConnection());
         root.addView(bar, new FrameLayout.LayoutParams(-2, -2));
 
-        // la mesa queda fija; solo los íconos giran según cómo se sostiene el teléfono
-        setRequestedOrientation(prefs.getInt("orient", 0) == 0
-                ? ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE : ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+        // Forma fija: dos teléfonos parados, lado a lado, que juntos forman una pantalla apaisada.
+        // Cada pantalla queda en vertical; solo los íconos giran según cómo se sostiene.
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         orient = new OrientationEventListener(this) {
             @Override public void onOrientationChanged(int o) { onPhysicalOrientation(o); }
         };
@@ -116,7 +116,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         for (Item it : desk.items) desk.normalize(it);
 
         side = hub.side();
-        if (side < 0) chooseSide(); else applySide();
+        if (side >= 0) applySide();
+        if (b == null) chooseSide();   // al iniciar, elegir principal o extendido
         hub.add(this);
         LinkService.start(this);
         if (android.os.Build.VERSION.SDK_INT >= 33 && !prefs.getBoolean("askedNotif", false)) {
@@ -135,6 +136,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         super.onResume();
         hub.foreground = true;
         if (orient.canDetectOrientation()) orient.enable();
+        if (hub.isPrincipal() && hub.connected() && MesaAccess.instance != null) MesaAccess.instance.switchToMesa();
     }
 
     @Override protected void onPause() {
@@ -144,12 +146,12 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     /** Mesa horizontal = teléfonos uno sobre otro; vertical = lado a lado. Siempre unidos por el lado largo. */
-    private boolean stacked() { return prefs.getInt("orient", 0) == 0; }
+    private boolean stacked() { return false; }
     /** Ancho inicial de un elemento: en horizontal la pantalla es más ancha, así que se usa la mitad. */
     private double sized(double base) { return stacked() ? base * 0.5 : base; }
-    private String sideName(int s) { return stacked() ? (s == 0 ? "arriba" : "abajo") : (s == 0 ? "a la izquierda" : "a la derecha"); }
-    private String firstPhone() { return stacked() ? "el teléfono de arriba" : "el teléfono izquierdo"; }
-    private String secondPhone() { return stacked() ? "el teléfono de abajo" : "el teléfono derecho"; }
+    private String sideName(int s) { return s == 1 ? "PRINCIPAL (derecha)" : "EXTENDIDO (izquierda)"; }
+    private String firstPhone() { return "el extendido (izquierda)"; }
+    private String secondPhone() { return "el principal (derecha)"; }
 
     private SquareButton addSquare(int kind, String label, boolean primary, View.OnClickListener l) {
         SquareButton b = new SquareButton(this, kind, label, primary, night);
@@ -181,39 +183,106 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     // ---------------- ajustes y apps ----------------
 
     private void settingsMenu() {
+        boolean auto = hub.autoKeyboard();
         String[] opts = {
-                "Este teléfono va " + sideName(side).toUpperCase() + " (cambiar)",
-                "Mesa en " + (stacked() ? "HORIZONTAL, uno arriba del otro" : "VERTICAL, lado a lado") + " (cambiar)",
-                "Conexión y dirección IP",
-                "Teclado: recibir en este teléfono"};
+                "Este teléfono es el " + sideName(side) + " (cambiar)",
+                hub.isPrincipal() ? "Revisar configuración del principal" : "Revisar configuración del extendido",
+                "Teclado automático: " + (auto ? "SÍ" : "NO") + " (cambiar)",
+                "Conexión y dirección IP"};
         new AlertDialog.Builder(this)
                 .setTitle("Ajustes")
                 .setItems(opts, (d, w) -> {
                     if (w == 0) chooseSide();
-                    else if (w == 1) {
-                        int o = prefs.getInt("orient", 0) == 0 ? 1 : 0;
-                        prefs.edit().putInt("orient", o).putBoolean("savedStacked", o == 0).apply();
-                        desk.convertAll(o == 0);
-                        scheduleSave();
-                        applySide();
-                        snapped = -1;
-                        setRequestedOrientation(o == 0 ? ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE : ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
-                        Toast.makeText(this, o == 0 ? "Pon los teléfonos en horizontal, uno arriba del otro. Haz lo mismo en el otro teléfono."
-                                : "Pon los teléfonos en vertical, uno al lado del otro. Haz lo mismo en el otro teléfono.", Toast.LENGTH_LONG).show();
+                    else if (w == 1) checkSetup(true);
+                    else if (w == 2) {
+                        prefs.edit().putBoolean("autoKb", !auto).apply();
+                        Toast.makeText(this, !auto ? "El teclado se abrirá solo en el extendido" : "Teclado automático desactivado", Toast.LENGTH_SHORT).show();
                     }
-                    else if (w == 2) showConnection();
-                    else setupReceiver();
+                    else showConnection();
                 })
+                .show();
+    }
+
+    // ---------------- configuración guiada ----------------
+
+    private boolean canOverlay() { return android.provider.Settings.canDrawOverlays(this); }
+
+    /**
+     * Revisa lo que cada teléfono necesita. Principal: teclado Mesa Doble activado, cambio automático
+     * de teclado (accesibilidad) y permiso para abrir apps pedidas desde el extendido.
+     * Extendido: permiso para abrir el teclado solo aunque la mesa esté de fondo.
+     */
+    private void checkSetup(boolean always) {
+        List<String> lines = new ArrayList<>();
+        final List<Runnable> fixes = new ArrayList<>();
+        if (hub.isPrincipal()) {
+            if (!Hub.imeEnabled(this)) {
+                lines.add("✗ Activar el teclado Mesa Doble");
+                fixes.add(() -> openSettings(android.provider.Settings.ACTION_INPUT_METHOD_SETTINGS, null,
+                        "Activa \"Mesa Doble\" en la lista de teclados y vuelve."));
+            } else lines.add("✓ Teclado Mesa Doble activado");
+            if (!MesaAccess.isEnabled(this)) {
+                lines.add("✗ Cambio automático de teclado (accesibilidad)");
+                fixes.add(this::guideAccessibility);
+            } else lines.add("✓ Cambio automático de teclado");
+            if (!canOverlay()) {
+                lines.add("✗ Abrir apps pedidas desde el extendido");
+                fixes.add(() -> openSettings(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()),
+                        "Activa \"Mostrar sobre otras apps\" para Mesa Doble y vuelve."));
+            } else lines.add("✓ Abrir apps pedidas desde el extendido");
+        } else {
+            if (!canOverlay()) {
+                lines.add("✗ Abrir el teclado solo, aunque la mesa esté de fondo");
+                fixes.add(() -> openSettings(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()),
+                        "Activa \"Mostrar sobre otras apps\" para Mesa Doble y vuelve."));
+            } else lines.add("✓ Abrir el teclado solo");
+        }
+        if (fixes.isEmpty() && !always) return;
+        StringBuilder msg = new StringBuilder();
+        for (String l : lines) msg.append(l).append("\n");
+        if (fixes.isEmpty()) msg.append("\nTodo listo.");
+        else msg.append("\nEn teléfonos Xiaomi revisa también: Ajustes → Apps → Mesa Doble → Otros permisos → "
+                + "\"Mostrar ventanas emergentes mientras se ejecuta en segundo plano\".");
+        AlertDialog.Builder b = new AlertDialog.Builder(this)
+                .setTitle(hub.isPrincipal() ? "Configurar el principal" : "Configurar el extendido")
+                .setMessage(msg.toString());
+        if (!fixes.isEmpty()) b.setPositiveButton("Resolver el primero", (d, w) -> fixes.get(0).run()).setNegativeButton("Después", null);
+        else b.setPositiveButton("Listo", null);
+        b.show();
+    }
+
+    private void openSettings(String action, Uri data, String toast) {
+        try {
+            Intent i = new Intent(action);
+            if (data != null) i.setData(data);
+            startActivity(i);
+            Toast.makeText(this, toast, Toast.LENGTH_LONG).show();
+        } catch (Exception e) {
+            Toast.makeText(this, "No pude abrir esa pantalla de Ajustes", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void guideAccessibility() {
+        new AlertDialog.Builder(this)
+                .setTitle("Cambio automático de teclado")
+                .setMessage("Mesa Doble usa un servicio de accesibilidad solo para cambiar al teclado Mesa Doble "
+                        + "(y devolver el tuyo al desconectarse) y para saber cuándo abres una app de chat. "
+                        + "No lee lo que hay en tu pantalla.\n\n"
+                        + "1. Si la opción aparece bloqueada (\"ajuste restringido\"): abre Info de la app → menú ⋮ → "
+                        + "\"Permitir ajustes restringidos\".\n"
+                        + "2. En Accesibilidad → Apps descargadas, activa \"Mesa Doble\".")
+                .setPositiveButton("Abrir Accesibilidad", (d, w) -> openSettings(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS, null,
+                        "Busca Mesa Doble en Apps descargadas y actívalo."))
+                .setNeutralButton("Info de la app", (d, w) -> openSettings(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:" + getPackageName()), "Menú ⋮ → Permitir ajustes restringidos"))
+                .setNegativeButton("Después", null)
                 .show();
     }
 
     private void showApps() {
         AppsDialog.show(this, night, new AppsDialog.Host() {
-            @Override public void openHere(String pkg) { openApp(pkg, ""); }
-            @Override public void openThere(String pkg, String label) {
-                if (!hub.connected()) { Toast.makeText(MainActivity.this, "El otro teléfono no está conectado", Toast.LENGTH_SHORT).show(); return; }
-                hub.send("launch", "pkg", pkg, "label", label);
-            }
+            @Override public void openHere(String pkg) { openOnPrincipal(pkg, ""); }
+            @Override public void openThere(String pkg, String label) { openOnPrincipal(pkg, label); }
             @Override public void putOnDesk(String pkg, String label, String iconPng) {
                 Item it = new Item();
                 it.kind = Item.APP; it.pkg = pkg; it.title = label; it.w = sized(0.24);
@@ -231,7 +300,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (r == Hub.NOT_INSTALLED) {
             new AlertDialog.Builder(this)
                     .setTitle("No está instalada en este teléfono")
-                    .setMessage("Cada teléfono abre sus propias apps. ¿Quieres buscarla en Play Store?")
+                    .setMessage("Las apps se abren en el principal. ¿Quieres buscarla en Play Store?")
                     .setPositiveButton("Buscar", (d, w) -> {
                         try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=" + pkg))); }
                         catch (Exception e) { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=" + pkg))); }
@@ -241,7 +310,14 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         }
     }
 
-    @Override public void onOpenApp(Item it) { openApp(it.pkg, it.title); }
+    /** Las apps corren en el principal: desde el extendido se le pide que la abra. */
+    private void openOnPrincipal(String pkg, String label) {
+        if (hub.isPrincipal()) { openApp(pkg, label); return; }
+        if (!hub.connected()) { Toast.makeText(this, "El principal no está conectado", Toast.LENGTH_SHORT).show(); return; }
+        hub.send("launch", "pkg", pkg, "label", label);
+    }
+
+    @Override public void onOpenApp(Item it) { openOnPrincipal(it.pkg, it.title); }
 
     @Override protected void onDestroy() {
         hub.remove(this);   // la conexión sigue viva para el teclado
@@ -373,15 +449,14 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     private void chooseSide() {
-        boolean st = stacked();
+        String last = side == 1 ? "\n\nLa última vez este teléfono fue el principal." : side == 0 ? "\n\nLa última vez este teléfono fue el extendido." : "";
         new AlertDialog.Builder(this)
-                .setTitle("¿Dónde está este teléfono?")
-                .setMessage(st ? "Pon los dos teléfonos en horizontal, uno arriba del otro y unidos por el lado largo, conectados al mismo WiFi. "
-                                + "Abre la app en ambos y elige en cada uno su posición."
-                              : "Pon los dos teléfonos en vertical, uno al lado del otro y unidos por el lado largo, conectados al mismo WiFi. "
-                                + "Abre la app en ambos y elige en cada uno su posición.")
-                .setPositiveButton(st ? "Abajo" : "Derecha", (d, w) -> setSide(1))
-                .setNegativeButton(st ? "Arriba" : "Izquierda", (d, w) -> setSide(0))
+                .setTitle("¿Qué es este teléfono?")
+                .setMessage("Pon los dos teléfonos parados, uno al lado del otro: juntos forman una pantalla apaisada.\n\n"
+                        + "PRINCIPAL (derecha): aquí corren las apps.\n"
+                        + "EXTENDIDO (izquierda): pantalla extra y teclado." + last)
+                .setPositiveButton("Principal (derecha)", (d, w) -> setSide(1))
+                .setNegativeButton("Extendido (izquierda)", (d, w) -> setSide(0))
                 .setCancelable(side >= 0)
                 .show();
     }
@@ -390,6 +465,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         side = s;
         prefs.edit().putInt("side", s).apply();
         applySide();
+        if (s == 1 && hub.connected() && MesaAccess.instance != null) MesaAccess.instance.switchToMesa();
+        main.postDelayed(() -> checkSetup(false), 400);
     }
 
     private void updateStatus() {

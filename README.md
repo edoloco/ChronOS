@@ -2,31 +2,32 @@
 
 App de Android que une dos teléfonos en un solo escritorio: arrastras notas, imágenes y enlaces de una pantalla a la otra.
 
+## Forma
+
+Los dos teléfonos van **parados, uno al lado del otro**, unidos por el lado largo: juntos forman una pantalla apaisada.
+
+- **Principal (derecha):** aquí corren las apps.
+- **Extendido (izquierda):** pantalla extra y teclado.
+
+Al abrir la app se elige qué es cada teléfono.
+
 ## Instalar
 
-1. En cada teléfono, abre la última versión: `Releases → MesaDoble.apk`.
-2. Descarga e instala el APK (Android pedirá permitir "instalar apps de origen desconocido" para el navegador).
-3. Conecta ambos teléfonos al mismo WiFi (o uno al hotspot del otro).
-4. Pon los teléfonos unidos por su **lado largo**: en horizontal, uno arriba del otro (como una consola
-   plegable); en vertical, uno al lado del otro (como un libro).
-5. Abre la app en ambos y elige la posición de cada uno (**Arriba/Abajo** o **Izquierda/Derecha**).
+1. En cada teléfono, abre la última versión: `Releases → MesaDoble.apk`, descárgala e instálala.
+2. Conecta ambos al mismo WiFi (o uno al hotspot del otro).
+3. Abre Mesa Doble y elige **Principal** o **Extendido**. La app te guía con lo que falta:
+   - Principal: activar el teclado Mesa Doble, el cambio automático de teclado (accesibilidad) y
+     "Mostrar sobre otras apps" (para abrir apps pedidas desde el extendido).
+   - Extendido: "Mostrar sobre otras apps" (para que el teclado aparezca solo).
 
 ## Uso
 
-La mesa queda fija (horizontal por defecto, con los teléfonos uno sobre otro; se cambia en *Ajustes*).
-Los elementos siempre cruzan por el borde largo, el que toca al otro teléfono. Los botones son cuadrados y sus íconos
-giran en su lugar según cómo sostengas el teléfono.
-
-- **+ Nota**: crea una nota. Tócala para editarla.
-- **Imagen**: elige una foto de la galería.
-- **Apps**: abre una app en este teléfono, en el otro, o déjala en la mesa como ícono. Al tocar ese ícono se abre
-  en el teléfono donde está (cada teléfono abre sus propias apps).
-- **Girar y cambiar tamaño**: mantén presionado un elemento y usa los controles (círculo de arriba para girar,
-  esquina para el tamaño), o usa dos dedos sobre el elemento.
-- **Pasar al otro teléfono**: arrastra hacia el borde interior y suelta, lánzala con el dedo hacia ese borde, o toca la flecha del elemento.
-- **Compartir desde otras apps**: en Chrome, Fotos, WhatsApp, etc., usa *Compartir → Poner en Mesa Doble*.
-- **Teclado**: escribe en el otro teléfono desde este. Ver abajo.
-- **Red** (cuadro de estado): si el teléfono derecho no encuentra al izquierdo solo, escribe la IP que muestra el izquierdo.
+- **Nota / Imagen**: agrégalas y arrástralas de una pantalla a la otra (cruzan por el borde que se toca).
+- **Apps**: elige una app para dejar su acceso directo en la mesa. Al tocarlo, se abre en el principal.
+- **Girar y cambiar tamaño**: mantén presionado un elemento o usa dos dedos.
+- **Teclado automático**: al tocar donde se escribe en el principal (o al abrir una app de chat), el teclado
+  aparece en el extendido. El principal cambia solo al teclado Mesa Doble y vuelve al tuyo si se desconecta.
+- **Compartir desde otras apps**: *Compartir → Poner en Mesa Doble*.
 
 Los teléfonos se hablan directo por la red local (puerto 47820); no se usa internet.
 

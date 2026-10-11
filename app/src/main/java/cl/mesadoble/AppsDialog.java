@@ -81,7 +81,7 @@ public class AppsDialog {
         root.addView(top);
 
         TextView hint = new TextView(a);
-        hint.setText("Toca una app para abrirla en este teléfono o en el otro, o para dejarla en la mesa.");
+        hint.setText("Elige una app para dejar su acceso directo en la mesa. Al tocarlo, se abre en el principal.");
         hint.setTextColor(night ? 0xFF93A4B5 : 0xFF5B6B7A);
         hint.setTextSize(12);
         hint.setPadding(4, Math.round(8 * dp), 4, Math.round(6 * dp));
@@ -128,10 +128,10 @@ public class AppsDialog {
             App app = shown.get(pos);
             new AlertDialog.Builder(a)
                     .setTitle(app.label)
-                    .setItems(new String[]{"Abrir en este teléfono", "Abrir en el otro teléfono", "Dejar en la mesa"}, (dd, w) -> {
-                        if (w == 0) { d.dismiss(); host.openHere(app.pkg); }
-                        else if (w == 1) { host.openThere(app.pkg, app.label); }
-                        else { d.dismiss(); host.putOnDesk(app.pkg, app.label, iconPng(app.icon, Math.round(96 * dp))); }
+                    .setItems(new String[]{"Poner acceso directo en la mesa", "Abrir ahora en el principal"}, (dd, w) -> {
+                        d.dismiss();
+                        if (w == 0) host.putOnDesk(app.pkg, app.label, iconPng(app.icon, Math.round(96 * dp)));
+                        else host.openThere(app.pkg, app.label);
                     })
                     .show();
         });

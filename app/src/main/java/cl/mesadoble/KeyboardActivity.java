@@ -103,13 +103,26 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         LinkService.start(this);
     }
 
+    private boolean auto;
+    private final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable autoClose = () -> { if (auto && !hub.remoteImeReady()) finish(); };
+
+    @Override protected void onNewIntent(android.content.Intent i) {
+        super.onNewIntent(i);
+        auto = i.getBooleanExtra("auto", false);
+    }
+
     @Override protected void onResume() {
         super.onResume();
+        auto = auto || getIntent().getBooleanExtra("auto", false);
+        hub.keyboardVisible = true;
         hub.add(this);
         hub.send("kbAsk");
     }
 
     @Override protected void onPause() {
+        hub.keyboardVisible = false;
+        h.removeCallbacks(autoClose);
         hub.remove(this);
         super.onPause();
     }
@@ -221,6 +234,11 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
         if ("kbState".equals(t) || "kbAck".equals(t)) updateStatus();
+        // abierto solo (al tocar un campo en el principal): se cierra solo cuando ya no hay dónde escribir
+        if ("kbState".equals(t) && auto) {
+            h.removeCallbacks(autoClose);
+            if (!hub.remoteImeReady()) h.postDelayed(autoClose, 3000);
+        }
     }
 
     // ---------------- envío ----------------
