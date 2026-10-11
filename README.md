@@ -15,7 +15,7 @@ App de Android que une dos teléfonos en un solo escritorio: arrastras notas, im
 - **Imagen**: elige una foto de la galería.
 - **Pasar al otro teléfono**: arrastra hacia el borde interior y suelta, lánzala con el dedo hacia ese borde, o toca la flecha del elemento.
 - **Compartir desde otras apps**: en Chrome, Fotos, WhatsApp, etc., usa *Compartir → Poner en Mesa Doble*.
-- **Teclado**: convierte este teléfono en teclado y touchpad Bluetooth del otro. Ver abajo.
+- **Teclado**: escribe en el otro teléfono desde este. Ver abajo.
 - **Red**: si el teléfono derecho no encuentra al izquierdo solo, escribe la IP que muestra el izquierdo.
 
 Los teléfonos se hablan directo por la red local (puerto 47820); no se usa internet.
@@ -25,13 +25,18 @@ Los teléfonos se hablan directo por la red local (puerto 47820); no se usa inte
 Cada `push` a `main` compila el APK con GitHub Actions y lo publica en *Releases*.
 También se puede abrir la carpeta en Android Studio y presionar *Run*.
 
-## Modo teclado
+## Modo teclado (por WiFi, sin Bluetooth)
 
-1. En el teléfono que hará de teclado toca **Teclado** y acepta el permiso de Bluetooth.
-2. La primera vez toca **Teléfono → Vincular nuevo**. En el otro teléfono ve a *Ajustes → Bluetooth → Vincular nuevo dispositivo* y elige este teléfono.
-3. En el teléfono que recibe, configura el teclado físico en **Español (Latinoamérica)**:
-   *Ajustes → Configuración adicional → Idiomas y entrada → Teclado físico → Mesa Doble Teclado*.
-   Así la ñ, las tildes y los símbolos salen tal como aparecen en las teclas.
-4. Botón de modo: *Teclado*, *Teclado + touchpad* o *Touchpad*.
+Usa la misma conexión de la mesa: si la mesa está conectada, el teclado también.
 
-Tildes: toca ´ y luego la vocal. Arroba: AltGr y luego q.
+**En el teléfono que recibe (una sola vez):** Mesa Doble → *Teclado* → *Este teléfono recibe*.
+Activa el teclado "Mesa Doble" y elígelo. Al tocar un campo de texto en cualquier app aparece una barra
+delgada en vez del teclado grande. Para volver al teclado normal: *Cambiar teclado* en esa barra.
+
+**En el teléfono que escribe:** Mesa Doble → *Teclado* → *Este teléfono es el teclado*.
+
+- *Teclado grande*: teclado en pantalla completa (ideal en horizontal) con ñ, tildes (´ y luego la vocal),
+  AltGr (@ = AltGr + q), copiar/pegar, deshacer, flechas, reproducir/pausa y volumen.
+- *Teclado del teléfono / dictado*: escribe con Gboard (autocorrector, deslizar) o dicta por voz.
+
+La reproducción y el volumen funcionan aunque el teclado Mesa Doble no esté elegido en el otro teléfono.

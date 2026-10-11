@@ -52,7 +52,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private SharedPreferences prefs;
     private DeskView desk;
-    private Link link;
+    private Hub hub;
     private TextView status;
     private LinearLayout bar;
     private Button sideBtn;
@@ -95,18 +95,24 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         sideBtn = barButton("Lado", false);
         sideBtn.setOnClickListener(v -> chooseSide());
         Button kb = barButton("Teclado", false);
-        kb.setOnClickListener(v -> startActivity(new Intent(this, KeyboardActivity.class)));
+        kb.setOnClickListener(v -> keyboardMenu());
         Button conn = barButton("Red", false);
         conn.setOnClickListener(v -> showConnection());
         bar.addView(note); bar.addView(img); bar.addView(kb); bar.addView(sideBtn); bar.addView(conn);
         root.addView(bar, new FrameLayout.LayoutParams(-2, -2));
 
         setContentView(root);
-        link = new Link(this, this);
+        hub = Hub.get(this);
         loadItems();
 
-        side = prefs.getInt("side", -1);
+        side = hub.side();
         if (side < 0) chooseSide(); else applySide();
+        hub.add(this);
+        LinkService.start(this);
+        if (android.os.Build.VERSION.SDK_INT >= 33 && !prefs.getBoolean("askedNotif", false)) {
+            prefs.edit().putBoolean("askedNotif", true).apply();
+            requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 3);
+        }
         handleShare(getIntent());
     }
 
@@ -116,8 +122,58 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     @Override protected void onDestroy() {
-        link.stop();
+        hub.remove(this);   // la conexión sigue viva para el teclado
         super.onDestroy();
+    }
+
+    // ---------------- teclado ----------------
+
+    private void keyboardMenu() {
+        new AlertDialog.Builder(this)
+                .setTitle("Teclado")
+                .setItems(new String[]{"Este teléfono es el teclado", "Este teléfono recibe lo que escribo"}, (d, w) -> {
+                    if (w == 0) startActivity(new Intent(this, KeyboardActivity.class));
+                    else setupReceiver();
+                })
+                .show();
+    }
+
+    private boolean imeEnabled() {
+        android.view.inputmethod.InputMethodManager imm =
+                (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+        if (imm == null) return false;
+        for (android.view.inputmethod.InputMethodInfo i : imm.getEnabledInputMethodList())
+            if (getPackageName().equals(i.getPackageName())) return true;
+        return false;
+    }
+
+    private void setupReceiver() {
+        if (!imeEnabled()) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Activa el teclado Mesa Doble")
+                    .setMessage("Se abrirá la lista de teclados. Activa \"Mesa Doble\" y vuelve aquí.\n\n"
+                            + "Android mostrará un aviso general sobre teclados: Mesa Doble solo escribe lo que mandas "
+                            + "desde tu otro teléfono y no guarda nada.")
+                    .setPositiveButton("Abrir ajustes", (d, w) -> {
+                        try { startActivity(new Intent(android.provider.Settings.ACTION_INPUT_METHOD_SETTINGS)); }
+                        catch (Exception e) { Toast.makeText(this, "Busca \"Gestionar teclados\" en Ajustes", Toast.LENGTH_LONG).show(); }
+                    })
+                    .setNegativeButton("Cancelar", null)
+                    .show();
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Elige \"Mesa Doble\"")
+                .setMessage("En la lista que aparece elige Mesa Doble. Luego abre WhatsApp, Chrome o la app que quieras "
+                        + "y toca donde se escribe: verás una barra delgada y podrás escribir desde el otro teléfono.\n\n"
+                        + "Para volver a tu teclado normal toca \"Cambiar teclado\" en esa barra.")
+                .setPositiveButton("Elegir teclado", (d, w) -> {
+                    android.view.inputmethod.InputMethodManager imm =
+                            (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+                    if (imm != null) imm.showInputMethodPicker();
+                })
+                .setNegativeButton("Cancelar", null)
+                .show();
     }
 
     @Override public void onWindowFocusChanged(boolean hasFocus) {
@@ -178,7 +234,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         status.setLayoutParams(sp);
         sideBtn.setText(side == 0 ? "Izq." : "Der.");
         otherSide = -1;
-        link.start(side == 0);
+        hub.setSide(side);
         waitingSince = System.currentTimeMillis();
         if (!prefs.getBoolean("welcomed", false)) {
             prefs.edit().putBoolean("welcomed", true).apply();
@@ -252,7 +308,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                  prefs.edit().putString("lastIp", v).apply();
                  linkInfo = "Conectando con " + v + "…";
                  updateStatus();
-                 link.connectTo(v);
+                 hub.link.connectTo(v);
              })
              .setNegativeButton("Cancelar", null);
         }
@@ -330,14 +386,14 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     @Override public void onItemChanged(Item it) {
         JSONObject m = new JSONObject();
         try { m.put("t", "up"); m.put("item", it.toJson()); } catch (JSONException ignored) { }
-        link.send(m);
+        hub.send(m);
         scheduleSave();
     }
 
     @Override public void onItemDeleted(Item it) {
         JSONObject m = new JSONObject();
         try { m.put("t", "del"); m.put("id", it.id); } catch (JSONException ignored) { }
-        link.send(m);
+        hub.send(m);
         scheduleSave();
     }
 
@@ -347,13 +403,13 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         lastDragSend = now;
         JSONObject m = new JSONObject();
         try { m.put("t", "drag"); m.put("id", it.id); m.put("x", x); m.put("y", y); } catch (JSONException ignored) { }
-        link.send(m);
+        hub.send(m);
     }
 
     @Override public void onDragEnd(Item it) {
         JSONObject m = new JSONObject();
         try { m.put("t", "dragEnd"); m.put("id", it.id); } catch (JSONException ignored) { }
-        link.send(m);
+        hub.send(m);
     }
 
     // ---------------- imágenes ----------------
@@ -451,8 +507,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 for (Item it : desk.items) arr.put(it.toJson());
                 full.put("t", "full"); full.put("items", arr);
             } catch (JSONException ignored) { }
-            link.send(hello);
-            link.send(full);
+            hub.send(hello);
+            hub.send(full);
         }
         if (state != Link.CONNECTED) { otherSide = -1; desk.clearAllRemoteDrags(); }
         updateStatus();

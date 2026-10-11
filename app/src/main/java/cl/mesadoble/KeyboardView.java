@@ -5,7 +5,10 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.HapticFeedbackConstants;
+import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
 
@@ -15,53 +18,71 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Teclado en pantalla que envía teclas físicas (códigos HID).
- * Las etiquetas siguen la distribución "Español (Latinoamérica)": el otro teléfono
- * debe tener ese idioma elegido para el teclado físico, así ñ, tildes y símbolos coinciden.
+ * Teclado en pantalla del teléfono que ESCRIBE. Envía caracteres listos (ñ, tildes, símbolos),
+ * así que no importa cómo esté configurado el otro teléfono.
  */
 public class KeyboardView extends View {
 
-    static final int NORMAL = 0, MOD = 1, MEDIA = 2;
+    public interface Sink {
+        void text(String s);
+        void key(int keycode, int meta);
+        void action(String what);   // copy, cut, paste, all, undo
+        void media(String what);    // play, vup, vdown
+    }
+
+    static final int CHAR = 0, KEY = 1, MOD = 2, ACT = 3, MEDIA = 4;
+    static final int SHIFT = 1, CTRL = 2, ALTGR = 4;
 
     static class Key {
-        final String label, shift, altgr;
-        final int code, type;
+        final String label, shift, altgr, act;
+        final int type, code;
         final float units;
         final RectF r = new RectF();
         boolean down;
-        Key(String label, String shift, String altgr, int code, float units, int type) {
-            this.label = label; this.shift = shift; this.altgr = altgr;
-            this.code = code; this.units = units; this.type = type;
+        Key(int type, String label, String shift, String altgr, int code, String act, float units) {
+            this.type = type; this.label = label; this.shift = shift; this.altgr = altgr;
+            this.code = code; this.act = act; this.units = units;
         }
     }
 
+    private static Key c(String l, String s, String a) { return new Key(CHAR, l, s, a, 0, null, 1); }
+    private static Key c(String l, String s, String a, float u) { return new Key(CHAR, l, s, a, 0, null, u); }
+    private static Key l(String l) { return new Key(CHAR, l, null, null, 0, null, 1); }
+    private static Key key(String l, int code, float u) { return new Key(KEY, l, null, null, code, null, u); }
+    private static Key mod(String l, int bit, float u) { return new Key(MOD, l, null, null, bit, null, u); }
+    private static Key act(String l, String a) { return new Key(ACT, l, null, null, 0, a, 1.5f); }
+    private static Key media(String l, String a) { return new Key(MEDIA, l, null, null, 0, a, 1.5f); }
+
     private final List<Key[]> rows = new ArrayList<>();
-    private final float[] rowWeights;
+    private final float[] rowWeights = {0.72f, 1, 1, 1, 1, 1};
     private final Map<Integer, Key> pointers = new HashMap<>();
-    private final List<Integer> held = new ArrayList<>();   // códigos de teclas presionadas
     private int heldMods = 0, latchedMods = 0, usedWhileHeld = 0;
     private boolean caps = false;
-    private Hid hid;
+    private String deadKey = null;
+    private Sink sink;
+
+    private final Handler repeat = new Handler(Looper.getMainLooper());
+    private Key repeating;
+    private final Runnable repeater = new Runnable() {
+        @Override public void run() {
+            if (repeating == null || !repeating.down) return;
+            fire(repeating);
+            repeat.postDelayed(this, 45);
+        }
+    };
 
     private final float dp;
     private final Paint keyBg = new Paint(Paint.ANTI_ALIAS_FLAG), main = new Paint(Paint.ANTI_ALIAS_FLAG),
             sub = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final int bg, keyColor, keyDark, keyDown, fg, muted, accent;
+    private final int bg, keyColor, keyDark, fg, muted, accent;
 
-    private static Key k(String l, String s, String a, int code) { return new Key(l, s, a, code, 1, NORMAL); }
-    private static Key k(String l, String s, String a, int code, float u) { return new Key(l, s, a, code, u, NORMAL); }
-    private static Key letter(char c, int code) { return new Key(String.valueOf(c), null, null, code, 1, NORMAL); }
-    private static Key mod(String l, int bit, float u) { return new Key(l, null, null, bit, u, MOD); }
-    private static Key media(String l, int usage) { return new Key(l, null, null, usage, 1.5f, MEDIA); }
-
-    public KeyboardView(Context c, boolean night) {
-        super(c);
-        dp = getResources().getDisplayMetrics().density;
+    public KeyboardView(Context ctx, boolean night) {
+        super(ctx);
+        dp = ctx.getResources().getDisplayMetrics().density;
         bg = night ? 0xFF121920 : 0xFFCDD5DC;
         keyColor = night ? 0xFF2A3848 : 0xFFFFFFFF;
         keyDark = night ? 0xFF1E2934 : 0xFFB7C2CC;
         accent = night ? 0xFF5CC3CF : 0xFF1F7F8C;
-        keyDown = accent;
         fg = night ? 0xFFE6EDF3 : 0xFF1D2733;
         muted = night ? 0xFF8798A9 : 0xFF5B6B7A;
         main.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
@@ -69,92 +90,81 @@ public class KeyboardView extends View {
         sub.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
 
         rows.add(new Key[]{
-                k("Esc", null, null, 0x29, 1.5f), media("Atrás", Hid.AC_BACK), media("Inicio", Hid.AC_HOME),
-                media("⏮", Hid.MEDIA_PREV), media("⏯", Hid.MEDIA_PLAY), media("⏭", Hid.MEDIA_NEXT),
-                media("Vol −", Hid.VOL_DOWN), media("Vol +", Hid.VOL_UP), media("Silencio", Hid.MUTE),
-                k("Supr", null, null, 0x4C, 1.5f)});
+                key("Esc", KeyEvent.KEYCODE_ESCAPE, 1.5f), act("Sel. todo", "all"), act("Copiar", "copy"),
+                act("Cortar", "cut"), act("Pegar", "paste"), act("Deshacer", "undo"),
+                media("⏯", "play"), media("Vol −", "vdown"), media("Vol +", "vup"),
+                key("Supr", KeyEvent.KEYCODE_FORWARD_DEL, 1.5f)});
         rows.add(new Key[]{
-                k("|", "°", "¬", 0x35), k("1", "!", null, 0x1E), k("2", "\"", null, 0x1F), k("3", "#", null, 0x20),
-                k("4", "$", null, 0x21), k("5", "%", null, 0x22), k("6", "&", null, 0x23), k("7", "/", null, 0x24),
-                k("8", "(", null, 0x25), k("9", ")", null, 0x26), k("0", "=", null, 0x27),
-                k("'", "?", "\\", 0x2D), k("¿", "¡", null, 0x2E), k("⌫", null, null, 0x2A, 2f)});
+                c("|", "°", "¬"), c("1", "!", null), c("2", "\"", null), c("3", "#", null), c("4", "$", null),
+                c("5", "%", null), c("6", "&", null), c("7", "/", null), c("8", "(", null), c("9", ")", null),
+                c("0", "=", null), c("'", "?", "\\"), c("¿", "¡", null), key("⌫", KeyEvent.KEYCODE_DEL, 2f)});
         rows.add(new Key[]{
-                k("Tab", null, null, 0x2B, 1.5f), new Key("q", null, "@", 0x14, 1, NORMAL), letter('w', 0x1A),
-                letter('e', 0x08), letter('r', 0x15), letter('t', 0x17), letter('y', 0x1C), letter('u', 0x18),
-                letter('i', 0x0C), letter('o', 0x12), letter('p', 0x13),
-                k("´", "¨", null, 0x2F), k("+", "*", "~", 0x30), k("}", "]", "`", 0x31, 1.5f)});
+                key("Tab", KeyEvent.KEYCODE_TAB, 1.5f), c("q", null, "@"), l("w"), l("e"), l("r"), l("t"),
+                l("y"), l("u"), l("i"), l("o"), l("p"), c("´", "¨", null), c("+", "*", "~"), c("}", "]", "`", 1.5f)});
         rows.add(new Key[]{
-                k("Bloq", null, null, 0x39, 1.75f), letter('a', 0x04), letter('s', 0x16), letter('d', 0x07),
-                letter('f', 0x09), letter('g', 0x0A), letter('h', 0x0B), letter('j', 0x0D), letter('k', 0x0E),
-                letter('l', 0x0F), letter('ñ', 0x33), k("{", "[", "^", 0x34), k("Enter", null, null, 0x28, 2.25f)});
+                mod("Bloq", 0, 1.75f), l("a"), l("s"), l("d"), l("f"), l("g"), l("h"), l("j"), l("k"), l("l"),
+                l("ñ"), c("{", "[", "^"), key("Enter", KeyEvent.KEYCODE_ENTER, 2.25f)});
         rows.add(new Key[]{
-                mod("Mayús", Hid.SHIFT, 1.25f), k("<", ">", null, 0x64), letter('z', 0x1D), letter('x', 0x1B),
-                letter('c', 0x06), letter('v', 0x19), letter('b', 0x05), letter('n', 0x11), letter('m', 0x10),
-                k(",", ";", null, 0x36), k(".", ":", null, 0x37), k("-", "_", null, 0x38), mod("Mayús", Hid.SHIFT, 2.75f)});
+                mod("Mayús", SHIFT, 1.25f), c("<", ">", null), l("z"), l("x"), l("c"), l("v"), l("b"), l("n"),
+                l("m"), c(",", ";", null), c(".", ":", null), c("-", "_", null), mod("Mayús", SHIFT, 2.75f)});
         rows.add(new Key[]{
-                mod("Ctrl", Hid.CTRL, 1.25f), mod("Alt", Hid.ALT, 1.25f), k("", null, null, 0x2C, 6f),
-                mod("AltGr", Hid.ALTGR, 1.5f), k("←", null, null, 0x50, 1.25f), k("↑", null, null, 0x52, 1.25f),
-                k("↓", null, null, 0x51, 1.25f), k("→", null, null, 0x4F, 1.25f)});
-        rowWeights = new float[]{0.72f, 1, 1, 1, 1, 1};
+                mod("Ctrl", CTRL, 1.5f), mod("AltGr", ALTGR, 1.5f), c(" ", null, null, 7f),
+                key("←", KeyEvent.KEYCODE_DPAD_LEFT, 1.25f), key("↑", KeyEvent.KEYCODE_DPAD_UP, 1.25f),
+                key("↓", KeyEvent.KEYCODE_DPAD_DOWN, 1.25f), key("→", KeyEvent.KEYCODE_DPAD_RIGHT, 1.25f)});
     }
 
-    public void setHid(Hid h) { hid = h; }
+    public void setSink(Sink s) { sink = s; }
 
-    @Override protected void onSizeChanged(int w, int h, int ow, int oh) { layoutKeys(w, h); }
-
-    private void layoutKeys(int w, int h) {
-        float gap = 4 * dp, pad = 6 * dp;
-        float total = 0;
+    @Override protected void onSizeChanged(int w, int h, int ow, int oh) {
+        float gap = 4 * dp, pad = 6 * dp, total = 0;
         for (float rw : rowWeights) total += rw;
         float avail = h - 2 * pad - gap * (rows.size() - 1);
         float y = pad;
         for (int i = 0; i < rows.size(); i++) {
             Key[] row = rows.get(i);
-            float rh = avail * rowWeights[i] / total;
-            float units = 0;
+            float rh = avail * rowWeights[i] / total, units = 0;
             for (Key k : row) units += k.units;
-            float uw = (w - 2 * pad - gap * (row.length - 1)) / units;
-            float x = pad;
-            for (Key k : row) {
-                float kw = uw * k.units;
-                k.r.set(x, y, x + kw, y + rh);
-                x += kw + gap;
-            }
+            float uw = (w - 2 * pad - gap * (row.length - 1)) / units, x = pad;
+            for (Key k : row) { float kw = uw * k.units; k.r.set(x, y, x + kw, y + rh); x += kw + gap; }
             y += rh + gap;
         }
-        invalidate();
     }
 
     // ---------------- dibujo ----------------
 
-    @Override protected void onDraw(Canvas c) {
-        c.drawColor(bg);
+    private boolean isLetter(Key k) { return k.type == CHAR && k.label.length() == 1 && Character.isLetter(k.label.charAt(0)); }
+
+    @Override protected void onDraw(Canvas cv) {
+        cv.drawColor(bg);
         int mods = heldMods | latchedMods;
-        boolean upper = ((mods & Hid.SHIFT) != 0) ^ caps;
+        boolean shift = (mods & SHIFT) != 0;
         for (Key[] row : rows) for (Key k : row) {
-            boolean active = k.down || (k.type == MOD && (mods & k.code) != 0) || (k.code == 0x39 && caps);
-            boolean special = k.type != NORMAL || k.label.length() > 1 && !k.label.equals("ñ") || k.code == 0x2C;
-            keyBg.setColor(active ? keyDown : special ? keyDark : keyColor);
+            boolean active = k.down || (k.type == MOD && k.code != 0 && (mods & k.code) != 0)
+                    || (k.type == MOD && k.code == 0 && caps) || (k.type == CHAR && k.label.equals(deadKey));
+            boolean special = !(k.type == CHAR);
+            keyBg.setColor(active ? accent : special ? keyDark : keyColor);
             float r = 7 * dp;
-            c.drawRoundRect(k.r, r, r, keyBg);
-            int textColor = active ? bg : fg;
+            cv.drawRoundRect(k.r, r, r, keyBg);
             String label = k.label;
-            boolean isLetter = label.length() == 1 && Character.isLetter(label.charAt(0));
-            if (isLetter && upper) label = label.toUpperCase();
-            if (k.code == 0x2C && k.type == NORMAL) label = "espacio";
-            float size = Math.min(k.r.height() * (isLetter || label.length() == 1 ? 0.42f : 0.28f), 26 * dp);
-            if (label.length() > 1) size = Math.min(size, k.r.width() / (label.length() * 0.62f));
+            if (isLetter(k) && (shift ^ caps)) label = label.toUpperCase();
+            boolean space = k.type == CHAR && " ".equals(k.label);
+            if (space) label = deadKey != null ? deadKey + " …" : "espacio";
+            float size = Math.min(k.r.height() * (label.length() == 1 ? 0.42f : 0.28f), 26 * dp);
+            if (label.length() > 1) size = Math.min(size, k.r.width() / (label.length() * 0.6f));
             main.setTextSize(size);
-            main.setColor(k.code == 0x2C ? muted : textColor);
-            c.drawText(label, k.r.centerX(), k.r.centerY() + size * 0.36f, main);
+            main.setColor(active ? bg : space ? muted : fg);
+            cv.drawText(label, k.r.centerX(), k.r.centerY() + size * 0.36f, main);
             float ss = Math.min(11 * dp, k.r.height() * 0.24f);
             sub.setTextSize(ss);
-            sub.setColor(active ? bg : muted);
-            if (k.shift != null) { sub.setTextAlign(Paint.Align.LEFT); c.drawText(k.shift, k.r.left + 5 * dp, k.r.top + ss + 3 * dp, sub); }
+            if (k.shift != null) {
+                sub.setTextAlign(Paint.Align.LEFT);
+                sub.setColor(active ? bg : muted);
+                cv.drawText(k.shift, k.r.left + 5 * dp, k.r.top + ss + 3 * dp, sub);
+            }
             if (k.altgr != null) {
                 sub.setTextAlign(Paint.Align.RIGHT);
                 sub.setColor(active ? bg : accent);
-                c.drawText(k.altgr, k.r.right - 5 * dp, k.r.bottom - 5 * dp, sub);
+                cv.drawText(k.altgr, k.r.right - 5 * dp, k.r.bottom - 5 * dp, sub);
             }
         }
     }
@@ -170,13 +180,12 @@ public class KeyboardView extends View {
     }
 
     @Override public boolean onTouchEvent(MotionEvent e) {
-        int a = e.getActionMasked();
-        int idx = e.getActionIndex();
+        int a = e.getActionMasked(), i = e.getActionIndex();
         if (a == MotionEvent.ACTION_DOWN || a == MotionEvent.ACTION_POINTER_DOWN) {
-            Key k = keyAt(e.getX(idx), e.getY(idx));
-            if (k != null) { pointers.put(e.getPointerId(idx), k); press(k); }
+            Key k = keyAt(e.getX(i), e.getY(i));
+            if (k != null) { pointers.put(e.getPointerId(i), k); press(k); }
         } else if (a == MotionEvent.ACTION_UP || a == MotionEvent.ACTION_POINTER_UP) {
-            Key k = pointers.remove(e.getPointerId(idx));
+            Key k = pointers.remove(e.getPointerId(i));
             if (k != null) release(k);
         } else if (a == MotionEvent.ACTION_CANCEL) {
             for (Key k : new ArrayList<>(pointers.values())) release(k);
@@ -189,41 +198,96 @@ public class KeyboardView extends View {
         k.down = true;
         performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
         if (k.type == MOD) {
-            heldMods |= k.code;
-            usedWhileHeld &= ~k.code;
-        } else if (k.type == MEDIA) {
-            if (hid != null) hid.media(k.code);
+            if (k.code == 0) caps = !caps;
+            else { heldMods |= k.code; usedWhileHeld &= ~k.code; }
         } else {
-            if (k.code == 0x39) caps = !caps;
-            if (!held.contains(k.code)) held.add(k.code);
             usedWhileHeld |= heldMods;
-            sendKeys();
+            fire(k);
+            if (k.type == KEY && (k.code == KeyEvent.KEYCODE_DEL || k.code == KeyEvent.KEYCODE_FORWARD_DEL
+                    || k.code == KeyEvent.KEYCODE_DPAD_LEFT || k.code == KeyEvent.KEYCODE_DPAD_RIGHT
+                    || k.code == KeyEvent.KEYCODE_DPAD_UP || k.code == KeyEvent.KEYCODE_DPAD_DOWN)) {
+                repeating = k;
+                repeat.removeCallbacks(repeater);
+                repeat.postDelayed(repeater, 380);
+            }
         }
         invalidate();
     }
 
     private void release(Key k) {
         k.down = false;
-        if (k.type == MOD) {
+        if (k == repeating) { repeating = null; repeat.removeCallbacks(repeater); }
+        if (k.type == MOD && k.code != 0) {
             heldMods &= ~k.code;
-            // un toque corto (sin otra tecla) deja el modificador "enganchado" para la siguiente tecla
+            // toque corto sin otra tecla: queda activo para la tecla siguiente
             if ((usedWhileHeld & k.code) == 0) latchedMods ^= k.code;
-            sendKeys();
-        } else if (k.type == MEDIA) {
-            if (hid != null) hid.media(0);
-        } else {
-            held.remove(Integer.valueOf(k.code));
-            sendKeys();
-            if (held.isEmpty() && latchedMods != 0) { latchedMods = 0; sendKeys(); }
+        } else if (k.type != MOD) {
+            if (pointersOnlyMods()) latchedMods = 0;
         }
         invalidate();
     }
 
-    private void sendKeys() {
-        if (hid == null) return;
-        int[] codes = new int[Math.min(6, held.size())];
-        for (int i = 0; i < codes.length; i++) codes[i] = held.get(i);
-        int mods = heldMods | (held.isEmpty() ? 0 : latchedMods);
-        hid.keys(mods, codes);
+    private boolean pointersOnlyMods() {
+        for (Key k : pointers.values()) if (k.type != MOD) return false;
+        return true;
+    }
+
+    /** Ejecuta una tecla según los modificadores activos. */
+    private void fire(Key k) {
+        if (sink == null) return;
+        int mods = heldMods | latchedMods;
+        if (k.type == ACT) { sink.action(k.act); return; }
+        if (k.type == MEDIA) { sink.media(k.act); return; }
+        int meta = ((mods & SHIFT) != 0 ? KeyEvent.META_SHIFT_ON | KeyEvent.META_SHIFT_LEFT_ON : 0)
+                | ((mods & CTRL) != 0 ? KeyEvent.META_CTRL_ON | KeyEvent.META_CTRL_LEFT_ON : 0);
+        if (k.type == KEY) {
+            flushDead();
+            sink.key(k.code, meta);
+            return;
+        }
+        // tecla de carácter
+        if ((mods & CTRL) != 0 && isLetter(k)) {
+            String l = k.label;
+            switch (l) {
+                case "a": sink.action("all"); return;
+                case "c": sink.action("copy"); return;
+                case "x": sink.action("cut"); return;
+                case "v": sink.action("paste"); return;
+                case "z": sink.action("undo"); return;
+            }
+            char ch = l.charAt(0);
+            if (ch >= 'a' && ch <= 'z') sink.key(KeyEvent.KEYCODE_A + (ch - 'a'), meta);
+            return;
+        }
+        String out;
+        if ((mods & ALTGR) != 0 && k.altgr != null) out = k.altgr;
+        else if (isLetter(k)) out = ((mods & SHIFT) != 0) ^ caps ? k.label.toUpperCase() : k.label;
+        else if ((mods & SHIFT) != 0 && k.shift != null) out = k.shift;
+        else out = k.label;
+
+        if (out.equals("´") || out.equals("¨")) {   // tilde o diéresis: se combina con la letra siguiente
+            if (deadKey != null) { sink.text(deadKey); }
+            deadKey = out;
+            return;
+        }
+        if (deadKey != null) {
+            String combined = compose(deadKey, out);
+            deadKey = null;
+            sink.text(combined);
+            return;
+        }
+        sink.text(out);
+    }
+
+    private void flushDead() {
+        if (deadKey != null && sink != null) { sink.text(deadKey); deadKey = null; invalidate(); }
+    }
+
+    private static String compose(String dead, String ch) {
+        String table = dead.equals("´") ? "aáeéiíoóuúAÁEÉIÍOÓUÚ" : "uüUÜiïIÏeëEËaäAÄoöOÖ";
+        int i = table.indexOf(ch);
+        if (i >= 0 && i % 2 == 0) return String.valueOf(table.charAt(i + 1));
+        if (ch.equals(" ")) return dead;
+        return dead + ch;
     }
 }
