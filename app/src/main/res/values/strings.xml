@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">Mesa Doble</string>
     <string name="access_desc">Cambia al teclado Mesa Doble cuando los dos teléfonos están unidos (y devuelve tu teclado al desconectarse), y abre el teclado en el extendido cuando usas una app de chat. No lee el contenido de tu pantalla.</string>
+    <string name="widget_reloj">Reloj y fecha. Al tocarlo abre las alarmas.</string>
 </resources>

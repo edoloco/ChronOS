@@ -72,6 +72,11 @@ public class Link {
 
     public boolean isConnected() { return conn != null; }
     public boolean isHost() { return host; }
+    /** IP del otro teléfono (para el canal de archivos). */
+    public String peerIp() {
+        Conn c = conn;
+        try { return c != null ? c.s.getInetAddress().getHostAddress() : null; } catch (Exception e) { return null; }
+    }
 
     public void start(boolean asHost) {
         stop();

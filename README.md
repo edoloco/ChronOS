@@ -33,7 +33,16 @@ cuando cruzas más de la mitad o los lanzas.
 ## Uso
 
 - **Nota / Imagen**: agrégalas y arrástralas de una pantalla a la otra (cruzan por el borde que se toca).
-- **Apps**: elige una app para dejar su acceso directo en la mesa. Al tocarlo, se abre en el principal.
+- **Apps**: siempre muestra las apps del **principal** (en el extendido se piden por la conexión). Toca una para
+  dejar su acceso directo en la mesa o abrirla en el principal; **mantén presionada** para desinstalarla
+  (Android pide confirmar en el principal).
+- **Archivos**: gestor de dos ventanas tipo Total Commander: arriba el principal, abajo el extendido (toca el
+  nombre del teléfono para cambiar una ventana). Mantén presionado para elegir; *Copiar*/*Mover* pasan lo
+  elegido a la otra ventana (la flecha indica hacia dónde). También borrar, renombrar, nueva carpeta y abrir
+  (si está en el otro teléfono, se trae una copia). Necesita *Acceso a todos los archivos* en ambos teléfonos.
+  El contenido viaja por un canal aparte (puerto 47821) protegido con una clave que solo conocen los dos teléfonos.
+- **Widget propio "Mesa Doble · Reloj"**: hora, fecha y próxima alarma; al tocarlo abre las alarmas. Está en
+  *Widget* dentro de la mesa y también en el inicio normal del teléfono.
 - **Girar y cambiar tamaño**: mantén presionado un elemento o usa dos dedos.
 - **Teclado automático**: al tocar donde se escribe en el principal (o al abrir una app de chat), el teclado
   aparece en el extendido. El principal cambia solo al teclado Mesa Doble y vuelve al tuyo si se desconecta.

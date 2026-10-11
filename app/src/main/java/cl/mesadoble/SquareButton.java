@@ -18,7 +18,7 @@ import android.view.View;
 public class SquareButton extends View {
 
     public static final int NOTE = 0, IMAGE = 1, APPS = 2, KEYBOARD = 3, SETTINGS = 4, STATUS = 5,
-            BACK = 6, HOME = 7, RECENTS = 8, MENU = 9, DESKS = 10, WIDGET = 11;
+            BACK = 6, HOME = 7, RECENTS = 8, MENU = 9, DESKS = 10, WIDGET = 11, FILES = 12;
 
     private final int kind;
     private final String text;
@@ -168,6 +168,16 @@ public class SquareButton extends View {
                     c.drawCircle(cx + u * 1.35f, cy - u * 1.1f, 3.2f * dp, fill);
                 }
                 break;
+            case FILES: {   // dos carpetas, una sobre otra
+                for (int k = -1; k <= 1; k += 2) {
+                    float yy = cy + k * u * 0.55f;
+                    Path f = new Path();
+                    f.moveTo(cx - u * 1.2f, yy - u * 0.4f); f.lineTo(cx - u * 0.45f, yy - u * 0.4f); f.lineTo(cx - u * 0.25f, yy - u * 0.2f);
+                    f.lineTo(cx + u * 1.2f, yy - u * 0.2f); f.lineTo(cx + u * 1.2f, yy + u * 0.4f); f.lineTo(cx - u * 1.2f, yy + u * 0.4f); f.close();
+                    c.drawPath(f, stroke);
+                }
+                break;
+            }
             case WIDGET:
                 c.drawRoundRect(new RectF(cx - u * 1.2f, cy - u, cx + u * 0.1f, cy - u * 0.05f), 2 * dp, 2 * dp, stroke);
                 c.drawRoundRect(new RectF(cx + u * 0.35f, cy - u, cx + u * 1.2f, cy + u), 2 * dp, 2 * dp, stroke);

@@ -59,6 +59,18 @@ public class Hub implements Link.Listener {
         side = prefs.getInt("side", -1);
         link = new Link(c, this);
         ScreenSync.listen(c, this);
+        // al desinstalar una app, la lista de apps del otro teléfono se actualiza
+        android.content.IntentFilter pf = new android.content.IntentFilter(Intent.ACTION_PACKAGE_REMOVED);
+        pf.addDataScheme("package");
+        c.registerReceiver(new android.content.BroadcastReceiver() {
+            @Override public void onReceive(Context cx, Intent i) {
+                if (i.getBooleanExtra(Intent.EXTRA_REPLACING, false) || i.getData() == null) return;
+                JSONObject m = new JSONObject();
+                try { m.put("t", "appRemoved"); m.put("pkg", i.getData().getSchemeSpecificPart()); } catch (JSONException ignored) { }
+                for (Link.Listener l : listeners) l.onMessage(m);
+                if (isPrincipal()) send(m);
+            }
+        }, pf);
     }
 
     public int side() { return side; }
@@ -170,6 +182,9 @@ public class Hub implements Link.Listener {
         info = inf;
         if (st == Link.CONNECTED) {
             sendImeState();
+            FileServer fs = FileServer.get(app);
+            fs.start();
+            send("fsTok", "k", fs.token, "port", FileServer.PORT);
             main.removeCallbacks(restoreIme);
             if (isPrincipal() && MesaAccess.instance != null) MesaAccess.instance.switchToMesa();
             else if (isPrincipal() && !imeSelected(app)) notifySwitch();   // versión liviana: un toque en el aviso
@@ -191,6 +206,14 @@ public class Hub implements Link.Listener {
             send("launchAck", "r", r, "label", m.optString("label"));
             return;
         }
+        if ("uninstall".equals(t)) {
+            int r = uninstallHere(m.optString("pkg"), m.optString("label"));
+            send("uninstallAck", "r", r, "label", m.optString("label"));
+            return;
+        }
+        if ("appsReq".equals(t)) { AppsDialog.sendList(app, this); return; }
+        if (t.startsWith("fs") && !t.endsWith("R") && !"fsTok".equals(t)) { FileServer.get(app).handle(m, this); return; }
+        if ("fsTok".equals(t)) FileServer.get(app).setRemote(m.optString("k"), m.optInt("port"));
         if ("kbAsk".equals(t)) { sendImeState(); if (!imeSelected(app)) notifySwitch(); return; }
         if ("mouse".equals(t) || "click".equals(t) || "scroll".equals(t) || "nav".equals(t) || "pad".equals(t)) {
             if (MesaAccess.instance != null && MesaAccess.instance.handle(m)) return;
@@ -250,6 +273,18 @@ public class Hub implements Link.Listener {
         Intent i = app.getPackageManager().getLaunchIntentForPackage(pkg);
         if (i == null) return NOT_INSTALLED;
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+        return startOrNotify(i, pkg.hashCode(), "Abrir " + (label.isEmpty() ? "la app" : label), "Toca para abrirla en este teléfono");
+    }
+
+    /** Desinstalar una app de ESTE teléfono (Android siempre pide confirmación). */
+    public int uninstallHere(String pkg, String label) {
+        try { app.getPackageManager().getPackageInfo(pkg, 0); } catch (Exception e) { return NOT_INSTALLED; }
+        Intent i = new Intent(Intent.ACTION_DELETE, android.net.Uri.parse("package:" + pkg)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        return startOrNotify(i, ("del" + pkg).hashCode(), "Desinstalar " + (label.isEmpty() ? "la app" : label), "Toca para confirmar en este teléfono");
+    }
+
+    /** Abre una pantalla; si Android no lo permite con la app de fondo, deja un aviso de un toque. */
+    public int startOrNotify(Intent i, int reqCode, String title, String text) {
         if (foreground || Settings.canDrawOverlays(app)) {
             try { app.startActivity(i); return LAUNCHED; } catch (Exception ignored) { }
         }
@@ -257,12 +292,12 @@ public class Hub implements Link.Listener {
         if (nm == null) return NOTIFIED;
         if (nm.getNotificationChannel("avisos") == null)
             nm.createNotificationChannel(new NotificationChannel("avisos", "Avisos del teclado", NotificationManager.IMPORTANCE_HIGH));
-        PendingIntent pi = PendingIntent.getActivity(app, pkg.hashCode(), i, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        PendingIntent pi = PendingIntent.getActivity(app, reqCode, i, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         int icon = app.getResources().getIdentifier("ic_stat", "drawable", app.getPackageName());
         Notification n = new Notification.Builder(app, "avisos")
                 .setSmallIcon(icon != 0 ? icon : android.R.drawable.stat_notify_more)
-                .setContentTitle("Abrir " + (label.isEmpty() ? "la app" : label))
-                .setContentText("Toca para abrirla en este teléfono")
+                .setContentTitle(title)
+                .setContentText(text)
                 .setContentIntent(pi)
                 .setAutoCancel(true)
                 .build();

@@ -121,6 +121,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         addSquare(SquareButton.APPS, "Apps", false, v -> showApps());
         addSquare(SquareButton.WIDGET, "Widget", false, v -> addWidget());
         addSquare(SquareButton.DESKS, "Mesas", false, v -> desksMenu());
+        addSquare(SquareButton.FILES, "Archivos", false, v -> startActivity(new Intent(this, FilesActivity.class)));
         addSquare(SquareButton.KEYBOARD, "Teclado", false, v -> keyboardMenu());
         addSquare(SquareButton.SETTINGS, "Ajustes", false, v -> settingsMenu());
         statusBtn = addSquare(SquareButton.STATUS, "Red", false, v -> showConnection());
@@ -678,6 +679,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         AppsDialog.show(this, night, new AppsDialog.Host() {
             @Override public void openHere(String pkg) { openOnPrincipal(pkg, ""); }
             @Override public void openThere(String pkg, String label) { openOnPrincipal(pkg, label); }
+            @Override public void uninstall(String pkg, String label) { uninstallOnPrincipal(pkg, label); }
             @Override public void putOnDesk(String pkg, String label, String iconPng) {
                 Item it = new Item();
                 it.kind = Item.APP; it.pkg = pkg; it.title = label; it.w = sized(0.24);
@@ -711,6 +713,16 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (hub.isPrincipal()) { openApp(pkg, label); return; }
         if (!hub.connected()) { Toast.makeText(this, "El principal no está conectado", Toast.LENGTH_SHORT).show(); return; }
         hub.send("launch", "pkg", pkg, "label", label);
+    }
+
+    /** Desinstalar: siempre en el principal (Android pide confirmación allá). */
+    private void uninstallOnPrincipal(String pkg, String label) {
+        if (hub.isPrincipal()) {
+            if (hub.uninstallHere(pkg, label) == Hub.NOT_INSTALLED) Toast.makeText(this, label + " ya no está instalada", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!hub.connected()) { Toast.makeText(this, "El principal no está conectado", Toast.LENGTH_SHORT).show(); return; }
+        hub.send("uninstall", "pkg", pkg, "label", label);
     }
 
     @Override public void onOpenApp(Item it) { openOnPrincipal(it.pkg, it.title); }
@@ -1361,6 +1373,14 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 requested.remove(id);
                 if (it == null) { pendingImg.put(id, new String[]{ik, data}); break; }
                 if (ik.equals(it.ik) || it.ik.isEmpty()) { it.img = data; it.ik = ik; it.bmp = null; desk.invalidate(); scheduleSave(); }
+                break;
+            }
+            case "uninstallAck": {
+                int r = m.optInt("r");
+                String label = m.optString("label");
+                Toast.makeText(this, r == Hub.LAUNCHED ? "Confirma la desinstalación de " + label + " en el principal"
+                        : r == Hub.NOTIFIED ? "Toca el aviso en el principal para desinstalar " + label
+                        : label + " ya no está instalada en el principal", Toast.LENGTH_LONG).show();
                 break;
             }
             case "navAck":
