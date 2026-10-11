@@ -7,11 +7,14 @@ App de Android que une dos teléfonos en un solo escritorio: arrastras notas, im
 1. En cada teléfono, abre la última versión: `Releases → MesaDoble.apk`.
 2. Descarga e instala el APK (Android pedirá permitir "instalar apps de origen desconocido" para el navegador).
 3. Conecta ambos teléfonos al mismo WiFi (o uno al hotspot del otro).
-4. Abre la app en ambos y elige **Izquierda** en uno y **Derecha** en el otro.
+4. Pon los teléfonos unidos por su **lado largo**: en horizontal, uno arriba del otro (como una consola
+   plegable); en vertical, uno al lado del otro (como un libro).
+5. Abre la app en ambos y elige la posición de cada uno (**Arriba/Abajo** o **Izquierda/Derecha**).
 
 ## Uso
 
-La mesa queda fija (horizontal por defecto; se cambia en *Ajustes*). Los botones son cuadrados y sus íconos
+La mesa queda fija (horizontal por defecto, con los teléfonos uno sobre otro; se cambia en *Ajustes*).
+Los elementos siempre cruzan por el borde largo, el que toca al otro teléfono. Los botones son cuadrados y sus íconos
 giran en su lugar según cómo sostengas el teléfono.
 
 - **+ Nota**: crea una nota. Tócala para editarla.

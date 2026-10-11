@@ -77,8 +77,7 @@ public class Item {
         if (Double.isNaN(it.w) || it.w <= 0.05 || it.w > 1) it.w = 0.62;
         if (Double.isNaN(it.x)) it.x = 0.2;
         if (Double.isNaN(it.y)) it.y = 0.2;
-        it.x = Math.min(Math.max(it.x, 0.0), 2.0 - it.w);
-        it.y = Math.min(Math.max(it.y, 0.0), 0.9);
+        // el encuadre dentro de la mesa lo hace DeskView.normalize (depende de cómo están unidos)
         return it;
     }
 

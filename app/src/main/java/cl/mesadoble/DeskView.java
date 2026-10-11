@@ -54,6 +54,12 @@ public class DeskView extends View {
     private static final ExecutorService decoder = Executors.newSingleThreadExecutor();
     private Host host;
     private int side = 0;
+    /**
+     * true: teléfonos uno sobre otro (mesa horizontal), se cruza por arriba/abajo, y va de 0 a 2.
+     * false: teléfonos lado a lado (mesa vertical), se cruza por izquierda/derecha, x va de 0 a 2.
+     * En ambos casos los teléfonos se unen por su lado largo.
+     */
+    private boolean vertical = true;
     private boolean connected = false;
     private float glyphRot = 0;
 
@@ -117,6 +123,41 @@ public class DeskView extends View {
     public void setHost(Host h) { host = h; }
     public boolean isDragging(Item it) { return dragging == it || (editing == it && mode != NONE); }
     public void setSide(int s) { side = s; invalidate(); }
+    public void setVertical(boolean v) { vertical = v; invalidate(); }
+    public boolean isVertical() { return vertical; }
+
+    // ---- geometría según cómo están unidos los teléfonos
+    private float leftOf(Item it, int W) { return vertical ? it.dx * W : (it.dx - side) * W; }
+    private float topOf(Item it, int H) { return vertical ? (it.dy - side) * H : it.dy * H; }
+    /** Tamaño del elemento en la dirección en que se cruza al otro teléfono (en "pantallas"). */
+    private double alongSize(Item it) { return vertical ? it.hPx / Math.max(1, getHeight()) : it.w; }
+    private boolean onFirst(Item it) { return (vertical ? it.y : it.x) + alongSize(it) / 2 < 1; }
+    private static double clamp(double v, double lo, double hi) { return Math.max(lo, Math.min(Math.max(lo, hi), v)); }
+
+    /** Mantiene el elemento dentro de la mesa doble. */
+    public void normalize(Item it) {
+        if (vertical) { it.x = clamp(it.x, 0, 1 - it.w); it.y = clamp(it.y, 0, 1.92); }
+        else { it.x = clamp(it.x, 0, 2 - it.w); it.y = clamp(it.y, 0, 0.92); }
+    }
+
+    /** Pasa todos los elementos de "lado a lado" a "uno sobre otro" (o al revés), conservando su pantalla. */
+    public void convertAll(boolean toVertical) {
+        for (Item it : items) {
+            if (toVertical) {   // x: 0..2 → pantalla + posición horizontal
+                int scr = it.x + it.w / 2 >= 1 ? 1 : 0;
+                double u = it.x - scr, v = it.y;
+                it.x = u; it.y = scr + v;
+            } else {
+                int scr = it.y >= 1 ? 1 : 0;
+                double u = it.x, v = it.y - scr;
+                it.x = scr + u; it.y = v;
+            }
+            it.dx = Float.NaN; it.dy = Float.NaN;
+        }
+        vertical = toVertical;
+        for (Item it : items) normalize(it);
+        invalidate();
+    }
     public void setConnected(boolean c) { connected = c; invalidate(); }
     public void setGlyphRotation(float r) { glyphRot = r; invalidate(); }
 
@@ -131,14 +172,14 @@ public class DeskView extends View {
 
     /** Lugar libre aproximado dentro de la pantalla de este teléfono. */
     public double[] spot(double w) {
-        double x = side + 0.08 + Math.random() * Math.max(0.01, 0.84 - w);
-        double y = 0.14 + Math.random() * 0.4;
-        return new double[]{x, y};
+        if (vertical) return new double[]{0.06 + Math.random() * Math.max(0.01, 0.86 - w), side + 0.12 + Math.random() * 0.3};
+        return new double[]{side + 0.08 + Math.random() * Math.max(0.01, 0.84 - w), 0.14 + Math.random() * 0.4};
     }
 
     public void sendAcross(Item it) {
-        boolean onLeft = it.x + it.w / 2 < 1;
-        it.x = onLeft ? 1.04 + Math.random() * 0.1 : 1 - 0.04 - it.w - Math.random() * 0.1;
+        double sz = alongSize(it);
+        double a = onFirst(it) ? 1.04 + Math.random() * 0.08 : 1 - 0.04 - sz - Math.random() * 0.08;
+        if (vertical) it.y = a; else it.x = a;
         it.z = System.currentTimeMillis();
         it.touch();
         invalidate();
@@ -171,18 +212,30 @@ public class DeskView extends View {
     @Override protected void onDraw(Canvas c) {
         int W = getWidth(), H = getHeight();
         c.drawRect(0, 0, W, H, bg);
-        float seam = (1 - side) * W;   // brillo centrado en la unión: se ve continuo entre ambos teléfonos
-        glow.setShader(new RadialGradient(seam, H * 0.45f, Math.max(W, H) * 0.95f, deskColor2, deskColor, Shader.TileMode.CLAMP));
+        // brillo centrado en la unión de los teléfonos: se ve continuo entre ambos
+        float gx = vertical ? W / 2f : (1 - side) * W, gy = vertical ? (1 - side) * H : H * 0.45f;
+        glow.setShader(new RadialGradient(gx, gy, Math.max(W, H) * 0.95f, deskColor2, deskColor, Shader.TileMode.CLAMP));
         c.drawRect(0, 0, W, H, glow);
-        float step = 22 * dp, offset = (side * W) % step;
-        for (float x = step / 2 - offset; x < W; x += step)
-            for (float y = step / 2; y < H; y += step) c.drawCircle(x, y, 1.2f * dp, dot);
+        float step = 22 * dp;
+        float offX = vertical ? 0 : (side * W) % step, offY = vertical ? (side * H) % step : 0;
+        for (float x = step / 2 - offX; x < W; x += step)
+            for (float y = step / 2 - offY; y < H; y += step) c.drawCircle(x, y, 1.2f * dp, dot);
 
         boolean hot = !remoteDrags.isEmpty();
-        if (dragging != null) hot |= side == 0 ? dragX + dragging.w > 0.97 : dragX < 1.03;
+        if (dragging != null) {
+            double a = vertical ? dragY : dragX, sz = alongSize(dragging);
+            hot |= side == 0 ? a + sz > 0.97 : a < 1.03;
+        }
         float ew = (hot ? 18 : 7) * dp;
         int ac = Color.argb(hot ? 255 : connected ? 200 : 90, Color.red(accent), Color.green(accent), Color.blue(accent));
-        if (side == 0) {
+        // franja en el borde que toca al otro teléfono
+        if (vertical && side == 0) {
+            edge.setShader(new LinearGradient(0, H, 0, H - ew, ac, 0x00000000, Shader.TileMode.CLAMP));
+            c.drawRect(0, H - ew, W, H, edge);
+        } else if (vertical) {
+            edge.setShader(new LinearGradient(0, 0, 0, ew, ac, 0x00000000, Shader.TileMode.CLAMP));
+            c.drawRect(0, 0, W, ew, edge);
+        } else if (side == 0) {
             edge.setShader(new LinearGradient(W, 0, W - ew, 0, ac, 0x00000000, Shader.TileMode.CLAMP));
             c.drawRect(W - ew, 0, W, H, edge);
         } else {
@@ -217,10 +270,10 @@ public class DeskView extends View {
             it.dy += (float) (ty - it.dy) * k;
             if (Math.abs(tx - it.dx) > 0.0004 || Math.abs(ty - it.dy) > 0.0004) again = true;
             else { it.dx = (float) tx; it.dy = (float) ty; }
-            float left = (it.dx - side) * W, top = it.dy * H, width = (float) (it.w * W);
+            float left = leftOf(it, W), top = topOf(it, H), width = (float) (it.w * W);
             float h = measure(it, width);
             float reach = Math.max(width, h);   // un elemento girado puede asomar más allá de su ancho
-            if (left > W + reach || left + width < -reach) continue;
+            if (left > W + reach || left + width < -reach || top > H + reach || top + h < -reach) continue;
             drawItem(c, it, left, top, width, h, it == dragging || rd != null);
         }
         if (again) postInvalidateOnAnimation();
@@ -321,10 +374,16 @@ public class DeskView extends View {
         c.drawRoundRect(it.delBtn, 6 * dp, 6 * dp, btn);
         icon.setColor(isNote || isImg ? 0xFF2B2A22 : fg);
         float cx = it.sendBtn.centerX(), cy = it.sendBtn.centerY(), s = 6 * dp;
-        float dir = it.x + it.w / 2 < 1 ? 1 : -1;
+        float sign = onFirst(it) ? 1 : -1;
+        float ux = vertical ? 0 : sign, uy = vertical ? sign : 0;   // hacia el otro teléfono
+        // la flecha se dibuja dentro del elemento girado: se compensa el giro para que apunte al otro teléfono
+        double ar = Math.toRadians(-it.rot);
+        float rx = (float) (ux * Math.cos(ar) - uy * Math.sin(ar)), ry = (float) (ux * Math.sin(ar) + uy * Math.cos(ar));
+        float tipX = cx + rx * s, tipY = cy + ry * s, hb = 5 * dp;
         Path p = new Path();
-        p.moveTo(cx - dir * s, cy); p.lineTo(cx + dir * s, cy);
-        p.moveTo(cx + dir * (s - 5 * dp), cy - 5 * dp); p.lineTo(cx + dir * s, cy); p.lineTo(cx + dir * (s - 5 * dp), cy + 5 * dp);
+        p.moveTo(cx - rx * s, cy - ry * s); p.lineTo(tipX, tipY);
+        p.moveTo(tipX - rx * hb - ry * hb, tipY - ry * hb + rx * hb); p.lineTo(tipX, tipY);
+        p.lineTo(tipX - rx * hb + ry * hb, tipY - ry * hb - rx * hb);
         c.drawPath(p, icon);
         cx = it.delBtn.centerX(); cy = it.delBtn.centerY(); s = 5 * dp;
         c.drawLine(cx - s, cy - s, cx + s, cy + s, icon);
@@ -370,7 +429,7 @@ public class DeskView extends View {
     /** Punto de pantalla → coordenadas propias del elemento (sin girar, origen arriba a la izquierda). */
     private float[] toLocal(Item it, float px, float py) {
         int W = getWidth(), H = getHeight();
-        float left = (it.dx - side) * W, top = it.dy * H, width = (float) (it.w * W), h = it.hPx;
+        float left = leftOf(it, W), top = topOf(it, H), width = (float) (it.w * W), h = it.hPx;
         float cx = left + width / 2, cy = top + h / 2;
         double a = Math.toRadians(-it.rot);
         float dx = px - cx, dy = py - cy;
@@ -380,7 +439,7 @@ public class DeskView extends View {
 
     private float[] centerOf(Item it) {
         int W = getWidth(), H = getHeight();
-        return new float[]{(it.dx - side) * W + (float) (it.w * W) / 2, it.dy * H + it.hPx / 2};
+        return new float[]{leftOf(it, W) + (float) (it.w * W) / 2, topOf(it, H) + it.hPx / 2};
     }
 
     private Item hit(float px, float py) {
@@ -499,7 +558,8 @@ public class DeskView extends View {
                 removeCallbacks(longPress);
                 if (!moved) { moved = true; mode = DRAG; dragging = pressed; dragging.z = System.currentTimeMillis(); }
                 dragX = ox + ddx / W;
-                dragY = Math.max(-0.05, Math.min(0.95, oy + ddy / H));
+                dragY = oy + ddy / H;
+                if (vertical) dragX = clamp(dragX, -0.05, 0.95); else dragY = clamp(dragY, -0.05, 0.95);
                 if (host != null) host.onDrag(dragging, dragX, dragY);
                 invalidate();
                 return true;
@@ -515,25 +575,30 @@ public class DeskView extends View {
                 int m = mode; mode = NONE;
                 if (it == null) return true;
                 if (m == ROTATE || m == RESIZE || m == PINCH) { commit(it); return true; }
-                double vx = 0;
-                if (vt != null) { vt.addMovement(e); vt.computeCurrentVelocity(1000); vx = vt.getXVelocity() / W; vt.recycle(); vt = null; }
+                double vel = 0;   // velocidad hacia el otro teléfono, en pantallas por segundo
+                if (vt != null) {
+                    vt.addMovement(e); vt.computeCurrentVelocity(1000);
+                    vel = vertical ? vt.getYVelocity() / H : vt.getXVelocity() / W;
+                    vt.recycle(); vt = null;
+                }
                 if (!moved) {
                     if (e.getActionMasked() == MotionEvent.ACTION_UP && !longPressed) tap(it);
                     return true;
                 }
                 dragging = null;
-                double x = dragX, y = dragY;
-                double over = side == 0 ? (x + it.w) - 1 : 1 - x;
-                boolean flung = side == 0 ? vx > 1.6 : vx < -1.6;   // pantallas por segundo
-                if (over > it.w * 0.35 || (flung && over > -it.w * 0.6)) {
-                    x = side == 0 ? 1.04 + Math.random() * 0.08 : 1 - 0.04 - it.w - Math.random() * 0.08;
+                double a = vertical ? dragY : dragX, b = vertical ? dragX : dragY, sz = alongSize(it);
+                double over = side == 0 ? (a + sz) - 1 : 1 - a;
+                boolean flung = side == 0 ? vel > 1.6 : vel < -1.6;
+                if (over > sz * 0.35 || (flung && over > -sz * 0.6)) {
+                    a = side == 0 ? 1.04 + Math.random() * 0.08 : 1 - 0.04 - sz - Math.random() * 0.08;
                     if (it == editing) finishEditing();
                 } else {
-                    x = Math.min(Math.max(x, side + 0.02), side + 0.98 - it.w);
+                    a = clamp(a, side + 0.02, side + 0.98 - sz);
                 }
-                double hf = it.hPx / H;
-                y = Math.min(Math.max(y, 0.04), Math.max(0.04, 0.97 - hf));
-                it.x = x; it.y = y;
+                if (vertical) b = clamp(b, 0.02, 0.98 - it.w);
+                else b = clamp(b, 0.04, 0.97 - it.hPx / H);
+                it.x = vertical ? b : a;
+                it.y = vertical ? a : b;
                 commit(it);
                 if (host != null) host.onDragEnd(it);
                 return true;

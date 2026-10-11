@@ -109,7 +109,11 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         };
         setContentView(root);
         hub = Hub.get(this);
+        desk.setVertical(stacked());
         loadItems();
+        boolean savedStacked = prefs.getBoolean("savedStacked", false);   // versiones anteriores: lado a lado
+        if (savedStacked != stacked()) { desk.convertAll(stacked()); prefs.edit().putBoolean("savedStacked", stacked()).apply(); scheduleSave(); }
+        for (Item it : desk.items) desk.normalize(it);
 
         side = hub.side();
         if (side < 0) chooseSide(); else applySide();
@@ -138,6 +142,14 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         orient.disable();
         super.onPause();
     }
+
+    /** Mesa horizontal = teléfonos uno sobre otro; vertical = lado a lado. Siempre unidos por el lado largo. */
+    private boolean stacked() { return prefs.getInt("orient", 0) == 0; }
+    /** Ancho inicial de un elemento: en horizontal la pantalla es más ancha, así que se usa la mitad. */
+    private double sized(double base) { return stacked() ? base * 0.5 : base; }
+    private String sideName(int s) { return stacked() ? (s == 0 ? "arriba" : "abajo") : (s == 0 ? "a la izquierda" : "a la derecha"); }
+    private String firstPhone() { return stacked() ? "el teléfono de arriba" : "el teléfono izquierdo"; }
+    private String secondPhone() { return stacked() ? "el teléfono de abajo" : "el teléfono derecho"; }
 
     private SquareButton addSquare(int kind, String label, boolean primary, View.OnClickListener l) {
         SquareButton b = new SquareButton(this, kind, label, primary, night);
@@ -170,8 +182,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     private void settingsMenu() {
         String[] opts = {
-                "Este teléfono está a la " + (side == 0 ? "IZQUIERDA" : "DERECHA") + " (cambiar)",
-                "Mesa en " + (prefs.getInt("orient", 0) == 0 ? "HORIZONTAL" : "VERTICAL") + " (cambiar)",
+                "Este teléfono va " + sideName(side).toUpperCase() + " (cambiar)",
+                "Mesa en " + (stacked() ? "HORIZONTAL, uno arriba del otro" : "VERTICAL, lado a lado") + " (cambiar)",
                 "Conexión y dirección IP",
                 "Teclado: recibir en este teléfono"};
         new AlertDialog.Builder(this)
@@ -180,10 +192,14 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                     if (w == 0) chooseSide();
                     else if (w == 1) {
                         int o = prefs.getInt("orient", 0) == 0 ? 1 : 0;
-                        prefs.edit().putInt("orient", o).apply();
+                        prefs.edit().putInt("orient", o).putBoolean("savedStacked", o == 0).apply();
+                        desk.convertAll(o == 0);
+                        scheduleSave();
+                        applySide();
                         snapped = -1;
                         setRequestedOrientation(o == 0 ? ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE : ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
-                        Toast.makeText(this, "Elige la misma orientación en el otro teléfono", Toast.LENGTH_LONG).show();
+                        Toast.makeText(this, o == 0 ? "Pon los teléfonos en horizontal, uno arriba del otro. Haz lo mismo en el otro teléfono."
+                                : "Pon los teléfonos en vertical, uno al lado del otro. Haz lo mismo en el otro teléfono.", Toast.LENGTH_LONG).show();
                     }
                     else if (w == 2) showConnection();
                     else setupReceiver();
@@ -200,7 +216,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             }
             @Override public void putOnDesk(String pkg, String label, String iconPng) {
                 Item it = new Item();
-                it.kind = Item.APP; it.pkg = pkg; it.title = label; it.w = 0.24;
+                it.kind = Item.APP; it.pkg = pkg; it.title = label; it.w = sized(0.24);
                 it.setImage(iconPng);
                 double[] p = desk.spot(it.w);
                 it.x = p[0]; it.y = p[1];
@@ -328,10 +344,16 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     private void applySide() {
         desk.setSide(side);
-        int g = side == 0 ? Gravity.START : Gravity.END;
+        // la barra va en el borde exterior, lejos de la unión entre teléfonos
+        desk.setVertical(stacked());
         FrameLayout.LayoutParams bp = (FrameLayout.LayoutParams) bar.getLayoutParams();
-        bp.gravity = Gravity.BOTTOM | g;
-        bp.setMargins(dp(12), 0, dp(12), dp(14));
+        if (stacked()) {
+            bp.gravity = (side == 0 ? Gravity.TOP : Gravity.BOTTOM) | Gravity.START;
+            bp.setMargins(dp(14), dp(12), dp(14), dp(12));
+        } else {
+            bp.gravity = Gravity.BOTTOM | (side == 0 ? Gravity.START : Gravity.END);
+            bp.setMargins(dp(12), 0, dp(12), dp(14));
+        }
         bar.setLayoutParams(bp);
         otherSide = -1;
         hub.setSide(side);
@@ -339,21 +361,27 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (!prefs.getBoolean("welcomed", false)) {
             prefs.edit().putBoolean("welcomed", true).apply();
             Item it = new Item();
+            it.w = sized(0.62);
             it.text = side == 0 ? "Arrástrame hacia el otro teléfono, o toca la flecha →"
-                                : "Esta nota vive en la pantalla derecha. Tócala para editarla.";
+                                : "Esta nota vive en la otra pantalla. Tócala para editarla.";
             it.color = PAPER[side == 0 ? 0 : 2];
-            it.x = side + 0.18; it.y = 0.22; it.rot = side == 0 ? -1.5f : 1.2f;
+            double[] sp = desk.spot(it.w);
+            it.x = sp[0]; it.y = sp[1]; it.rot = side == 0 ? -1.5f : 1.2f;
             addItem(it);
         }
         updateStatus();
     }
 
     private void chooseSide() {
+        boolean st = stacked();
         new AlertDialog.Builder(this)
                 .setTitle("¿Dónde está este teléfono?")
-                .setMessage("Pon los dos teléfonos lado a lado, conectados al mismo WiFi. Abre la app en ambos y elige en cada uno el lado que ocupa.")
-                .setPositiveButton("Derecha", (d, w) -> setSide(1))
-                .setNegativeButton("Izquierda", (d, w) -> setSide(0))
+                .setMessage(st ? "Pon los dos teléfonos en horizontal, uno arriba del otro y unidos por el lado largo, conectados al mismo WiFi. "
+                                + "Abre la app en ambos y elige en cada uno su posición."
+                              : "Pon los dos teléfonos en vertical, uno al lado del otro y unidos por el lado largo, conectados al mismo WiFi. "
+                                + "Abre la app en ambos y elige en cada uno su posición.")
+                .setPositiveButton(st ? "Abajo" : "Derecha", (d, w) -> setSide(1))
+                .setNegativeButton(st ? "Arriba" : "Izquierda", (d, w) -> setSide(0))
                 .setCancelable(side >= 0)
                 .show();
     }
@@ -373,9 +401,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         } else if (side == 0) {
             t = "Esperando al otro teléfono · IP " + Link.localIp();
         } else if (System.currentTimeMillis() - waitingSince > 12000) {
-            t = "No encuentro el teléfono izquierdo. Puedes conectar escribiendo su IP.";
+            t = "No encuentro " + firstPhone() + ". Puedes conectar escribiendo su IP.";
         } else {
-            t = "Buscando el teléfono izquierdo…";
+            t = "Buscando " + firstPhone() + "…";
         }
         statusText = t;
         statusBtn.setStatus(linkState == Link.CONNECTED ? (otherSide == side ? 1 : 2) : linkState == Link.WAITING ? 1 : 0);
@@ -397,11 +425,12 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         String state = statusText;
         AlertDialog.Builder b = new AlertDialog.Builder(this).setTitle("Conexión");
         if (side == 0) {
-            b.setMessage(state + "\n\nEste teléfono es el izquierdo y espera la conexión.\nSu IP es " + Link.localIp()
-                    + "\n\nSi el derecho no lo encuentra solo, escribe esa IP en el otro teléfono.")
+            b.setMessage(state + "\n\nEste es " + firstPhone() + " y espera la conexión.\nSu IP es " + Link.localIp()
+                    + "\n\nSi " + secondPhone() + " no lo encuentra solo, escribe esa IP en él.")
              .setPositiveButton("Listo", null);
         } else {
-            b.setMessage(state + "\n\nEl teléfono derecho busca al izquierdo en el WiFi. Si no lo encuentra, escribe la IP que muestra el izquierdo.")
+            b.setMessage(state + "\n\nEste es " + secondPhone() + " y busca a " + firstPhone().replace("el teléfono", "el") + " en el WiFi. "
+                    + "Si no lo encuentra, escribe la IP que muestra " + firstPhone() + ".")
              .setView(box)
              .setPositiveButton("Conectar", (d, w) -> {
                  String v = ip.getText().toString().trim();
@@ -426,6 +455,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     private void addNote() {
         Item it = new Item();
+        it.w = sized(0.62);
         it.color = PAPER[colorIdx++ % PAPER.length];
         double[] p = desk.spot(it.w);
         it.x = p[0]; it.y = p[1];
@@ -437,12 +467,13 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private void addText(String text) {
         Matcher m = URL.matcher(text);
         Item it = new Item();
+        it.w = sized(0.62);
         if (m.find()) {
             it.kind = Item.LINK;
             it.url = m.group();
             String rest = text.replace(it.url, "").trim();
             it.title = rest.length() > 140 ? rest.substring(0, 140) : rest;
-            it.w = 0.66;
+            it.w = sized(0.66);
         } else {
             it.text = text.length() > 2000 ? text.substring(0, 2000) : text;
             it.color = PAPER[colorIdx++ % PAPER.length];
@@ -534,7 +565,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             main.post(() -> {
                 if (b64 == null) { Toast.makeText(this, "No pude abrir esa imagen", Toast.LENGTH_SHORT).show(); return; }
                 Item it = new Item();
-                it.kind = Item.IMG; it.setImage(b64); it.w = 0.5;
+                it.kind = Item.IMG; it.setImage(b64); it.w = sized(0.5);
                 double[] p = desk.spot(it.w);
                 it.x = p[0]; it.y = p[1];
                 it.rot = (float) (Math.random() * 3 - 1.5);
@@ -695,6 +726,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
      * Al sincronizar todo tras reconectar, gana la versión con más cambios.
      */
     private void merge(Item in, boolean live) {
+        desk.normalize(in);
         Item cur = desk.find(in.id);
         if (cur == null) { desk.items.add(in); requestImageIfMissing(in); return; }
         if (live && dragging(cur)) return;
