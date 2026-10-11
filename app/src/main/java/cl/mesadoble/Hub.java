@@ -1,7 +1,15 @@
 package cl.mesadoble;
 
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.provider.Settings;
+import android.view.inputmethod.InputMethodInfo;
+import android.view.inputmethod.InputMethodManager;
 import android.media.AudioManager;
 import android.os.SystemClock;
 import android.view.KeyEvent;
@@ -32,7 +40,9 @@ public class Hub implements Link.Listener {
     private final List<Link.Listener> listeners = new CopyOnWriteArrayList<>();
     private int state = Link.IDLE, side;
     private String info;
-    private boolean started, imeReady, remoteImeReady;
+    private boolean started, imeReady, remoteImeReady, remoteImeSelected;
+    private long lastNotify = 0;
+    public int acksOk = 0, acksFail = 0;
 
     private Hub(Context c) {
         app = c;
@@ -45,6 +55,29 @@ public class Hub implements Link.Listener {
     public int state() { return state; }
     public boolean connected() { return state == Link.CONNECTED; }
     public boolean remoteImeReady() { return remoteImeReady; }
+    public boolean remoteImeSelected() { return remoteImeSelected; }
+
+    /** ¿El teclado Mesa Doble está activado en la lista de teclados de ESTE teléfono? */
+    public static boolean imeEnabled(Context c) {
+        InputMethodManager imm = (InputMethodManager) c.getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm == null) return false;
+        for (InputMethodInfo i : imm.getEnabledInputMethodList())
+            if (c.getPackageName().equals(i.getPackageName())) return true;
+        return false;
+    }
+
+    /** ¿El teclado Mesa Doble es el teclado elegido ahora en ESTE teléfono? */
+    public static boolean imeSelected(Context c) {
+        try {
+            String cur = Settings.Secure.getString(c.getContentResolver(), Settings.Secure.DEFAULT_INPUT_METHOD);
+            return cur != null && cur.startsWith(c.getPackageName() + "/");
+        } catch (Exception e) { return false; }
+    }
+
+    public void refreshImeState() {
+        if (imeSelected(app)) cancelNotice();
+        sendImeState();
+    }
 
     public void ensureStarted() {
         if (side >= 0 && !started) { started = true; link.start(side == 0); }
@@ -80,12 +113,40 @@ public class Hub implements Link.Listener {
 
     /** El teclado Mesa Doble de ESTE teléfono está (o no) listo para recibir texto. */
     public void setImeReady(boolean r) {
+        if (r) cancelNotice();
         if (imeReady == r) return;
         imeReady = r;
         sendImeState();
     }
 
-    private void sendImeState() { send("kbState", "ready", imeReady); }
+    private void sendImeState() { send("kbState", "ready", imeReady, "sel", imeSelected(app)); }
+
+    /** Aviso en el teléfono que recibe: un toque y queda elegido el teclado Mesa Doble. */
+    private void notifySwitch() {
+        long now = System.currentTimeMillis();
+        if (now - lastNotify < 15000 || imeSelected(app)) return;
+        lastNotify = now;
+        NotificationManager nm = (NotificationManager) app.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm == null) return;
+        if (nm.getNotificationChannel("avisos") == null)
+            nm.createNotificationChannel(new NotificationChannel("avisos", "Avisos del teclado", NotificationManager.IMPORTANCE_HIGH));
+        Intent i = new Intent(app, ImePickerActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        PendingIntent pi = PendingIntent.getActivity(app, 1, i, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        int icon = app.getResources().getIdentifier("ic_stat", "drawable", app.getPackageName());
+        Notification n = new Notification.Builder(app, "avisos")
+                .setSmallIcon(icon != 0 ? icon : android.R.drawable.stat_notify_more)
+                .setContentTitle("El otro teléfono quiere escribir aquí")
+                .setContentText("Toca para usar el teclado Mesa Doble")
+                .setContentIntent(pi)
+                .setAutoCancel(true)
+                .build();
+        try { nm.notify(2, n); } catch (Exception ignored) { }
+    }
+
+    private void cancelNotice() {
+        NotificationManager nm = (NotificationManager) app.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm != null) nm.cancel(2);
+    }
 
     // ---------------- Link.Listener ----------------
 
@@ -100,9 +161,16 @@ public class Hub implements Link.Listener {
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
         if ("media".equals(t)) { media(m.optString("k")); return; }
-        if ("kbAsk".equals(t)) { sendImeState(); return; }
-        if ("kbState".equals(t)) remoteImeReady = m.optBoolean("ready");
+        if ("kbAsk".equals(t)) { sendImeState(); if (!imeSelected(app)) notifySwitch(); return; }
+        if ("kbState".equals(t)) { remoteImeReady = m.optBoolean("ready"); remoteImeSelected = m.optBoolean("sel"); }
+        if ("kbAck".equals(t)) { if (m.optBoolean("ok")) acksOk++; else acksFail++; }
         for (Link.Listener l : listeners) l.onMessage(m);
+        if ("kb".equals(t)) {
+            // confirma cada envío: así el que escribe sabe si llegó al campo de texto
+            boolean sel = imeSelected(app);
+            send("kbAck", "ok", imeReady, "sel", sel);
+            if (!imeReady && !sel) notifySwitch();
+        }
     }
 
     /** Multimedia y volumen: funcionan aunque el teclado receptor no esté activo. */

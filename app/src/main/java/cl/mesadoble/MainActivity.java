@@ -138,16 +138,19 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .show();
     }
 
-    private boolean imeEnabled() {
-        android.view.inputmethod.InputMethodManager imm =
-                (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
-        if (imm == null) return false;
-        for (android.view.inputmethod.InputMethodInfo i : imm.getEnabledInputMethodList())
-            if (getPackageName().equals(i.getPackageName())) return true;
-        return false;
-    }
+    private boolean imeEnabled() { return Hub.imeEnabled(this); }
 
     private void setupReceiver() {
+        if (Hub.imeSelected(this)) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Listo para recibir")
+                    .setMessage("El teclado Mesa Doble ya está elegido en este teléfono. Abre cualquier app, toca donde se escribe "
+                            + "y escribe desde el otro teléfono.\n\nPara volver a tu teclado normal toca \"Cambiar teclado\" en la barra.")
+                    .setPositiveButton("Entendido", null)
+                    .setNeutralButton("Cambiar teclado", (d, w) -> startActivity(new Intent(this, ImePickerActivity.class)))
+                    .show();
+            return;
+        }
         if (!imeEnabled()) {
             new AlertDialog.Builder(this)
                     .setTitle("Activa el teclado Mesa Doble")
@@ -167,11 +170,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .setMessage("En la lista que aparece elige Mesa Doble. Luego abre WhatsApp, Chrome o la app que quieras "
                         + "y toca donde se escribe: verás una barra delgada y podrás escribir desde el otro teléfono.\n\n"
                         + "Para volver a tu teclado normal toca \"Cambiar teclado\" en esa barra.")
-                .setPositiveButton("Elegir teclado", (d, w) -> {
-                    android.view.inputmethod.InputMethodManager imm =
-                            (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
-                    if (imm != null) imm.showInputMethodPicker();
-                })
+                .setPositiveButton("Elegir teclado", (d, w) -> startActivity(new Intent(this, ImePickerActivity.class)))
                 .setNegativeButton("Cancelar", null)
                 .show();
     }

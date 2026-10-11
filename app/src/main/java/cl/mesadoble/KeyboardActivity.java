@@ -199,11 +199,18 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     private void updateStatus() {
         String t;
         boolean ok = false;
-        if (!hub.connected()) t = "Sin conexión. Abre Mesa Doble en ambos teléfonos";
-        else if (!hub.remoteImeReady()) t = "Toca un campo de texto en el otro teléfono (con el teclado Mesa Doble)";
-        else { t = "● Escribiendo en el otro teléfono"; ok = true; }
+        if (!hub.connected()) {
+            t = "Sin conexión con el otro teléfono. Abre Mesa Doble en ambos";
+        } else if (!hub.remoteImeSelected()) {
+            t = "En el otro teléfono toca el aviso \"quiere escribir aquí\" para elegir el teclado Mesa Doble";
+        } else if (!hub.remoteImeReady()) {
+            t = "Toca un campo de texto en el otro teléfono";
+        } else {
+            t = "● Escribiendo en el otro teléfono" + (hub.acksOk > 0 ? "  ✓" + hub.acksOk : "");
+            ok = true;
+        }
         status.setText(t);
-        status.setTextColor(ok ? (night ? 0xFF5CC3CF : 0xFF1F7F8C) : (night ? 0xFF93A4B5 : 0xFF5B6B7A));
+        status.setTextColor(ok ? (night ? 0xFF5CC3CF : 0xFF1F7F8C) : (night ? 0xFFF0A26B : 0xFFB4541A));
     }
 
     @Override public void onState(int state, String info) {
@@ -212,7 +219,8 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     }
 
     @Override public void onMessage(JSONObject m) {
-        if ("kbState".equals(m.optString("t"))) updateStatus();
+        String t = m.optString("t");
+        if ("kbState".equals(t) || "kbAck".equals(t)) updateStatus();
     }
 
     // ---------------- envío ----------------
