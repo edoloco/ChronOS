@@ -51,6 +51,8 @@ public class FileServer {
     private final ExecutorService work = Executors.newCachedThreadPool();
     private volatile ServerSocket server;
     volatile String remoteToken;
+    /** Carpeta abierta en el gestor de archivos del otro teléfono (destino al copiar o mover). */
+    static volatile String remoteDir = "";
     volatile int remotePort = PORT;
 
     private FileServer(Context c) {

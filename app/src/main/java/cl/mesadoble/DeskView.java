@@ -56,6 +56,7 @@ public class DeskView extends View {
         void onWidgetFrame(Item it, float left, float top, float width, float height, float rot, float pivotX, float pivotY, boolean shown);
         boolean widgetBound(Item it);
         void onWidgetTap(Item it);
+        void onOpenAlarms();
     }
 
     /** Alto de la franja superior de un widget (nombre y botones); el widget va debajo. */
@@ -95,6 +96,12 @@ public class DeskView extends View {
     private ValueAnimator slideAnim;
     private boolean lockApps, autoApps;
     private int edgeDir = 0;
+    private boolean clockTick;
+    private String alarmText = "";
+    private long alarmAt = 0;
+    private final Paint clockPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    { clockPaint.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL)); }
+    private final Runnable minuteTick = this::invalidate;
     private final Runnable edgeFlip = this::onEdgeFlip;
     private int mode = NONE;
     private Item pressed, dragging, editing;
@@ -358,6 +365,7 @@ public class DeskView extends View {
 
     @Override protected void onDraw(Canvas c) {
         int W = getWidth(), H = getHeight();
+        clockTick = false;
         c.drawRect(0, 0, W, H, bg);
         // brillo centrado en la unión de los teléfonos: se ve continuo entre ambos
         float gx = vertical ? W / 2f : (1 - side) * W, gy = vertical ? (1 - side) * H : H * 0.45f;
@@ -439,6 +447,10 @@ public class DeskView extends View {
             if (Item.WIDGET.equals(it.kind) && !framed.contains(it)) host.onWidgetFrame(it, 0, 0, 0, 0, 0, 0, 0, false);
         if (again) postInvalidateOnAnimation();
 
+        // relojes: se vuelve a dibujar al cambiar el minuto
+        removeCallbacks(minuteTick);
+        if (clockTick) postDelayed(minuteTick, 60_000 - System.currentTimeMillis() % 60_000 + 50);
+
         // puntos de los escritorios
         if (pages > 1) {
             float r = 3.6f * dp, g = 14 * dp, y = H - 14 * dp, x0 = W / 2f - (pages - 1) * g / 2;
@@ -470,6 +482,8 @@ public class DeskView extends View {
             it.hPx = Math.max(96 * dp, width * 0.9f);
         } else if (Item.WIDGET.equals(it.kind)) {
             it.hPx = widgetBar() + (float) (width * it.ar);
+        } else if (Item.CLOCK.equals(it.kind)) {
+            it.hPx = Math.max(118 * dp, width * 0.52f);
         } else {
             it.hPx = 132 * dp;
         }
@@ -485,15 +499,38 @@ public class DeskView extends View {
         RectF box = new RectF(0, 0, width, h);
 
         boolean isNote = Item.NOTE.equals(it.kind), isImg = Item.IMG.equals(it.kind), isApp = Item.APP.equals(it.kind),
-                isWidget = Item.WIDGET.equals(it.kind);
+                isWidget = Item.WIDGET.equals(it.kind), isClock = Item.CLOCK.equals(it.kind);
         card.setColor(isNote ? it.color : isImg ? 0xFFFFFFFF : linkBg);
         card.setShadowLayer((lifted ? 18 : 10) * dp, 0, (lifted ? 10 : 5) * dp, 0x55000000);
         c.drawRoundRect(box, isApp ? 18 * dp : r, isApp ? 18 * dp : r, card);
 
         int ink = isNote || isImg ? 0xFF2B2A22 : fg;
         label.setColor((ink & 0x00FFFFFF) | 0x77000000);
-        String tag = isNote ? "NOTA" : isImg ? "IMAGEN" : isApp ? "APP" : isWidget ? "WIDGET" : "ENLACE";
-        if (isWidget) {
+        String tag = isNote ? "NOTA" : isImg ? "IMAGEN" : isApp ? "APP" : isWidget ? "WIDGET" : isClock ? "RELOJ" : "ENLACE";
+        if (isClock) {
+            java.util.Date now = new java.util.Date();
+            boolean is24 = android.text.format.DateFormat.is24HourFormat(getContext());
+            String time = new java.text.SimpleDateFormat(is24 ? "HH:mm" : "h:mm", Locale.getDefault()).format(now);
+            String date = new java.text.SimpleDateFormat("EEEE, d 'de' MMMM", new Locale("es")).format(now);
+            long nowMs = System.currentTimeMillis();
+            if (nowMs - alarmAt > 30_000) { alarmText = ClockWidget.nextAlarm(getContext()); alarmAt = nowMs; }
+            String alarm = alarmText;
+            clockPaint.setColor(fg);
+            clockPaint.setTextSize(Math.min(h * 0.42f, width * 0.26f));
+            float ty = h * 0.55f;
+            c.drawText(time, width / 2 - clockPaint.measureText(time) / 2, ty, clockPaint);
+            small.setColor(fg);
+            small.setTextSize(Math.max(12 * dp, Math.min(17 * dp, width * 0.06f)));
+            String d2 = ellipsize(date.substring(0, 1).toUpperCase() + date.substring(1), small, width - 20 * dp);
+            c.drawText(d2, width / 2 - small.measureText(d2) / 2, ty + small.getTextSize() * 1.5f, small);
+            if (!alarm.isEmpty()) {
+                small.setColor(accent);
+                small.setTextSize(Math.max(11 * dp, Math.min(15 * dp, width * 0.05f)));
+                c.drawText(alarm, width / 2 - small.measureText(alarm) / 2, h - 12 * dp, small);
+            }
+            c.drawText(tag, 10 * dp, 18 * dp, label);
+            clockTick = true;
+        } else if (isWidget) {
             small.setColor(fg);
             small.setTextSize(13 * dp);
             c.drawText(ellipsize(it.title, small, width - 92 * dp), 10 * dp, 24 * dp, small);
@@ -533,7 +570,7 @@ public class DeskView extends View {
             small.setTextSize(Math.max(12 * dp, Math.min(16 * dp, width * 0.07f)));
             String t = ellipsize(it.title, small, width - 16 * dp);
             c.drawText(t, width / 2 - small.measureText(t) / 2, h - 16 * dp, small);
-        } else {
+        } else if (!isWidget && !isClock) {
             small.setColor(muted);
             small.setTextSize(12 * dp);
             String dom = host(it.url);
@@ -861,6 +898,7 @@ public class DeskView extends View {
         else if (Item.LINK.equals(it.kind) && "open".equals(pressedBtn)) { if (host != null) host.onOpenLink(it); }
         else if (Item.APP.equals(it.kind)) { if (host != null) host.onOpenApp(it); }
         else if (Item.WIDGET.equals(it.kind)) { if (host != null) host.onWidgetTap(it); }
+        else if (Item.CLOCK.equals(it.kind)) { if (host != null) host.onOpenAlarms(); }
         else { it.z = System.currentTimeMillis(); invalidate(); }
     }
 }

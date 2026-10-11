@@ -116,12 +116,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         menuBtn = new SquareButton(this, SquareButton.MENU, "Menú", false, night);
         menuBtn.setOnClickListener(v -> toggleBar());
         squares.add(menuBtn);
-        addSquare(SquareButton.NOTE, "Nota", true, v -> addNote());
-        addSquare(SquareButton.IMAGE, "Imagen", false, v -> pickImage());
+        addSquare(SquareButton.TOOLS, "Herramientas", true, v -> toolsMenu());
         addSquare(SquareButton.APPS, "Apps", false, v -> showApps());
-        addSquare(SquareButton.WIDGET, "Widget", false, v -> addWidget());
         addSquare(SquareButton.DESKS, "Mesas", false, v -> desksMenu());
-        addSquare(SquareButton.FILES, "Archivos", false, v -> startActivity(new Intent(this, FilesActivity.class)));
         addSquare(SquareButton.KEYBOARD, "Teclado", false, v -> keyboardMenu());
         addSquare(SquareButton.SETTINGS, "Ajustes", false, v -> settingsMenu());
         statusBtn = addSquare(SquareButton.STATUS, "Red", false, v -> showConnection());
@@ -673,6 +670,40 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                         openSettings(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS, null, "Busca Mesa Doble en Apps descargadas y actívalo."))
                 .button("Después", false, null)
                 .show();
+    }
+
+    /** Herramientas: nota, imagen, reloj, widgets de Android y archivos. */
+    private void toolsMenu() {
+        new Ui.Sheet(this)
+                .title("Herramientas")
+                .option(Ui.NOTE, "Nota", "Una nota para escribir", this::addNote)
+                .option(Ui.IMAGE, "Imagen", "Una foto de la galería", this::pickImage)
+                .option(Ui.CLOCK, "Reloj", "Hora, fecha y próxima alarma; al tocarlo abre las alarmas", this::addClock)
+                .option(Ui.WIDGETS, "Widget", "Widgets de tus apps (clima, calendario, música...)", this::addWidget)
+                .option(Ui.FOLDER, "Archivos", "Pasar archivos entre los dos teléfonos", this::openFiles)
+                .button("Cerrar", false, null)
+                .show();
+    }
+
+    private void addClock() {
+        Item it = new Item();
+        it.kind = Item.CLOCK;
+        it.w = sized(0.62);
+        double[] p = desk.spot(it.w);
+        it.x = p[0]; it.y = p[1];
+        addItem(it);
+    }
+
+    /** El gestor de archivos se abre en los dos teléfonos: cada uno maneja su ventana. */
+    private void openFiles() {
+        startActivity(new Intent(this, FilesActivity.class));
+        if (hub.connected()) hub.send("fmOpen");
+    }
+
+    @Override public void onOpenAlarms() {
+        if (hub.isPrincipal() || !hub.connected()) { hub.openAlarms(); return; }
+        hub.send("alarms");
+        Toast.makeText(this, "Abriendo las alarmas en el principal", Toast.LENGTH_SHORT).show();
     }
 
     private void showApps() {

@@ -18,7 +18,7 @@ import android.view.View;
 public class SquareButton extends View {
 
     public static final int NOTE = 0, IMAGE = 1, APPS = 2, KEYBOARD = 3, SETTINGS = 4, STATUS = 5,
-            BACK = 6, HOME = 7, RECENTS = 8, MENU = 9, DESKS = 10, WIDGET = 11, FILES = 12;
+            BACK = 6, HOME = 7, RECENTS = 8, MENU = 9, DESKS = 10, WIDGET = 11, FILES = 12, TOOLS = 13;
 
     private final int kind;
     private final String text;
@@ -178,6 +178,19 @@ public class SquareButton extends View {
                 }
                 break;
             }
+            case TOOLS: {   // llave y destornillador cruzados
+                c.save();
+                c.rotate(45, cx, cy);
+                c.drawLine(cx, cy - u * 0.35f, cx, cy + u * 1.25f, stroke);
+                c.drawArc(new RectF(cx - u * 0.55f, cy - u * 1.35f, cx + u * 0.55f, cy - u * 0.25f), 120, 300, false, stroke);
+                c.restore();
+                c.save();
+                c.rotate(-45, cx, cy);
+                c.drawLine(cx, cy - u * 1.2f, cx, cy + u * 0.3f, stroke);
+                c.drawRoundRect(new RectF(cx - u * 0.28f, cy + u * 0.3f, cx + u * 0.28f, cy + u * 1.25f), 2 * dp, 2 * dp, fill);
+                c.restore();
+                break;
+            }
             case WIDGET:
                 c.drawRoundRect(new RectF(cx - u * 1.2f, cy - u, cx + u * 0.1f, cy - u * 0.05f), 2 * dp, 2 * dp, stroke);
                 c.drawRoundRect(new RectF(cx + u * 0.35f, cy - u, cx + u * 1.2f, cy + u), 2 * dp, 2 * dp, stroke);
@@ -199,7 +212,12 @@ public class SquareButton extends View {
                 break;
         }
         label.setColor(kind == STATUS ? ink : fgColor);
-        if (!compact) c.drawText(text, cx, h - 8 * dp, label);
+        if (!compact) {
+            float ts = 9.5f * dp;   // los nombres largos se achican para caber
+            label.setTextSize(ts);
+            while (label.measureText(text) > w - 4 * dp && ts > 6.5f * dp) { ts -= 0.5f * dp; label.setTextSize(ts); }
+            c.drawText(text, cx, h - 8 * dp, label);
+        }
         c.restore();
     }
 }

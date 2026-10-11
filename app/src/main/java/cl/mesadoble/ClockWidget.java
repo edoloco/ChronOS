@@ -32,28 +32,35 @@ public class ClockWidget extends AppWidgetProvider {
         if (ids.length > 0) for (int id : ids) m.updateAppWidget(id, views(c));
     }
 
-    private static RemoteViews views(Context c) {
-        RemoteViews v = new RemoteViews(c.getPackageName(), R.layout.widget_reloj);
+    /** "Ver alarmas"; si el teléfono no lo tiene, la app de reloj que haya. */
+    static Intent alarmsIntent(Context c) {
         Intent alarms = new Intent(AlarmClock.ACTION_SHOW_ALARMS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         if (alarms.resolveActivity(c.getPackageManager()) == null) {
-            // sin "ver alarmas": abrir la app de reloj que haya
             for (String pkg : new String[]{"com.android.deskclock", "com.google.android.deskclock", "com.sec.android.app.clockpackage"}) {
                 Intent l = c.getPackageManager().getLaunchIntentForPackage(pkg);
-                if (l != null) { alarms = l; break; }
+                if (l != null) return l.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             }
         }
-        PendingIntent pi = PendingIntent.getActivity(c, 11, alarms, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-        v.setOnClickPendingIntent(R.id.reloj_raiz, pi);
-        String next = "";
+        return alarms;
+    }
+
+    /** Próxima alarma de este teléfono, ya escrita ("⏰ lun 07:00"), o "". */
+    static String nextAlarm(Context c) {
         try {
             AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
             AlarmManager.AlarmClockInfo info = am != null ? am.getNextAlarmClock() : null;
-            if (info != null) {
-                boolean is24 = android.text.format.DateFormat.is24HourFormat(c);
-                next = "⏰ " + new SimpleDateFormat(is24 ? "EEE HH:mm" : "EEE h:mm a", new Locale("es")).format(new Date(info.getTriggerTime()));
-            }
-        } catch (Exception ignored) { }
-        v.setTextViewText(R.id.reloj_alarma, next);
+            if (info == null) return "";
+            boolean is24 = android.text.format.DateFormat.is24HourFormat(c);
+            return "⏰ " + new SimpleDateFormat(is24 ? "EEE HH:mm" : "EEE h:mm a", new Locale("es")).format(new Date(info.getTriggerTime()));
+        } catch (Exception e) { return ""; }
+    }
+
+    private static RemoteViews views(Context c) {
+        RemoteViews v = new RemoteViews(c.getPackageName(), R.layout.widget_reloj);
+        Intent alarms = alarmsIntent(c);
+        PendingIntent pi = PendingIntent.getActivity(c, 11, alarms, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        v.setOnClickPendingIntent(R.id.reloj_raiz, pi);
+        v.setTextViewText(R.id.reloj_alarma, nextAlarm(c));
         return v;
     }
 }

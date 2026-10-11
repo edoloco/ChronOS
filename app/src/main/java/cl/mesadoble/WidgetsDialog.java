@@ -148,7 +148,12 @@ public class WidgetsDialog {
                 } catch (Exception ignored) { }
             }
             Collator col = Collator.getInstance(new Locale("es"));
-            Collections.sort(out, (x, y) -> { int c = col.compare(x.app, y.app); return c != 0 ? c : col.compare(x.label, y.label); });
+            final String own = a.getPackageName();
+            Collections.sort(out, (x, y) -> {
+                boolean ox = own.equals(x.info.provider.getPackageName()), oy = own.equals(y.info.provider.getPackageName());
+                if (ox != oy) return ox ? -1 : 1;   // los de Mesa Doble primero
+                int c = col.compare(x.app, y.app); return c != 0 ? c : col.compare(x.label, y.label);
+            });
             a.runOnUiThread(() -> { all.addAll(out); shown.addAll(out); adapter.notifyDataSetChanged(); });
         }, "widgets").start();
     }

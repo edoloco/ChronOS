@@ -1,8 +1,15 @@
 package cl.mesadoble;
 
+import android.animation.ValueAnimator;
 import android.app.Activity;
-import android.app.Dialog;
 import android.content.Intent;
+import android.content.res.Configuration;
+import android.graphics.Canvas;
+import android.graphics.LinearGradient;
+import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.Shader;
+import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
@@ -11,18 +18,23 @@ import android.os.Looper;
 import android.text.TextUtils;
 import android.text.format.Formatter;
 import android.view.Gravity;
+import android.view.HapticFeedbackConstants;
+import android.view.MotionEvent;
+import android.view.VelocityTracker;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
+import android.view.WindowManager;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.BaseAdapter;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
-import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -30,7 +42,6 @@ import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -54,26 +65,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Gestor de archivos de dos ventanas, como Total Commander: arriba el PRINCIPAL y abajo el EXTENDIDO
- * (cada ventana se puede cambiar al otro teléfono). Se copian o mueven archivos de una ventana a la otra.
+ * Gestor de archivos a pantalla completa, uno por teléfono, como las dos ventanas de Total Commander:
+ * el principal maneja sus archivos y el extendido los suyos. Lo elegido se copia o mueve a la carpeta que
+ * está abierta en el otro teléfono, con botones flotantes o lanzándolo hacia el otro teléfono.
  */
 public class FilesActivity extends Activity implements Link.Listener {
 
     static class Entry { String name; boolean dir; long size, mtime; }
-
-    private class Panel {
-        boolean principal;            // qué teléfono muestra
-        String path = "", root = "";
-        String error;
-        final List<Entry> entries = new ArrayList<>();
-        final Set<String> sel = new HashSet<>();
-        LinearLayout box;
-        TextView phone, pathText, info;
-        BaseAdapter adapter;
-        boolean remote() { return principal != hub.isPrincipal(); }
-        String name() { return principal ? "PRINCIPAL" : "EXTENDIDO"; }
-    }
-
     private static class Wait { final CountDownLatch l = new CountDownLatch(1); JSONObject r; }
 
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -82,10 +80,20 @@ public class FilesActivity extends Activity implements Link.Listener {
     private final AtomicInteger seq = new AtomicInteger();
     private Hub hub;
     private boolean night, showHidden;
-    private int fg, muted, accent, cardBg;
-    private Panel top, bottom, active;
-    private TextView copyBtn, moveBtn;
+    private int fg, muted, accent;
+    private float dirX, dirY = 1;           // hacia dónde está el otro teléfono
+    private String path = "", root = "", error;
+    private final List<Entry> entries = new ArrayList<>();
+    private final Set<String> sel = new HashSet<>();
+    private BaseAdapter adapter;
+    private ListView list;
+    private TextView phoneChip, pathText, destText, countText;
+    private LinearLayout fab;
+    private TextView copyFab, moveFab, renameFab;
+    private DragLayer dragLayer;
+    private TransferView transfer;
     private volatile boolean cancelled;
+    private long lastAnimSend;
 
     private int dp(float v) { return Math.round(v * getResources().getDisplayMetrics().density); }
 
@@ -93,36 +101,76 @@ public class FilesActivity extends Activity implements Link.Listener {
         night = Ui.night(this);
         setTheme(night ? android.R.style.Theme_Material_NoActionBar : android.R.style.Theme_Material_Light_NoActionBar);
         super.onCreate(b);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         MainActivity.applyOrientation(this);
         hub = Hub.get(this);
         hub.ensureStarted();
         fg = night ? 0xFFE6EDF3 : 0xFF1D2733;
         muted = night ? 0xFF93A4B5 : 0xFF5B6B7A;
         accent = night ? 0xFF5CC3CF : 0xFF1F7F8C;
-        cardBg = night ? 0xFF1E2934 : 0xFFF4F7F9;
 
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(night ? 0xFF121920 : 0xFFCDD5DC);
-        root.setPadding(dp(8), dp(8), dp(8), dp(8));
+        FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(night ? 0xFF121920 : 0xFFE4E9ED);
 
-        top = new Panel(); top.principal = true;
-        bottom = new Panel(); bottom.principal = false;
-        active = top;
-        root.addView(buildPanel(top), new LinearLayout.LayoutParams(-1, 0, 1));
-        root.addView(buildActions(), new LinearLayout.LayoutParams(-1, -2));
-        root.addView(buildPanel(bottom), new LinearLayout.LayoutParams(-1, 0, 1));
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.addView(buildHeader(), new LinearLayout.LayoutParams(-1, -2));
+        destText = new TextView(this);
+        destText.setTextColor(muted);
+        destText.setTextSize(12);
+        destText.setSingleLine(true);
+        destText.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+        destText.setPadding(dp(14), 0, dp(14), dp(4));
+        col.addView(destText);
+
+        list = new ListView(this);
+        list.setDivider(null);
+        list.setFastScrollEnabled(true);
+        list.setClipToPadding(false);
+        list.setPadding(0, 0, 0, dp(90));
+        adapter = buildAdapter();
+        list.setAdapter(adapter);
+        list.setOnItemClickListener((p, v, pos, id) -> {
+            if (error != null) { load(); return; }
+            Entry e = entries.get(pos);
+            if (!sel.isEmpty()) { toggle(e); return; }
+            if (e.dir) { path = child(dir(), e.name); load(); }
+            else view(new File(child(dir(), e.name)));
+        });
+        list.setOnItemLongClickListener((p, v, pos, id) -> {
+            if (error == null) { toggle(entries.get(pos)); v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS); }
+            return true;
+        });
+        dragLayer = new DragLayer();
+        dragLayer.addView(list, new FrameLayout.LayoutParams(-1, -1));
+        col.addView(dragLayer, new LinearLayout.LayoutParams(-1, 0, 1));
+        root.addView(col, new FrameLayout.LayoutParams(-1, -1));
+
+        root.addView(buildFab(), fabParams());
+
+        transfer = new TransferView(this, night);
+        transfer.setListener(() -> { cancelled = true; transfer.update("Cancelando…", -1, ""); });
+        root.addView(transfer, new FrameLayout.LayoutParams(-1, -1));
+
         setContentView(root);
+        updateDirection();
         hub.add(this);
-        refreshActive();
-
-        if (!FileServer.hasAccess(this)) askAccess();
-        else { load(top); load(bottom); }
+        if (!FileServer.hasAccess(this)) askAccess(); else load();
     }
 
     @Override protected void onResume() {
         super.onResume();
-        if (FileServer.hasAccess(this) && (top.error != null || bottom.error != null)) { load(top); load(bottom); }
+        immersive();
+        if (FileServer.hasAccess(this) && error != null) load();
+    }
+
+    @Override public void onWindowFocusChanged(boolean f) { super.onWindowFocusChanged(f); if (f) immersive(); }
+
+    @SuppressWarnings("deprecation")
+    private void immersive() {
+        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
     }
 
     @Override protected void onDestroy() {
@@ -132,6 +180,24 @@ public class FilesActivity extends Activity implements Link.Listener {
         super.onDestroy();
     }
 
+    @Override public void onConfigurationChanged(Configuration c) {
+        super.onConfigurationChanged(c);
+        updateDirection();
+    }
+
+    /** Regla fija: horizontal → principal arriba; vertical → principal a la izquierda. */
+    private void updateDirection() {
+        boolean landscape = getResources().getConfiguration().orientation != Configuration.ORIENTATION_PORTRAIT;
+        boolean p = hub.isPrincipal();
+        if (landscape) { dirX = 0; dirY = p ? 1 : -1; } else { dirX = p ? 1 : -1; dirY = 0; }
+        transfer.setDirection(dirX, dirY);
+        refreshTexts();
+    }
+
+    private String arrow() { return dirY > 0 ? "↓" : dirY < 0 ? "↑" : dirX > 0 ? "→" : "←"; }
+    private String here() { return hub.isPrincipal() ? "principal" : "extendido"; }
+    private String other() { return hub.isPrincipal() ? "extendido" : "principal"; }
+
     private void askAccess() {
         if (Build.VERSION.SDK_INT < 30) {
             requestPermissions(new String[]{android.Manifest.permission.READ_EXTERNAL_STORAGE, android.Manifest.permission.WRITE_EXTERNAL_STORAGE}, 41);
@@ -139,19 +205,16 @@ public class FilesActivity extends Activity implements Link.Listener {
         }
         new Ui.Sheet(this)
                 .title("Acceso a los archivos")
-                .message("Para ver y pasar archivos, Android pide activar \"Permitir acceso a todos los archivos\" para Mesa Doble. "
-                        + "Hazlo también en el otro teléfono (allá aparecerá un aviso la primera vez).")
-                .button("Después", false, null)
+                .message("Para ver y pasar archivos, Android pide activar \"Permitir acceso a todos los archivos\" para Mesa Doble "
+                        + "en los dos teléfonos.")
+                .button("Después", false, this::load)
                 .button("Activar", true, () -> {
                     try { startActivity(FileServer.accessIntent(this)); } catch (Exception e) { Toast.makeText(this, "No pude abrir ese permiso", Toast.LENGTH_SHORT).show(); }
                 })
                 .show();
     }
 
-    @Override public void onRequestPermissionsResult(int req, String[] p, int[] r) {
-        super.onRequestPermissionsResult(req, p, r);
-        load(top); load(bottom);
-    }
+    @Override public void onRequestPermissionsResult(int req, String[] p, int[] r) { super.onRequestPermissionsResult(req, p, r); load(); }
 
     // ---------------- interfaz ----------------
 
@@ -174,40 +237,47 @@ public class FilesActivity extends Activity implements Link.Listener {
         return t;
     }
 
-    private View buildPanel(Panel p) {
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(4), dp(4), dp(4), dp(4));
-        p.box = box;
-
-        LinearLayout head = new LinearLayout(this);
-        head.setGravity(Gravity.CENTER_VERTICAL);
-        p.phone = chip("", v -> { p.principal = !p.principal; p.path = ""; p.sel.clear(); setActive(p); load(p); });
-        p.phone.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
-        head.addView(p.phone, new LinearLayout.LayoutParams(-2, dp(36)));
-        TextView up = chip("↑", v -> { setActive(p); goUp(p); });
-        LinearLayout.LayoutParams ul = new LinearLayout.LayoutParams(dp(44), dp(36));
+    private View buildHeader() {
+        HorizontalScrollView sc = new HorizontalScrollView(this);
+        sc.setHorizontalScrollBarEnabled(false);
+        sc.setFillViewport(true);
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(10), dp(10), dp(10), dp(6));
+        phoneChip = chip("", null);
+        phoneChip.setTypeface(Typeface.DEFAULT_BOLD);
+        phoneChip.setTextColor(night ? 0xFF18212B : 0xFFFFFFFF);
+        phoneChip.setBackground(round(accent, 12));
+        row.addView(phoneChip, new LinearLayout.LayoutParams(-2, dp(38)));
+        TextView up = chip("↑", v -> goUp());
+        LinearLayout.LayoutParams ul = new LinearLayout.LayoutParams(dp(46), dp(38));
         ul.setMarginStart(dp(6));
-        head.addView(up, ul);
-        p.pathText = new TextView(this);
-        p.pathText.setTextColor(fg);
-        p.pathText.setTextSize(13);
-        p.pathText.setSingleLine(true);
-        p.pathText.setEllipsize(TextUtils.TruncateAt.START);
-        p.pathText.setPadding(dp(10), 0, dp(6), 0);
-        head.addView(p.pathText, new LinearLayout.LayoutParams(0, -2, 1));
-        p.info = new TextView(this);
-        p.info.setTextColor(muted);
-        p.info.setTextSize(12);
-        p.info.setPadding(0, 0, dp(6), 0);
-        head.addView(p.info);
-        box.addView(head, new LinearLayout.LayoutParams(-1, -2));
+        row.addView(up, ul);
+        pathText = new TextView(this);
+        pathText.setTextColor(fg);
+        pathText.setTextSize(14);
+        pathText.setSingleLine(true);
+        pathText.setEllipsize(TextUtils.TruncateAt.START);
+        pathText.setPadding(dp(10), 0, dp(8), 0);
+        row.addView(pathText, new LinearLayout.LayoutParams(0, -2, 1));
+        countText = new TextView(this);
+        countText.setTextColor(muted);
+        countText.setTextSize(12);
+        countText.setPadding(0, 0, dp(8), 0);
+        row.addView(countText);
+        for (TextView t : new TextView[]{chip("+ Carpeta", v -> newFolder()), chip("Ocultos", v -> { showHidden = !showHidden; load(); }),
+                chip("Cerrar", v -> { if (hub.connected()) hub.send("fmClose"); finish(); })}) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, dp(38));
+            lp.setMarginStart(dp(6));
+            row.addView(t, lp);
+        }
+        sc.addView(row, new FrameLayout.LayoutParams(-1, -2));
+        return sc;
+    }
 
-        ListView list = new ListView(this);
-        list.setDivider(null);
-        list.setFastScrollEnabled(true);
-        p.adapter = new BaseAdapter() {
-            @Override public int getCount() { return p.error != null ? 1 : p.entries.size(); }
+    private BaseAdapter buildAdapter() {
+        return new BaseAdapter() {
+            @Override public int getCount() { return error != null ? 1 : entries.size(); }
             @Override public Object getItem(int i) { return i; }
             @Override public long getItemId(int i) { return i; }
             @Override public View getView(int i, View v, ViewGroup parent) {
@@ -215,56 +285,43 @@ public class FilesActivity extends Activity implements Link.Listener {
                 if (row == null) {
                     row = new LinearLayout(FilesActivity.this);
                     row.setGravity(Gravity.CENTER_VERTICAL);
-                    row.setPadding(dp(8), dp(7), dp(8), dp(7));
+                    row.setPadding(dp(14), dp(8), dp(14), dp(8));
                     TextView ic = new TextView(FilesActivity.this);
-                    ic.setTextSize(20);
+                    ic.setTextSize(24);
                     ic.setGravity(Gravity.CENTER);
-                    row.addView(ic, new LinearLayout.LayoutParams(dp(36), -2));
-                    LinearLayout col = new LinearLayout(FilesActivity.this);
-                    col.setOrientation(LinearLayout.VERTICAL);
-                    col.setPadding(dp(8), 0, 0, 0);
-                    TextView t1 = new TextView(FilesActivity.this); t1.setTextSize(15); t1.setSingleLine(true); t1.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+                    row.addView(ic, new LinearLayout.LayoutParams(dp(42), -2));
+                    LinearLayout c = new LinearLayout(FilesActivity.this);
+                    c.setOrientation(LinearLayout.VERTICAL);
+                    c.setPadding(dp(10), 0, 0, 0);
+                    TextView t1 = new TextView(FilesActivity.this); t1.setTextSize(16); t1.setSingleLine(true); t1.setEllipsize(TextUtils.TruncateAt.MIDDLE);
                     TextView t2 = new TextView(FilesActivity.this); t2.setTextSize(12);
-                    col.addView(t1); col.addView(t2);
-                    row.addView(col, new LinearLayout.LayoutParams(0, -2, 1));
+                    c.addView(t1); c.addView(t2);
+                    row.addView(c, new LinearLayout.LayoutParams(0, -2, 1));
+                    TextView check = new TextView(FilesActivity.this);
+                    check.setTextSize(18);
+                    row.addView(check);
                 }
                 TextView ic = (TextView) row.getChildAt(0);
-                LinearLayout col = (LinearLayout) row.getChildAt(1);
-                TextView t1 = (TextView) col.getChildAt(0), t2 = (TextView) col.getChildAt(1);
-                t1.setTextColor(fg); t2.setTextColor(muted);
-                if (p.error != null) {
-                    ic.setText("⚠"); t1.setText(p.error); t1.setSingleLine(false); t2.setText("Toca para reintentar");
+                LinearLayout c = (LinearLayout) row.getChildAt(1);
+                TextView t1 = (TextView) c.getChildAt(0), t2 = (TextView) c.getChildAt(1), check = (TextView) row.getChildAt(2);
+                t1.setTextColor(fg); t2.setTextColor(muted); check.setTextColor(accent);
+                if (error != null) {
+                    ic.setText("⚠"); t1.setSingleLine(false); t1.setText(error); t2.setText("Toca para reintentar"); check.setText("");
                     row.setBackground(null);
                     return row;
                 }
                 t1.setSingleLine(true);
-                Entry e = p.entries.get(i);
+                Entry e = entries.get(i);
                 ic.setText(e.dir ? "📁" : icon(e.name));
                 t1.setText(e.name);
                 String date = e.mtime > 0 ? DateFormat.getDateInstance(DateFormat.MEDIUM).format(new Date(e.mtime)) : "";
                 t2.setText(e.dir ? date : Formatter.formatShortFileSize(FilesActivity.this, e.size) + " · " + date);
-                boolean s = p.sel.contains(e.name);
-                row.setBackground(s ? round((accent & 0x00FFFFFF) | 0x40000000, 10) : null);
+                boolean s = sel.contains(e.name);
+                check.setText(s ? "✓" : "");
+                row.setBackground(s ? round((accent & 0x00FFFFFF) | 0x3A000000, 12) : null);
                 return row;
             }
         };
-        list.setAdapter(p.adapter);
-        list.setOnItemClickListener((parent, view, pos, id) -> {
-            setActive(p);
-            if (p.error != null) { load(p); return; }
-            Entry e = p.entries.get(pos);
-            if (!p.sel.isEmpty()) { toggle(p, e); return; }
-            if (e.dir) { p.path = child(p.path.isEmpty() ? p.root : p.path, e.name); p.sel.clear(); load(p); }
-            else openFile(p, e);
-        });
-        list.setOnItemLongClickListener((parent, view, pos, id) -> {
-            setActive(p);
-            if (p.error == null) toggle(p, p.entries.get(pos));
-            return true;
-        });
-        list.setOnTouchListener((v, ev) -> { if (active != p) setActive(p); return false; });
-        box.addView(list, new LinearLayout.LayoutParams(-1, 0, 1));
-        return box;
     }
 
     private static String icon(String n) {
@@ -278,139 +335,167 @@ public class FilesActivity extends Activity implements Link.Listener {
         return "📄";
     }
 
-    private View buildActions() {
-        HorizontalScrollView sc = new HorizontalScrollView(this);
-        sc.setHorizontalScrollBarEnabled(false);
-        LinearLayout row = new LinearLayout(this);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(4), dp(6), dp(4), dp(6));
-        copyBtn = chip("Copiar ↓", v -> transfer(false));
-        moveBtn = chip("Mover ↓", v -> transfer(true));
-        copyBtn.setTextColor(night ? 0xFF18212B : 0xFFFFFFFF);
-        copyBtn.setBackground(round(accent, 12));
-        View[] all = {copyBtn, moveBtn, chip("Borrar", v -> deleteSel()), chip("Renombrar", v -> renameSel()),
-                chip("Nueva carpeta", v -> newFolder()), chip("Todo", v -> selectAll()),
-                chip("Ocultos", v -> { showHidden = !showHidden; load(top); load(bottom); }),
-                chip("Cerrar", v -> finish())};
-        for (View v : all) {
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, dp(40));
-            lp.setMarginEnd(dp(6));
-            row.addView(v, lp);
+    /** Botones flotantes: aparecen al elegir uno o más archivos. */
+    private View buildFab() {
+        fab = new LinearLayout(this);
+        fab.setGravity(Gravity.CENTER_VERTICAL);
+        fab.setPadding(dp(8), dp(8), dp(8), dp(8));
+        fab.setBackground(round(night ? 0xF2223040 : 0xF7FFFFFF, 26));
+        fab.setElevation(dp(10));
+        copyFab = chip("", v -> startTransfer(false));
+        moveFab = chip("", v -> startTransfer(true));
+        copyFab.setTextColor(night ? 0xFF18212B : 0xFFFFFFFF);
+        copyFab.setBackground(round(accent, 18));
+        moveFab.setBackground(round((accent & 0x00FFFFFF) | 0x33000000, 18));
+        moveFab.setTextColor(accent);
+        TextView del = chip("Eliminar", v -> deleteSel());
+        del.setTextColor(night ? 0xFFF0A26B : 0xFFB4541A);
+        del.setBackground(round(night ? 0x33F0A26B : 0x22B4541A, 18));
+        renameFab = chip("Renombrar", v -> renameSel());
+        TextView clear = chip("✕", v -> { sel.clear(); adapter.notifyDataSetChanged(); refreshTexts(); });
+        for (TextView t : new TextView[]{copyFab, moveFab, del, renameFab, clear}) {
+            t.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, dp(46));
+            lp.setMarginStart(dp(4)); lp.setMarginEnd(dp(4));
+            fab.addView(t, lp);
         }
-        sc.addView(row);
-        return sc;
+        fab.setVisibility(View.GONE);
+        return fab;
     }
 
-    private void setActive(Panel p) { active = p; refreshActive(); }
+    private FrameLayout.LayoutParams fabParams() {
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        lp.bottomMargin = dp(18);
+        return lp;
+    }
 
-    private void refreshActive() {
-        for (Panel p : new Panel[]{top, bottom}) {
-            GradientDrawable g = round(cardBg, 16);
-            if (p == active) g.setStroke(dp(2), accent);
-            p.box.setBackground(g);
-            boolean here = !p.remote();
-            p.phone.setText(p.name() + (here ? " · este" : "") + "  ⇅");
-            p.phone.setTextColor(p.principal ? accent : fg);
+    private void showFab(boolean show) {
+        if (show == (fab.getVisibility() == View.VISIBLE)) return;
+        if (show) {
+            fab.setVisibility(View.VISIBLE);
+            fab.setAlpha(0); fab.setTranslationY(dp(30));
+            fab.animate().alpha(1).translationY(0).setDuration(180).setInterpolator(new DecelerateInterpolator()).setListener(null).start();
+        } else {
+            fab.animate().alpha(0).translationY(dp(30)).setDuration(150).withEndAction(() -> fab.setVisibility(View.GONE)).start();
         }
-        String arrow = active == top ? "↓" : "↑";
-        copyBtn.setText("Copiar " + arrow);
-        moveBtn.setText("Mover " + arrow);
     }
 
-    private void toggle(Panel p, Entry e) {
-        if (!p.sel.remove(e.name)) p.sel.add(e.name);
-        p.adapter.notifyDataSetChanged();
-        updateInfo(p);
+    private void refreshTexts() {
+        if (phoneChip == null) return;
+        phoneChip.setText(here().toUpperCase(Locale.ROOT));
+        String shown = dir();
+        if (!root.isEmpty() && shown.startsWith(root)) shown = "Almacenamiento" + shown.substring(root.length());
+        pathText.setText(shown);
+        countText.setText(error != null ? "" : sel.isEmpty() ? entries.size() + "" : sel.size() + " elegidos");
+        String rd = FileServer.remoteDir;
+        String rn = rd == null || rd.isEmpty() ? "Almacenamiento" : nameOf(rd);
+        destText.setText(hub.connected()
+                ? "Destino: " + other() + " " + arrow() + " " + rn + "  ·  mantén presionado para elegir; arrastra o lanza hacia el " + other() + " para mover"
+                : "El " + other() + " no está conectado");
+        copyFab.setText("Copiar " + arrow());
+        moveFab.setText("Mover " + arrow());
+        renameFab.setVisibility(sel.size() == 1 ? View.VISIBLE : View.GONE);
+        showFab(!sel.isEmpty());
     }
 
-    private void selectAll() {
-        Panel p = active;
-        if (p.sel.size() == p.entries.size()) p.sel.clear();
-        else for (Entry e : p.entries) p.sel.add(e.name);
-        p.adapter.notifyDataSetChanged();
-        updateInfo(p);
-    }
-
-    private void updateInfo(Panel p) {
-        p.info.setText(!p.sel.isEmpty() ? p.sel.size() + " elegidos" : p.error == null ? p.entries.size() + "" : "");
-        String shown = p.path.isEmpty() ? p.root : p.path;
-        if (!p.root.isEmpty() && shown.startsWith(p.root)) shown = "Almacenamiento" + shown.substring(p.root.length());
-        p.pathText.setText(shown);
+    private void toggle(Entry e) {
+        if (!sel.remove(e.name)) sel.add(e.name);
+        adapter.notifyDataSetChanged();
+        refreshTexts();
     }
 
     private static String child(String dir, String name) { return dir.endsWith("/") ? dir + name : dir + "/" + name; }
-    private static String nameOf(String path) { int i = path.lastIndexOf('/'); return i >= 0 ? path.substring(i + 1) : path; }
-    private String dirOf(Panel p) { return p.path.isEmpty() ? p.root : p.path; }
+    private static String nameOf(String p) { int i = p.lastIndexOf('/'); return i >= 0 ? p.substring(i + 1) : p; }
+    private String dir() { return path.isEmpty() ? root : path; }
 
-    private void goUp(Panel p) {
-        String cur = dirOf(p);
-        if (cur.isEmpty() || cur.equals(p.root)) return;
+    private void goUp() {
+        String cur = dir();
+        if (cur.isEmpty() || cur.equals(root)) return;
         int i = cur.lastIndexOf('/');
-        p.path = i > 0 ? cur.substring(0, i) : p.root;
-        p.sel.clear();
-        load(p);
+        path = i > 0 ? cur.substring(0, i) : root;
+        load();
     }
 
-    // ---------------- cargar listas ----------------
+    // ---------------- lista ----------------
 
-    private void load(Panel p) {
-        final boolean remote = p.remote();
-        final String path = p.path;
-        p.info.setText("…");
+    private void load() {
+        final String p = path;
         work.execute(() -> {
             List<Entry> out = new ArrayList<>();
-            String err = null, resolved = path, root = "";
+            String err = null, resolved = p, rt = "";
             try {
-                JSONArray arr;
-                if (!remote) {
-                    if (!FileServer.hasAccess(this)) throw new IOException("Falta el permiso de archivos en este teléfono");
-                    File d = FileServer.resolve(path);
-                    resolved = d.getAbsolutePath();
-                    root = FileServer.root().getAbsolutePath();
-                    arr = FileServer.list(d);
-                } else {
-                    JSONObject r = request("fsList", "path", path);
-                    if (r.has("err")) throw new IOException(r.optString("err"));
-                    resolved = r.optString("path");
-                    root = r.optString("root");
-                    arr = r.optJSONArray("entries");
-                }
-                for (int i = 0; arr != null && i < arr.length(); i++) {
-                    JSONObject o = arr.getJSONObject(i);
+                if (!FileServer.hasAccess(this)) throw new IOException("Falta el permiso de archivos en este teléfono. Toca para reintentar después de activarlo.");
+                File d = FileServer.resolve(p);
+                resolved = d.getAbsolutePath();
+                rt = FileServer.root().getAbsolutePath();
+                File[] fs = d.listFiles();
+                if (fs == null) throw new IOException("No se puede abrir esta carpeta");
+                for (File f : fs) {
+                    if (!showHidden && f.getName().startsWith(".")) continue;
                     Entry e = new Entry();
-                    e.name = o.optString("n"); e.dir = o.optBoolean("d"); e.size = o.optLong("s"); e.mtime = o.optLong("m");
-                    if (!showHidden && e.name.startsWith(".")) continue;
+                    e.name = f.getName(); e.dir = f.isDirectory(); e.size = e.dir ? 0 : f.length(); e.mtime = f.lastModified();
                     out.add(e);
                 }
                 Collator col = Collator.getInstance(new Locale("es"));
                 col.setStrength(Collator.PRIMARY);
                 Collections.sort(out, (a, b) -> a.dir != b.dir ? (a.dir ? -1 : 1) : col.compare(a.name, b.name));
-            } catch (Exception e) {
-                err = e.getMessage() != null ? e.getMessage() : "No pude leer la carpeta";
-            }
-            final String fe = err, fr = resolved, fro = root;
+            } catch (Exception e) { err = e.getMessage() != null ? e.getMessage() : "No pude leer la carpeta"; }
+            final String fe = err, fr = resolved, frt = rt;
             main.post(() -> {
-                if (remote != p.remote()) return;   // se cambió de teléfono mientras cargaba
-                p.error = fe;
-                p.entries.clear();
-                if (fe == null) { p.entries.addAll(out); p.path = fr; p.root = fro; }
-                p.sel.retainAll(names(p));
-                p.adapter.notifyDataSetChanged();
-                updateInfo(p);
+                error = fe;
+                entries.clear();
+                if (fe == null) { entries.addAll(out); path = fr; root = frt; }
+                Set<String> names = new HashSet<>();
+                for (Entry e : entries) names.add(e.name);
+                sel.retainAll(names);
+                adapter.notifyDataSetChanged();
+                refreshTexts();
+                if (fe == null && hub.connected()) hub.send("fmPath", "path", path);   // el otro teléfono sabe dónde dejar lo que mande
             });
         });
     }
 
-    private Set<String> names(Panel p) {
-        Set<String> s = new HashSet<>();
-        for (Entry e : p.entries) s.add(e.name);
-        return s;
+    private List<Entry> selected() {
+        List<Entry> l = new ArrayList<>();
+        for (Entry e : entries) if (sel.contains(e.name)) l.add(e);
+        return l;
     }
 
-    // ---------------- pedidos al otro teléfono ----------------
+    // ---------------- mensajes ----------------
+
+    @Override public void onState(int state, String info) {
+        main.post(() -> {
+            refreshTexts();
+            if (state == Link.CONNECTED && error == null) hub.send("fmPath", "path", path);
+        });
+    }
+
+    @Override public void onMessage(JSONObject m) {
+        String t = m.optString("t");
+        switch (t) {
+            case "fsListR": case "fsOpR": {
+                Wait w = waits.get(m.optInt("req"));
+                if (w != null) { w.r = m; w.l.countDown(); }
+                break;
+            }
+            case "fmPath": main.post(this::refreshTexts); break;
+            case "fmReload": main.post(this::load); break;
+            case "fmClose": main.post(this::finish); break;
+            case "fmAnim":   // el otro teléfono está mandando archivos hacia acá
+                main.post(() -> {
+                    String s = m.optString("s");
+                    if ("begin".equals(s)) transfer.begin(false, m.optString("title"), dirX, dirY, false);
+                    else if ("prog".equals(s)) transfer.update(m.optString("name"), (float) m.optDouble("p", -1), m.optString("d"));
+                    else if ("end".equals(s)) { transfer.end(); load(); }
+                });
+                break;
+        }
+    }
+
+    // ---------------- envío al otro teléfono ----------------
 
     private JSONObject request(String t, Object... kv) throws IOException {
-        if (!hub.connected()) throw new IOException("El otro teléfono no está conectado");
+        if (!hub.connected()) throw new IOException("El " + other() + " no está conectado");
         int id = seq.incrementAndGet();
         JSONObject m = new JSONObject();
         try {
@@ -421,229 +506,121 @@ public class FilesActivity extends Activity implements Link.Listener {
         waits.put(id, w);
         hub.send(m);
         try {
-            if (!w.l.await(25, TimeUnit.SECONDS)) throw new IOException("El otro teléfono no responde");
+            if (!w.l.await(25, TimeUnit.SECONDS)) throw new IOException("El " + other() + " no responde");
         } catch (InterruptedException e) { throw new IOException("Cancelado"); }
         finally { waits.remove(id); }
         if ("permiso".equals(w.r.optString("err")))
-            throw new IOException("Falta el permiso de archivos en el otro teléfono: toca el aviso que apareció allá");
+            throw new IOException("Falta el permiso de archivos en el " + other() + ": toca el aviso que apareció allá");
+        if (!w.r.optBoolean("ok")) throw new IOException(w.r.optString("err", "No se pudo"));
         return w.r;
     }
 
-    private JSONObject remoteOp(String op, Object... kv) throws IOException {
-        Object[] all = new Object[kv.length + 2];
-        all[0] = "op"; all[1] = op;
-        System.arraycopy(kv, 0, all, 2, kv.length);
-        JSONObject r = request("fsOp", all);
-        if (!r.optBoolean("ok")) throw new IOException(r.optString("err", "No se pudo"));
-        return r;
-    }
-
-    @Override public void onState(int state, String info) {
-        if (state == Link.CONNECTED) main.postDelayed(() -> {
-            if (top.remote()) load(top);
-            if (bottom.remote()) load(bottom);
-        }, 800);
-    }
-
-    @Override public void onMessage(JSONObject m) {
-        String t = m.optString("t");
-        if ("fsListR".equals(t) || "fsOpR".equals(t)) {
-            Wait w = waits.get(m.optInt("req"));
-            if (w != null) { w.r = m; w.l.countDown(); }
-        }
-    }
-
-    // ---------------- canal de contenido ----------------
-
-    private Socket dataSocket() throws IOException {
+    private void upload(File src, String remoteDir, FileServer.Progress pr) throws IOException {
         FileServer fs = FileServer.get(this);
         String ip = hub.link.peerIp();
         if (ip == null || fs.remoteToken == null) throw new IOException("Reconecta los teléfonos para pasar archivos");
-        Socket s = new Socket();
-        s.connect(new InetSocketAddress(ip, fs.remotePort), 6000);
-        s.setSoTimeout(60000);
-        return s;
-    }
-
-    private void download(String remotePath, File dst, FileServer.Progress pr) throws IOException {
-        try (Socket s = dataSocket()) {
-            InputStream in = new BufferedInputStream(s.getInputStream());
-            OutputStream out = new BufferedOutputStream(s.getOutputStream());
-            JSONObject h = new JSONObject();
-            try { h.put("k", FileServer.get(this).remoteToken); h.put("op", "get"); h.put("path", remotePath); } catch (JSONException ignored) { }
-            FileServer.writeLine(out, h);
-            JSONObject r = new JSONObject(FileServer.readLine(in));
-            if (!r.optBoolean("ok")) throw new IOException("permiso".equals(r.optString("err"))
-                    ? "Falta el permiso de archivos en el otro teléfono" : r.optString("err", "No se pudo leer"));
-            File part = new File(dst.getParentFile(), "." + dst.getName() + ".parte");
-            boolean ok = false;
-            try (OutputStream fo = new FileOutputStream(part)) { FileServer.pipe(in, fo, r.optLong("size"), pr); ok = true; }
-            finally { if (!ok) //noinspection ResultOfMethodCallIgnored
-                part.delete(); }
-            if (!part.renameTo(dst)) throw new IOException("No pude guardar " + dst.getName());
-            if (r.has("m")) //noinspection ResultOfMethodCallIgnored
-                dst.setLastModified(r.optLong("m"));
-        } catch (JSONException e) { throw new IOException("Respuesta inválida"); }
-    }
-
-    private void upload(File src, String remoteDir, FileServer.Progress pr) throws IOException {
-        try (Socket s = dataSocket()) {
+        try (Socket s = new Socket()) {
+            s.connect(new InetSocketAddress(ip, fs.remotePort), 6000);
+            s.setSoTimeout(60000);
             InputStream in = new BufferedInputStream(s.getInputStream());
             OutputStream out = new BufferedOutputStream(s.getOutputStream());
             JSONObject h = new JSONObject();
             try {
-                h.put("k", FileServer.get(this).remoteToken); h.put("op", "put"); h.put("path", remoteDir);
+                h.put("k", fs.remoteToken); h.put("op", "put"); h.put("path", remoteDir);
                 h.put("name", src.getName()); h.put("size", src.length()); h.put("m", src.lastModified());
             } catch (JSONException ignored) { }
             FileServer.writeLine(out, h);
             try (InputStream fi = new FileInputStream(src)) { FileServer.pipe(fi, out, src.length(), pr); }
             JSONObject r = new JSONObject(FileServer.readLine(in));
-            if (!r.optBoolean("ok")) throw new IOException(r.optString("err", "No se pudo guardar"));
+            if (!r.optBoolean("ok")) throw new IOException("permiso".equals(r.optString("err"))
+                    ? "Falta el permiso de archivos en el " + other() : r.optString("err", "No se pudo guardar"));
         } catch (JSONException e) { throw new IOException("Respuesta inválida"); }
     }
 
-    // ---------------- progreso ----------------
+    private int done, total;
 
-    private Dialog progressDlg;
-    private TextView progressText;
-    private ProgressBar progressBar;
-
-    private void showProgress(String title) {
+    private void startTransfer(boolean move) {
+        List<Entry> items = selected();
+        if (items.isEmpty()) return;
+        if (!hub.connected()) { Toast.makeText(this, "El " + other() + " no está conectado", Toast.LENGTH_SHORT).show(); return; }
+        if (transfer.isActive()) return;
         cancelled = false;
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        progressText = new TextView(this);
-        progressText.setTextColor(fg);
-        progressText.setTextSize(14);
-        progressText.setSingleLine(true);
-        progressText.setEllipsize(TextUtils.TruncateAt.MIDDLE);
-        box.addView(progressText);
-        progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
-        progressBar.setMax(1000);
-        box.addView(progressBar, new LinearLayout.LayoutParams(-1, dp(24)));
-        progressDlg = new Ui.Sheet(this).title(title).view(box).cancelable(false)
-                .button("Cancelar", false, () -> cancelled = true).show();
-    }
-
-    private void progress(String text, long done, long total) {
-        main.post(() -> {
-            if (progressText == null) return;
-            progressText.setText(text);
-            progressBar.setIndeterminate(total <= 0);
-            if (total > 0) progressBar.setProgress((int) (done * 1000 / total));
-        });
-    }
-
-    private void endProgress(String msg) {
-        main.post(() -> {
-            if (progressDlg != null) try { progressDlg.dismiss(); } catch (Exception ignored) { }
-            progressDlg = null; progressText = null;
-            if (msg != null) Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
-            top.sel.clear(); bottom.sel.clear();
-            load(top); load(bottom);
-        });
-    }
-
-    private FileServer.Progress counter(String name, long size) {
-        final long[] done = {0};
-        final long[] last = {0};
-        return n -> {
-            done[0] += n;
-            long now = System.currentTimeMillis();
-            if (now - last[0] > 120 || done[0] >= size) { last[0] = now; progress(name, done[0], size); }
-            return !cancelled;
-        };
-    }
-
-    // ---------------- operaciones ----------------
-
-    private List<Entry> selected(Panel p) {
-        List<Entry> l = new ArrayList<>();
-        for (Entry e : p.entries) if (p.sel.contains(e.name)) l.add(e);
-        return l;
-    }
-
-    private void transfer(boolean move) {
-        Panel from = active, to = active == top ? bottom : top;
-        List<Entry> items = selected(from);
-        if (items.isEmpty()) { Toast.makeText(this, "Mantén presionado un archivo o carpeta para elegirlo", Toast.LENGTH_SHORT).show(); return; }
-        if (to.error != null) { Toast.makeText(this, "La otra ventana no está lista", Toast.LENGTH_SHORT).show(); return; }
-        final boolean fr = from.remote(), tr = to.remote();
-        final String srcDir = dirOf(from), dstDir = dirOf(to);
-        if (fr == tr && srcDir.equals(dstDir) && move) { Toast.makeText(this, "Es la misma carpeta", Toast.LENGTH_SHORT).show(); return; }
-        showProgress((move ? "Moviendo " : "Copiando ") + items.size() + (items.size() == 1 ? " elemento" : " elementos")
-                + " al " + to.name().toLowerCase(Locale.ROOT));
+        done = 0; total = items.size();
+        final String srcDir = dir(), dst = FileServer.remoteDir == null ? "" : FileServer.remoteDir;
+        String head = (move ? "Moviendo " : "Copiando ") + (total == 1 ? items.get(0).name : total + " elementos") + " al " + other();
+        transfer.begin(true, head, dirX, dirY, true);
+        hub.send("fmAnim", "s", "begin", "title", "Recibiendo " + (total == 1 ? items.get(0).name : total + " elementos") + " del " + here());
+        showFab(false);
         work.execute(() -> {
             String err = null;
-            int n = 0;
             for (Entry e : items) {
                 if (cancelled) break;
-                try {
-                    copyEntry(fr, child(srcDir, e.name), e.dir, e.size, tr, dstDir, move);
-                    n++;
-                } catch (Exception ex) { err = e.name + ": " + ex.getMessage(); if (cancelled) break; }
+                try { send(child(srcDir, e.name), e.dir, e.size, dst, move); done++; }
+                catch (Exception ex) { if (!cancelled) err = e.name + ": " + ex.getMessage(); }
             }
-            endProgress(cancelled ? "Cancelado" : err != null ? err : (n == 1 ? "Listo" : "Listo: " + n + " elementos"));
+            final String fe = cancelled ? "Cancelado" : err;
+            final int n = done;
+            main.post(() -> {
+                transfer.end();
+                hub.send("fmAnim", "s", "end");
+                sel.clear();
+                load();
+                Toast.makeText(this, fe != null ? fe : (move ? "Movido" : "Copiado") + (n == 1 ? "" : ": " + n + " elementos") + " al " + other(),
+                        Toast.LENGTH_LONG).show();
+            });
         });
     }
 
-    private void copyEntry(boolean srcRemote, String srcPath, boolean dir, long size, boolean dstRemote, String dstDir, boolean move) throws IOException {
-        if (cancelled) throw new IOException("Cancelado");
-        String name = nameOf(srcPath);
-        progress(name, 0, dir ? 0 : size);
-        if (!srcRemote && !dstRemote) { FileServer.copy(new File(srcPath), new File(dstDir), move); return; }
-        if (srcRemote && dstRemote) { remoteOp(move ? "move" : "copy", "path", srcPath, "to", dstDir); return; }
-        if (!srcRemote) {   // de este teléfono al otro
-            File f = new File(srcPath);
-            if (dir) {
-                String nd = remoteOp("mkdir", "path", dstDir, "name", name, "unique", true).optString("path");
-                File[] cs = f.listFiles();
-                if (cs != null) for (File c : cs) copyEntry(false, c.getAbsolutePath(), c.isDirectory(), c.length(), true, nd, false);
-            } else {
-                upload(f, dstDir, counter(name, size));
-            }
-            if (move) FileServer.delete(f);
-        } else {            // del otro teléfono a este
-            if (dir) {
-                File nd = FileServer.unique(new File(dstDir), name);
-                if (!nd.mkdirs()) throw new IOException("No pude crear " + nd.getName());
-                JSONObject r = request("fsList", "path", srcPath);
-                if (r.has("err")) throw new IOException(r.optString("err"));
-                JSONArray arr = r.optJSONArray("entries");
-                for (int i = 0; arr != null && i < arr.length(); i++) {
-                    JSONObject o = arr.optJSONObject(i);
-                    copyEntry(true, child(srcPath, o.optString("n")), o.optBoolean("d"), o.optLong("s"), false, nd.getAbsolutePath(), false);
-                }
-            } else {
-                download(srcPath, FileServer.unique(new File(dstDir), name), counter(name, size));
-            }
-            if (move) remoteOp("delete", "path", srcPath);
+    private void progress(String name, long bytes, long size) {
+        float p = size > 0 ? bytes / (float) size : -1;
+        String d = (p >= 0 ? Math.round(p * 100) + "% · " : "") + Math.min(done + 1, total) + " de " + total;
+        main.post(() -> transfer.update(name, p, d));
+        long now = System.currentTimeMillis();
+        if (now - lastAnimSend > 200 || (size > 0 && bytes >= size)) {
+            lastAnimSend = now;
+            hub.send("fmAnim", "s", "prog", "name", name, "p", (double) p, "d", d);
         }
     }
 
+    /** Pasa un archivo o carpeta de este teléfono a la carpeta abierta en el otro. */
+    private void send(String srcPath, boolean isDir, long size, String dstDir, boolean move) throws IOException {
+        if (cancelled) throw new IOException("Cancelado");
+        File f = new File(srcPath);
+        String name = f.getName();
+        progress(name, 0, isDir ? 0 : size);
+        if (isDir) {
+            String nd = request("fsOp", "op", "mkdir", "path", dstDir, "name", name, "unique", true).optString("path");
+            File[] cs = f.listFiles();
+            if (cs != null) for (File c : cs) send(c.getAbsolutePath(), c.isDirectory(), c.length(), nd, false);
+        } else {
+            final long[] sent = {0};
+            final long[] last = {0};
+            upload(f, dstDir, n -> {
+                sent[0] += n;
+                long now = System.currentTimeMillis();
+                if (now - last[0] > 100 || sent[0] >= size) { last[0] = now; progress(name, sent[0], size); }
+                return !cancelled;
+            });
+        }
+        if (move) FileServer.delete(f);
+    }
+
+    // ---------------- operaciones locales ----------------
+
     private void deleteSel() {
-        Panel p = active;
-        List<Entry> items = selected(p);
-        if (items.isEmpty()) { Toast.makeText(this, "Mantén presionado para elegir qué borrar", Toast.LENGTH_SHORT).show(); return; }
+        List<Entry> items = selected();
+        if (items.isEmpty()) return;
         new Ui.Sheet(this)
-                .title("Borrar " + (items.size() == 1 ? "\"" + items.get(0).name + "\"" : items.size() + " elementos"))
-                .message("Se borran del " + p.name().toLowerCase(Locale.ROOT) + ". No se puede deshacer.")
+                .title("Eliminar " + (items.size() == 1 ? "\"" + items.get(0).name + "\"" : items.size() + " elementos"))
+                .message("Se borran del " + here() + ". No se puede deshacer.")
                 .button("Cancelar", false, null)
-                .button("Borrar", true, () -> {
-                    final boolean remote = p.remote();
-                    final String dir = dirOf(p);
-                    showProgress("Borrando");
+                .button("Eliminar", true, () -> {
+                    final String d = dir();
                     work.execute(() -> {
                         String err = null;
-                        for (Entry e : items) {
-                            if (cancelled) break;
-                            progress(e.name, 0, 0);
-                            try {
-                                if (remote) remoteOp("delete", "path", child(dir, e.name));
-                                else if (!FileServer.delete(new File(child(dir, e.name)))) throw new IOException("No se pudo borrar");
-                            } catch (IOException ex) { err = e.name + ": " + ex.getMessage(); }
-                        }
-                        endProgress(err);
+                        for (Entry e : items) if (!FileServer.delete(new File(child(d, e.name)))) err = "No pude borrar " + e.name;
+                        final String fe = err;
+                        main.post(() -> { if (fe != null) Toast.makeText(this, fe, Toast.LENGTH_LONG).show(); sel.clear(); load(); });
                     });
                 })
                 .show();
@@ -662,9 +639,8 @@ public class FilesActivity extends Activity implements Link.Listener {
     }
 
     private void renameSel() {
-        Panel p = active;
-        List<Entry> items = selected(p);
-        if (items.size() != 1) { Toast.makeText(this, "Elige un solo elemento para cambiarle el nombre", Toast.LENGTH_SHORT).show(); return; }
+        List<Entry> items = selected();
+        if (items.size() != 1) return;
         Entry e = items.get(0);
         EditText f = field(e.name);
         new Ui.Sheet(this).title("Cambiar nombre").view(f)
@@ -672,72 +648,28 @@ public class FilesActivity extends Activity implements Link.Listener {
                 .button("Guardar", true, () -> {
                     String nn = f.getText().toString().trim();
                     if (nn.isEmpty() || nn.contains("/") || nn.equals(e.name)) return;
-                    simpleOp(p, () -> {
-                        String path = child(dirOf(p), e.name);
-                        if (p.remote()) remoteOp("rename", "path", path, "name", nn);
-                        else {
-                            File to = new File(dirOf(p), nn);
-                            if (to.exists()) throw new IOException("Ya existe " + nn);
-                            if (!new File(path).renameTo(to)) throw new IOException("No pude cambiar el nombre");
-                        }
-                    });
+                    File to = new File(dir(), nn);
+                    if (to.exists()) { Toast.makeText(this, "Ya existe " + nn, Toast.LENGTH_SHORT).show(); return; }
+                    if (!new File(child(dir(), e.name)).renameTo(to)) Toast.makeText(this, "No pude cambiar el nombre", Toast.LENGTH_SHORT).show();
+                    sel.clear();
+                    load();
                 })
                 .show();
     }
 
     private void newFolder() {
-        Panel p = active;
         EditText f = field("");
         f.setHint("Nombre de la carpeta");
-        new Ui.Sheet(this).title("Nueva carpeta en el " + p.name().toLowerCase(Locale.ROOT)).view(f)
+        new Ui.Sheet(this).title("Nueva carpeta").view(f)
                 .button("Cancelar", false, null)
                 .button("Crear", true, () -> {
                     String nn = f.getText().toString().trim();
                     if (nn.isEmpty() || nn.contains("/")) return;
-                    simpleOp(p, () -> {
-                        if (p.remote()) remoteOp("mkdir", "path", dirOf(p), "name", nn);
-                        else { File d = new File(dirOf(p), nn); if (!d.isDirectory() && !d.mkdirs()) throw new IOException("No pude crear la carpeta"); }
-                    });
+                    File d = new File(dir(), nn);
+                    if (!d.isDirectory() && !d.mkdirs()) Toast.makeText(this, "No pude crear la carpeta", Toast.LENGTH_SHORT).show();
+                    load();
                 })
                 .show();
-    }
-
-    private interface Op { void run() throws IOException; }
-
-    private void simpleOp(Panel p, Op op) {
-        work.execute(() -> {
-            String err = null;
-            try { op.run(); } catch (IOException e) { err = e.getMessage(); }
-            final String fe = err;
-            main.post(() -> {
-                if (fe != null) Toast.makeText(this, fe, Toast.LENGTH_LONG).show();
-                p.sel.clear();
-                load(p);
-            });
-        });
-    }
-
-    /** Abrir: si está en el otro teléfono, primero se trae una copia temporal. */
-    private void openFile(Panel p, Entry e) {
-        String path = child(dirOf(p), e.name);
-        if (!p.remote()) { view(new File(path)); return; }
-        File dir = new File(getCacheDir(), "abrir");
-        File[] old = dir.listFiles();
-        if (old != null) for (File o : old) FileServer.delete(o);
-        //noinspection ResultOfMethodCallIgnored
-        dir.mkdirs();
-        File dst = new File(dir, e.name);
-        showProgress("Trayendo " + e.name);
-        work.execute(() -> {
-            try {
-                download(path, dst, counter(e.name, e.size));
-                main.post(() -> {
-                    if (progressDlg != null) try { progressDlg.dismiss(); } catch (Exception ignored) { }
-                    progressDlg = null; progressText = null;
-                    view(dst);
-                });
-            } catch (IOException ex) { endProgress(ex.getMessage()); }
-        });
     }
 
     private void view(File f) {
@@ -746,5 +678,153 @@ public class FilesActivity extends Activity implements Link.Listener {
         i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         try { startActivity(i); }
         catch (Exception ex) { Toast.makeText(this, "No hay una app para abrir " + f.getName(), Toast.LENGTH_SHORT).show(); }
+    }
+
+    // ---------------- arrastrar y lanzar ----------------
+
+    /**
+     * Sobre la lista: si se toca un archivo elegido y se arrastra, los elegidos siguen al dedo como un montón
+     * de hojas. Soltarlos contra el borde del otro teléfono, o lanzarlos hacia allá, los MUEVE.
+     */
+    private class DragLayer extends FrameLayout {
+        private final int slop = ViewConfiguration.get(FilesActivity.this).getScaledTouchSlop();
+        private float downX, downY, gx, gy, homeX, homeY;
+        private int downPos = -1;
+        private boolean dragging, flying;
+        private VelocityTracker vt;
+        private final Paint paper = new Paint(Paint.ANTI_ALIAS_FLAG), line = new Paint(Paint.ANTI_ALIAS_FLAG),
+                badge = new Paint(Paint.ANTI_ALIAS_FLAG), badgeText = new Paint(Paint.ANTI_ALIAS_FLAG), glow = new Paint();
+
+        DragLayer() {
+            super(FilesActivity.this);
+            setWillNotDraw(false);
+            paper.setColor(0xFFFFFFFF);
+            paper.setShadowLayer(6 * getResources().getDisplayMetrics().density, 0, 3, 0x55000000);
+            line.setColor(0xFFB8C4CE);
+            line.setStrokeWidth(dp(1.6f));
+            badge.setColor(accent);
+            badgeText.setColor(night ? 0xFF18212B : 0xFFFFFFFF);
+            badgeText.setTextSize(dp(13));
+            badgeText.setTextAlign(Paint.Align.CENTER);
+            badgeText.setTypeface(Typeface.DEFAULT_BOLD);
+            setLayerType(LAYER_TYPE_SOFTWARE, null);
+        }
+
+        private boolean onSelected(int pos) { return error == null && pos >= 0 && pos < entries.size() && sel.contains(entries.get(pos).name); }
+
+        @Override public boolean onInterceptTouchEvent(MotionEvent e) {
+            if (flying) return true;
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    downX = e.getX(); downY = e.getY(); dragging = false;
+                    downPos = list.pointToPosition((int) downX, (int) downY);
+                    if (vt != null) vt.recycle();
+                    vt = VelocityTracker.obtain();
+                    vt.addMovement(e);
+                    return false;
+                case MotionEvent.ACTION_MOVE:
+                    if (vt != null) vt.addMovement(e);
+                    // se revisa en cada movimiento: mantener presionado elige el archivo y, sin soltar, ya se puede arrastrar
+                    if (!dragging && onSelected(downPos) && Math.hypot(e.getX() - downX, e.getY() - downY) > slop * 1.5f) {
+                        dragging = true;
+                        homeX = downX; homeY = downY;
+                        gx = e.getX(); gy = e.getY();
+                        performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+                        invalidate();
+                        return true;
+                    }
+                    return false;
+            }
+            return false;
+        }
+
+        @Override public boolean onTouchEvent(MotionEvent e) {
+            if (!dragging) return false;
+            if (vt != null) vt.addMovement(e);
+            switch (e.getActionMasked()) {
+                case MotionEvent.ACTION_MOVE:
+                    gx = e.getX(); gy = e.getY();
+                    invalidate();
+                    return true;
+                case MotionEvent.ACTION_UP: case MotionEvent.ACTION_CANCEL: {
+                    float vx = 0, vy = 0;
+                    if (vt != null) { vt.computeCurrentVelocity(1000); vx = vt.getXVelocity(); vy = vt.getYVelocity(); vt.recycle(); vt = null; }
+                    float toward = vx * dirX + vy * dirY;   // px/s hacia el otro teléfono
+                    float edgeDist = dirY > 0 ? getHeight() - gy : dirY < 0 ? gy : dirX > 0 ? getWidth() - gx : gx;
+                    float extent = dirY != 0 ? getHeight() : getWidth();
+                    boolean go = e.getActionMasked() == MotionEvent.ACTION_UP && hub.connected()
+                            && (toward > dp(900) || edgeDist < extent * 0.14f);
+                    if (go) flyOut(); else flyBack();
+                    return true;
+                }
+            }
+            return true;
+        }
+
+        private void flyOut() {
+            flying = true;
+            final float sx = gx, sy = gy;
+            final float tx = dirX > 0 ? getWidth() + dp(80) : dirX < 0 ? -dp(80) : gx;
+            final float ty = dirY > 0 ? getHeight() + dp(80) : dirY < 0 ? -dp(80) : gy;
+            ValueAnimator a = ValueAnimator.ofFloat(0, 1);
+            a.setDuration(260);
+            a.addUpdateListener(v -> { float t = (float) v.getAnimatedValue(); gx = sx + (tx - sx) * t; gy = sy + (ty - sy) * t; invalidate(); });
+            a.addListener(new android.animation.AnimatorListenerAdapter() {
+                @Override public void onAnimationEnd(android.animation.Animator an) {
+                    flying = false; dragging = false; invalidate();
+                    startTransfer(true);
+                }
+            });
+            a.start();
+        }
+
+        private void flyBack() {
+            flying = true;
+            final float sx = gx, sy = gy;
+            ValueAnimator a = ValueAnimator.ofFloat(0, 1);
+            a.setDuration(220);
+            a.setInterpolator(new DecelerateInterpolator());
+            a.addUpdateListener(v -> { float t = (float) v.getAnimatedValue(); gx = sx + (homeX - sx) * t; gy = sy + (homeY - sy) * t; invalidate(); });
+            a.addListener(new android.animation.AnimatorListenerAdapter() {
+                @Override public void onAnimationEnd(android.animation.Animator an) { flying = false; dragging = false; invalidate(); }
+            });
+            a.start();
+        }
+
+        @Override protected void dispatchDraw(Canvas c) {
+            super.dispatchDraw(c);
+            if (!dragging) return;
+            int W = getWidth(), H = getHeight();
+            // brillo en el borde del otro teléfono: más fuerte mientras más cerca
+            float edgeDist = dirY > 0 ? H - gy : dirY < 0 ? gy : dirX > 0 ? W - gx : gx;
+            float extent = dirY != 0 ? H : W;
+            int al = (int) (80 + 175 * Math.max(0, 1 - edgeDist / (extent * 0.5f)));
+            int col = (accent & 0x00FFFFFF) | (al << 24);
+            float band = dp(36);
+            if (dirY > 0) { glow.setShader(new LinearGradient(0, H, 0, H - band, col, 0, Shader.TileMode.CLAMP)); c.drawRect(0, H - band, W, H, glow); }
+            else if (dirY < 0) { glow.setShader(new LinearGradient(0, 0, 0, band, col, 0, Shader.TileMode.CLAMP)); c.drawRect(0, 0, W, band, glow); }
+            else if (dirX > 0) { glow.setShader(new LinearGradient(W, 0, W - band, 0, col, 0, Shader.TileMode.CLAMP)); c.drawRect(W - band, 0, W, H, glow); }
+            else { glow.setShader(new LinearGradient(0, 0, band, 0, col, 0, Shader.TileMode.CLAMP)); c.drawRect(0, 0, band, H, glow); }
+            // montón de hojas bajo el dedo
+            int n = Math.min(3, sel.size());
+            for (int i = n - 1; i >= 0; i--) drawPaper(c, gx + i * dp(5), gy - dp(40) + i * dp(4), (i - 1) * 7f);
+            c.drawCircle(gx + dp(22), gy - dp(62), dp(13), badge);
+            c.drawText(String.valueOf(sel.size()), gx + dp(22), gy - dp(57), badgeText);
+        }
+
+        private void drawPaper(Canvas c, float x, float y, float rot) {
+            float w = dp(38), h = dp(48), f = dp(11);
+            c.save();
+            c.translate(x, y);
+            c.rotate(rot);
+            Path p = new Path();
+            p.moveTo(-w / 2, -h / 2); p.lineTo(w / 2 - f, -h / 2); p.lineTo(w / 2, -h / 2 + f); p.lineTo(w / 2, h / 2); p.lineTo(-w / 2, h / 2); p.close();
+            c.drawPath(p, paper);
+            for (int i = 0; i < 4; i++) {
+                float ly = -h / 2 + h * (0.3f + i * 0.17f);
+                c.drawLine(-w / 2 + dp(6), ly, w / 2 - dp(6), ly, line);
+            }
+            c.restore();
+        }
     }
 }

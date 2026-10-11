@@ -32,7 +32,7 @@ public class Ui {
     public static final int LAYOUT_SIDE_H = 1, LAYOUT_SIDE_V = 2, LAYOUT_STACK = 3, LOCK = 4, UNLOCK = 5,
             KEYBOARD = 6, KB_TOUCHPAD = 7, TOUCHPAD = 8, GAMEPAD = 9, MIC = 10, WIFI = 11, GEAR = 12,
             AUTO = 13, CHECK = 14, CROSS = 15, PIN = 16, OPEN = 17, STORE = 18, RECEIVE = 19, NOTE = 20,
-            PALETTE = 21, HOME = 22, SEND = 23, PAGES = 24, PLUS = 25, GRID = 26, TRASH = 27;
+            PALETTE = 21, HOME = 22, SEND = 23, PAGES = 24, PLUS = 25, GRID = 26, TRASH = 27, IMAGE = 28, CLOCK = 29, FOLDER = 30, WIDGETS = 31;
 
     public static boolean night(Context c) {
         return (c.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
@@ -393,6 +393,32 @@ public class Ui {
                     for (int i = -1; i <= 1; i += 2) for (int j = -1; j <= 1; j += 2)
                         c.drawRoundRect(new RectF(cx + i * u * 0.45f - u * 0.35f, cy + j * u * 0.45f - u * 0.35f,
                                 cx + i * u * 0.45f + u * 0.35f, cy + j * u * 0.45f + u * 0.35f), 3 * dp, 3 * dp, st);
+                    break;
+                case IMAGE: {
+                    c.drawRoundRect(new RectF(cx - u * 0.9f, cy - u * 0.7f, cx + u * 0.9f, cy + u * 0.7f), 3 * dp, 3 * dp, st);
+                    Path ip = new Path();
+                    ip.moveTo(cx - u * 0.9f, cy + u * 0.45f); ip.lineTo(cx - u * 0.25f, cy - u * 0.1f);
+                    ip.lineTo(cx + u * 0.25f, cy + u * 0.3f); ip.lineTo(cx + u * 0.9f, cy - u * 0.2f);
+                    c.drawPath(ip, st);
+                    c.drawCircle(cx + u * 0.4f, cy - u * 0.35f, 1.6f * dp, fl);
+                    break;
+                }
+                case CLOCK:
+                    c.drawCircle(cx, cy, u * 0.85f, st);
+                    c.drawLine(cx, cy, cx, cy - u * 0.5f, st);
+                    c.drawLine(cx, cy, cx + u * 0.35f, cy + u * 0.2f, st);
+                    break;
+                case FOLDER: {
+                    Path fp = new Path();
+                    fp.moveTo(cx - u * 0.9f, cy - u * 0.6f); fp.lineTo(cx - u * 0.3f, cy - u * 0.6f); fp.lineTo(cx - u * 0.1f, cy - u * 0.4f);
+                    fp.lineTo(cx + u * 0.9f, cy - u * 0.4f); fp.lineTo(cx + u * 0.9f, cy + u * 0.65f); fp.lineTo(cx - u * 0.9f, cy + u * 0.65f); fp.close();
+                    c.drawPath(fp, st);
+                    break;
+                }
+                case WIDGETS:
+                    c.drawRoundRect(new RectF(cx - u * 0.9f, cy - u * 0.8f, cx - u * 0.1f, cy - u * 0.05f), 3 * dp, 3 * dp, st);
+                    c.drawRoundRect(new RectF(cx + u * 0.1f, cy - u * 0.8f, cx + u * 0.9f, cy + u * 0.8f), 3 * dp, 3 * dp, st);
+                    c.drawRoundRect(new RectF(cx - u * 0.9f, cy + u * 0.1f, cx - u * 0.1f, cy + u * 0.8f), 3 * dp, 3 * dp, st);
                     break;
                 case TRASH:
                     c.drawLine(cx - u * 0.8f, cy - u * 0.55f, cx + u * 0.8f, cy - u * 0.55f, st);

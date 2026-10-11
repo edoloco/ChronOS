@@ -211,6 +211,13 @@ public class Hub implements Link.Listener {
             send("uninstallAck", "r", r, "label", m.optString("label"));
             return;
         }
+        if ("alarms".equals(t)) { openAlarms(); return; }
+        if ("fmOpen".equals(t)) {
+            startOrNotify(new Intent(app, FilesActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    .putExtra("remote", true), 22, "Archivos", "Toca para abrir el gestor de archivos aquí");
+            return;
+        }
+        if ("fmPath".equals(t)) FileServer.remoteDir = m.optString("path");
         if ("appsReq".equals(t)) { AppsDialog.sendList(app, this); return; }
         if (t.startsWith("fs") && !t.endsWith("R") && !"fsTok".equals(t)) { FileServer.get(app).handle(m, this); return; }
         if ("fsTok".equals(t)) FileServer.get(app).setRemote(m.optString("k"), m.optInt("port"));
@@ -274,6 +281,10 @@ public class Hub implements Link.Listener {
         if (i == null) return NOT_INSTALLED;
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
         return startOrNotify(i, pkg.hashCode(), "Abrir " + (label.isEmpty() ? "la app" : label), "Toca para abrirla en este teléfono");
+    }
+
+    public void openAlarms() {
+        startOrNotify(ClockWidget.alarmsIntent(app).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), 23, "Alarmas", "Toca para ver las alarmas");
     }
 
     /** Desinstalar una app de ESTE teléfono (Android siempre pide confirmación). */
