@@ -465,6 +465,14 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                             prefs.edit().putBoolean("autoKb", !auto).apply();
                             Toast.makeText(this, !auto ? "El teclado se abrirá solo en el extendido" : "Teclado automático desactivado", Toast.LENGTH_SHORT).show();
                         })
+                .option(principal ? Ui.LOCK : Ui.UNLOCK, -1, "Pantalla unida: " + (ScreenSync.enabled(this) ? "sí" : "no"),
+                        "El extendido se enciende, desbloquea y bloquea junto con el principal", ScreenSync.enabled(this), () -> {
+                            boolean on = !ScreenSync.enabled(this);
+                            prefs.edit().putBoolean("syncScreen", on).apply();
+                            hub.send("scrSync", "on", on);
+                            Toast.makeText(this, on ? "Pantalla unida activada" : "Pantalla unida desactivada", Toast.LENGTH_SHORT).show();
+                            if (on) main.postDelayed(() -> checkSetup(false), 300);
+                        })
                 .option(Ui.PALETTE, "Color de fondo", "Elegir el color de la mesa", this::chooseColor)
                 .option(Ui.HOME, isLauncher() ? "Pantalla de inicio: sí" : "Pantalla de inicio: no",
                         isLauncher() ? "Mesa Doble es tu launcher (tocar para dejar de usarla)" : "Usar Mesa Doble como launcher de este teléfono", this::toggleLauncher)
@@ -522,6 +530,17 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                         "Activa \"Mostrar sobre otras apps\" para Mesa Doble y vuelve."));
             } else lines.add("✓ Abrir apps pedidas desde el extendido");
         } else {
+            if (ScreenSync.enabled(this)) {
+                if (MesaAccess.instance == null && !ScreenSync.adminActive(this)) {
+                    lines.add("✗ Bloquearse junto al principal");
+                    fixes.add(this::requestLockAdmin);
+                } else lines.add("✓ Bloquearse junto al principal");
+                if (!ScreenSync.canWake(this)) {
+                    lines.add("✗ Encenderse junto al principal");
+                    fixes.add(() -> openSettings("android.settings.MANAGE_APP_USE_FULL_SCREEN_INTENT", Uri.parse("package:" + getPackageName()),
+                            "Permite las notificaciones de pantalla completa y vuelve."));
+                } else lines.add("✓ Encenderse junto al principal");
+            }
             if (!MesaAccess.available(this)) {
                 lines.add("• Versión liviana: si la mesa está de fondo, el teclado se abre tocando un aviso");
             } else if (!canOverlay()) {
@@ -529,6 +548,13 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 fixes.add(() -> openSettings(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()),
                         "Activa \"Mostrar sobre otras apps\" para Mesa Doble y vuelve."));
             } else lines.add("✓ Abrir el teclado solo");
+        }
+        if (ScreenSync.enabled(this)) {
+            if (!ScreenSync.ignoringBattery(this)) {
+                lines.add("✗ Seguir conectado con la pantalla apagada");
+                fixes.add(() -> openSettings(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName()),
+                        "Ahorro de batería → Sin restricciones"));
+            } else lines.add("✓ Sigue conectado con la pantalla apagada");
         }
         if (fixes.isEmpty() && !always) return;
         Ui.Sheet sh = new Ui.Sheet(this)
@@ -543,6 +569,24 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             sh.option(ok ? Ui.CHECK : bad ? Ui.CROSS : Ui.GEAR, text, bad ? "Tocar para resolver" : null, r);
         }
         sh.button(fixes.isEmpty() ? "Listo" : "Después", !fixes.isEmpty() ? false : true, null).show();
+    }
+
+    /** Pide el permiso de "bloquear la pantalla" (administrador del dispositivo, solo esa función). */
+    private void requestLockAdmin() {
+        new Ui.Sheet(this)
+                .title("Bloquearse junto al principal")
+                .message("Android pide activar a Mesa Doble como \"administrador del dispositivo\" solo para poder bloquear la pantalla. "
+                        + "No puede borrar ni ver nada.\n\nPara desinstalar la app más adelante, primero desactívalo en "
+                        + "Ajustes → Contraseñas y seguridad → Privacidad → Apps de administración del dispositivo.")
+                .button("Después", false, null)
+                .button("Activar", true, () -> {
+                    Intent i = new Intent(android.app.admin.DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
+                    i.putExtra(android.app.admin.DevicePolicyManager.EXTRA_DEVICE_ADMIN, ScreenSync.admin(this));
+                    i.putExtra(android.app.admin.DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                            "Para que este teléfono se bloquee cuando bloqueas el principal.");
+                    try { startActivity(i); } catch (Exception e) { Toast.makeText(this, "No pude abrir ese permiso", Toast.LENGTH_SHORT).show(); }
+                })
+                .show();
     }
 
     private void openSettings(String action, Uri data, String toast) {

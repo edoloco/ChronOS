@@ -58,6 +58,7 @@ public class Hub implements Link.Listener {
         prefs = c.getSharedPreferences("mesa", Context.MODE_PRIVATE);
         side = prefs.getInt("side", -1);
         link = new Link(c, this);
+        ScreenSync.listen(c, this);
     }
 
     public int side() { return side; }
@@ -183,6 +184,8 @@ public class Hub implements Link.Listener {
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
         if ("media".equals(t)) { media(m.optString("k")); return; }
+        if ("screen".equals(t)) { if (!isPrincipal()) ScreenSync.apply(app, this, m.optString("s")); return; }
+        if ("scrSync".equals(t)) { prefs.edit().putBoolean("syncScreen", m.optBoolean("on", true)).apply(); }
         if ("launch".equals(t)) {
             int r = launchHere(m.optString("pkg"), m.optString("label"));
             send("launchAck", "r", r, "label", m.optString("label"));

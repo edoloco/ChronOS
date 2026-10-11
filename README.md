@@ -51,6 +51,12 @@ cuando cruzas más de la mitad o los lanzas.
 - **Apps ordenadas o fijas** (botón *Mesas*): *Ordenar apps ahora* las pone en cuadrícula por nombre;
   *Orden automático* las reacomoda al agregarlas o soltarlas; *Apps bloqueadas* las deja fijas (no se mueven
   ni se borran, pero se abren al tocarlas). Se aplica en ambos teléfonos.
+- **Pantalla unida** (*Ajustes*, activada por defecto): cuando el principal se apaga o bloquea, el extendido
+  también; cuando el principal se enciende o desbloquea, el extendido igual. En el extendido, *Ajustes →
+  Revisar configuración* pide lo necesario: permiso para bloquear la pantalla (administrador del dispositivo,
+  solo "bloquear"), notificaciones de pantalla completa y batería *Sin restricciones*. En Xiaomi activa también
+  *Otros permisos → Mostrar en pantalla de bloqueo*. Si el extendido tiene PIN, pedirá el PIN al desbloquear;
+  sin PIN se desbloquea solo.
 - **Color de fondo**: *Ajustes → Color de fondo*, se aplica en ambos teléfonos.
 - **Pantalla de inicio**: *Ajustes → Pantalla de inicio* convierte Mesa Doble en el launcher del teléfono
   (no necesita permisos; se desactiva igual).

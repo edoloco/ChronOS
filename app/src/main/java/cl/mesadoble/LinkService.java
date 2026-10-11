@@ -37,7 +37,27 @@ public class LinkService extends Service {
                 .build();
         try { startForeground(1, n); } catch (Exception e) { stopSelf(); return START_NOT_STICKY; }
         Hub.get(this).ensureStarted();
+        holdWifi();
         return START_STICKY;
+    }
+
+    private android.net.wifi.WifiManager.WifiLock wifiLock;
+
+    /** Mantiene el WiFi despierto con la pantalla apagada, para que el principal pueda encender al extendido. */
+    @SuppressWarnings("deprecation")
+    private void holdWifi() {
+        if (wifiLock != null) return;
+        try {
+            android.net.wifi.WifiManager wm = (android.net.wifi.WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+            wifiLock = wm.createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF, "mesadoble:wifi");
+            wifiLock.setReferenceCounted(false);
+            wifiLock.acquire();
+        } catch (Exception ignored) { }
+    }
+
+    @Override public void onDestroy() {
+        try { if (wifiLock != null) wifiLock.release(); } catch (Exception ignored) { }
+        super.onDestroy();
     }
 
     @Override public IBinder onBind(Intent intent) { return null; }
