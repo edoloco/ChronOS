@@ -10,8 +10,9 @@ android {
         applicationId 'cl.mesadoble'
         minSdk 28
         targetSdk 34
-        versionCode((System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger())
-        versionName "1.0.${System.getenv('GITHUB_RUN_NUMBER') ?: '0'}"
+        // número de versión basado en fecha y hora: siempre crece, aunque cambie el archivo de compilación
+        versionCode((System.getenv('VERSION_CODE') ?: '1').toInteger())
+        versionName(System.getenv('VERSION_NAME') ?: '1.0')
     }
 
     // Dos versiones: "completa" (cambio de teclado automático, usa accesibilidad)
