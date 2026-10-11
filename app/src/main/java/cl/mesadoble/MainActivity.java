@@ -101,16 +101,25 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         statusBtn = addSquare(SquareButton.STATUS, "Red", false, v -> showConnection());
         root.addView(bar, new FrameLayout.LayoutParams(-2, -2));
 
-        // La orientación depende de la forma elegida (apaisada por defecto) y del bloqueo de vista.
+        // REGLA DE DISPOSICIÓN (fija para todas las versiones):
+        //   horizontal → principal ARRIBA, extendido ABAJO; los elementos cruzan de arriba hacia abajo.
+        //   vertical   → principal a la IZQUIERDA, extendido a la DERECHA; cruzan de izquierda a derecha.
+        // El uso principal es en horizontal. El principal define la orientación y el extendido la copia.
         applyOrientation(this);
         orient = new OrientationEventListener(this) {
             @Override public void onOrientationChanged(int o) { onPhysicalOrientation(o); }
         };
         setContentView(root);
         hub = Hub.get(this);
-        desk.setVertical(stacked());
         loadItems();
-        boolean savedStacked = prefs.getBoolean("savedStacked", false);   // versiones anteriores: lado a lado
+        boolean savedStacked = prefs.getBoolean("savedStacked", false);
+        if (!prefs.getBoolean("layoutV2", false)) {
+            // versiones anteriores tenían el principal a la derecha: se intercambian las mitades una vez
+            if (!savedStacked) desk.swapHalves();
+            prefs.edit().putBoolean("layoutV2", true).apply();
+            scheduleSave();
+        }
+        desk.setVertical(savedStacked);
         if (savedStacked != stacked()) { desk.convertAll(stacked()); prefs.edit().putBoolean("savedStacked", stacked()).apply(); scheduleSave(); }
         for (Item it : desk.items) desk.normalize(it);
 
@@ -144,47 +153,67 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         super.onPause();
     }
 
-    /** Mesa horizontal = teléfonos uno sobre otro; vertical = lado a lado. Siempre unidos por el lado largo. */
-    // Formas de la mesa (siempre unidos por el borde que se toca)
-    static final int LAYOUT_SIDE_H = 0, LAYOUT_SIDE_V = 1, LAYOUT_STACK = 2;
-    private int layout() { return prefs.getInt("layout", LAYOUT_SIDE_H); }
+    /*
+     * REGLA DE DISPOSICIÓN (fija): los teléfonos se unen por el lado largo.
+     *   Horizontal: principal ARRIBA, extendido ABAJO (y va de 0 a 2; pantalla 0 = principal).
+     *   Vertical:   principal a la IZQUIERDA, extendido a la DERECHA (x va de 0 a 2; pantalla 0 = principal).
+     * Es el mismo armado físico girado: la orientación de la pantalla decide la disposición.
+     */
     private boolean locked() { return prefs.getBoolean("viewLock", true); }
-    private boolean stacked() { return layout() == LAYOUT_STACK; }
-    /** Posición de este teléfono en la mesa: lado a lado = extendido izq. / principal der.; uno sobre otro = principal arriba. */
-    private int deskSide() { boolean p = side == 1; return stacked() ? (p ? 0 : 1) : (p ? 1 : 0); }
-    private int layoutIcon(int l) { return l == LAYOUT_SIDE_V ? Ui.LAYOUT_SIDE_V : l == LAYOUT_STACK ? Ui.LAYOUT_STACK : Ui.LAYOUT_SIDE_H; }
-    private String layoutName(int l) {
-        return l == LAYOUT_SIDE_V ? "Lado a lado, en vertical" : l == LAYOUT_STACK ? "Uno sobre otro, en horizontal" : "Lado a lado, en horizontal";
+    private boolean landscapeNow() { return getResources().getConfiguration().orientation != Configuration.ORIENTATION_PORTRAIT; }
+    private boolean stacked() { return landscapeNow(); }
+    /** El principal siempre ocupa la primera pantalla (arriba o izquierda). */
+    private int deskSide() { return side == 1 ? 0 : 1; }
+    private int layoutIcon() { return stacked() ? Ui.LAYOUT_STACK : Ui.LAYOUT_SIDE_V; }
+    private String layoutName() {
+        return stacked() ? "Horizontal: principal arriba, extendido abajo" : "Vertical: principal a la izquierda, extendido a la derecha";
     }
 
-    /** Orientación de pantalla según la forma y el bloqueo. La usan también el teclado y otras pantallas. */
+    /**
+     * Orientación de pantalla. Principal: la elegida (horizontal por defecto) o libre si la vista no está bloqueada.
+     * Extendido: siempre la misma que informó el principal. La usan también el teclado y otras pantallas.
+     */
     static void applyOrientation(Activity a) {
         SharedPreferences p = a.getSharedPreferences("mesa", MODE_PRIVATE);
-        boolean portrait = p.getInt("layout", LAYOUT_SIDE_H) == LAYOUT_SIDE_V, lock = p.getBoolean("viewLock", true);
-        a.setRequestedOrientation(portrait
-                ? (lock ? ActivityInfo.SCREEN_ORIENTATION_PORTRAIT : ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT)
-                : (lock ? ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE : ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE));
+        boolean h = p.getBoolean("orientH", true), lock = p.getBoolean("viewLock", true), principal = p.getInt("side", -1) == 1;
+        if (principal && !lock) a.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR);
+        else a.setRequestedOrientation(h ? ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE : ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
     }
 
-    /** Cambia la forma; el principal la comparte para que el extendido quede igual. */
-    private void setLayout(int l, boolean lock, boolean fromRemote) {
-        boolean wasStacked = stacked();
-        prefs.edit().putInt("layout", l).putBoolean("viewLock", lock).apply();
-        if (stacked() != wasStacked) {
+    /** Elige orientación y bloqueo (en el principal) y los comparte con el extendido. */
+    private void setView(boolean horizontal, boolean lock, boolean fromRemote) {
+        prefs.edit().putBoolean("orientH", horizontal).putBoolean("viewLock", lock).apply();
+        snapped = -1;
+        applyOrientation(this);
+        relayout();
+        if (!fromRemote) sendView();
+    }
+
+    /** Ajusta la mesa a la orientación actual (convierte posiciones si cambió entre horizontal y vertical). */
+    private void relayout() {
+        if (desk.isVertical() != stacked()) {
             desk.convertAll(stacked());
             prefs.edit().putBoolean("savedStacked", stacked()).apply();
             scheduleSave();
         }
-        snapped = -1;
         applySide();
-        applyOrientation(this);
-        if (!fromRemote) hub.send("view", "layout", l, "lock", lock);
     }
 
-    private void sendView() { hub.send("view", "layout", layout(), "lock", locked()); }
+    private void sendView() {
+        if (side != 1) return;
+        boolean h = locked() ? prefs.getBoolean("orientH", true) : landscapeNow();
+        hub.send("view", "h", h, "lock", locked());
+    }
+
+    @Override public void onConfigurationChanged(Configuration c) {
+        super.onConfigurationChanged(c);
+        relayout();
+        if (side == 1 && !locked()) sendView();   // vista libre: el extendido sigue al principal al girar
+    }
+
     /** Ancho inicial de un elemento: en horizontal la pantalla es más ancha, así que se usa la mitad. */
-    private double sized(double base) { return layout() == LAYOUT_SIDE_V ? base : base * 0.5; }
-    private String sideName(int s) { return s == 1 ? "PRINCIPAL (derecha)" : "EXTENDIDO (izquierda)"; }
+    private double sized(double base) { return stacked() ? base * 0.5 : base; }
+    private String sideName(int s) { return s == 1 ? "PRINCIPAL" : "EXTENDIDO"; }
     private String firstPhone() { return "el extendido"; }
     private String secondPhone() { return "el principal"; }
 
@@ -218,39 +247,42 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     // ---------------- ajustes y apps ----------------
 
     private void settingsMenu() {
-        boolean auto = hub.autoKeyboard();
-        new Ui.Sheet(this)
-                .title("Ajustes")
-                .option(layoutIcon(layout()), deskSide(), "Forma de la mesa", layoutName(layout()), false, this::chooseLayout)
-                .option(locked() ? Ui.LOCK : Ui.UNLOCK, -1, locked() ? "Vista bloqueada" : "Vista libre",
-                        locked() ? "La pantalla no gira aunque muevas el teléfono" : "Gira 180° si das vuelta los teléfonos", false,
-                        () -> setLayout(layout(), !locked(), false))
-                .option(layoutIcon(layout()), deskSide(), "Este teléfono es el " + (side == 1 ? "principal" : "extendido"),
-                        side == 1 ? "Aquí corren las apps" : "Pantalla extra y teclado", false, this::chooseSide)
+        boolean auto = hub.autoKeyboard(), principal = side == 1;
+        boolean h = prefs.getBoolean("orientH", true);
+        Ui.Sheet sh = new Ui.Sheet(this).title("Ajustes");
+        if (principal) {
+            sh.option(h ? Ui.LAYOUT_STACK : Ui.LAYOUT_SIDE_V, deskSide(), h ? "Orientación: horizontal" : "Orientación: vertical",
+                    h ? "Principal arriba, extendido abajo" : "Principal a la izquierda, extendido a la derecha", false, this::chooseOrientation);
+            sh.option(locked() ? Ui.LOCK : Ui.UNLOCK, -1, locked() ? "Vista bloqueada" : "Vista libre",
+                    locked() ? "No gira aunque muevas los teléfonos" : "Cambia sola entre horizontal y vertical al girar", false,
+                    () -> setView(h, !locked(), false));
+        } else {
+            sh.option(layoutIcon(), deskSide(), "Orientación: la del principal", layoutName(), false, null);
+        }
+        sh.option(layoutIcon(), deskSide(), "Este teléfono es el " + (principal ? "principal" : "extendido"),
+                        principal ? "Aquí corren las apps" : "Pantalla extra y teclado", false, this::chooseSide)
                 .option(Ui.AUTO, -1, "Teclado automático: " + (auto ? "sí" : "no"),
                         "El teclado aparece solo en el extendido al escribir", false, () -> {
                             prefs.edit().putBoolean("autoKb", !auto).apply();
                             Toast.makeText(this, !auto ? "El teclado se abrirá solo en el extendido" : "Teclado automático desactivado", Toast.LENGTH_SHORT).show();
                         })
-                .option(Ui.GEAR, "Revisar configuración", hub.isPrincipal() ? "Permisos del principal" : "Permisos del extendido", () -> checkSetup(true))
+                .option(Ui.GEAR, "Revisar configuración", principal ? "Permisos del principal" : "Permisos del extendido", () -> checkSetup(true))
                 .option(Ui.WIFI, "Conexión", statusText, this::showConnection)
                 .button("Cerrar", false, null)
                 .show();
     }
 
-    /** Elegir la forma de la mesa con dibujos de cómo van los teléfonos. */
-    private void chooseLayout() {
-        int cur = layout();
+    /** Horizontal o vertical, con dibujos de cómo van los teléfonos. */
+    private void chooseOrientation() {
+        boolean h = prefs.getBoolean("orientH", true);
         new Ui.Sheet(this)
-                .title("Forma de la mesa")
+                .title("Orientación")
                 .message("P = principal (corren las apps) · E = extendido (pantalla extra y teclado). "
                         + "Los elementos cruzan por el borde donde se tocan los teléfonos.")
-                .option(Ui.LAYOUT_SIDE_H, -1, "Lado a lado, en horizontal", "Como una pantalla ancha. La forma recomendada.", cur == LAYOUT_SIDE_H,
-                        () -> setLayout(LAYOUT_SIDE_H, locked(), false))
-                .option(Ui.LAYOUT_STACK, -1, "Uno sobre otro, en horizontal", "Como un notebook: principal arriba, teclado abajo.", cur == LAYOUT_STACK,
-                        () -> setLayout(LAYOUT_STACK, locked(), false))
-                .option(Ui.LAYOUT_SIDE_V, -1, "Lado a lado, en vertical", "Como un libro abierto.", cur == LAYOUT_SIDE_V,
-                        () -> setLayout(LAYOUT_SIDE_V, locked(), false))
+                .option(Ui.LAYOUT_STACK, 0, "Horizontal", "Principal arriba, extendido abajo. La forma de uso principal.", h,
+                        () -> setView(true, true, false))
+                .option(Ui.LAYOUT_SIDE_V, 0, "Vertical", "Principal a la izquierda, extendido a la derecha.", !h,
+                        () -> setView(false, true, false))
                 .button("Cerrar", false, null)
                 .show();
     }
@@ -502,13 +534,12 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     private void chooseSide() {
-        int l = layout(), ic = layoutIcon(l);
-        boolean st = stacked();
+        int ic = layoutIcon();
         new Ui.Sheet(this)
                 .title("¿Qué es este teléfono?")
-                .message(layoutName(l) + ". Puedes cambiar la forma en Ajustes.")
-                .option(ic, st ? 0 : 1, "Principal", (st ? "Arriba" : "A la derecha") + " · aquí corren las apps", side == 1, () -> setSide(1))
-                .option(ic, st ? 1 : 0, "Extendido", (st ? "Abajo" : "A la izquierda") + " · pantalla extra y teclado", side == 0, () -> setSide(0))
+                .message("En horizontal el principal va arriba; en vertical, a la izquierda.")
+                .option(ic, 0, "Principal", "Arriba en horizontal · a la izquierda en vertical · aquí corren las apps", side == 1, () -> setSide(1))
+                .option(ic, 1, "Extendido", "Abajo en horizontal · a la derecha en vertical · pantalla extra y teclado", side == 0, () -> setSide(0))
                 .cancelable(side >= 0)
                 .show();
     }
@@ -516,7 +547,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private void setSide(int s) {
         side = s;
         prefs.edit().putInt("side", s).apply();
-        applySide();
+        applyOrientation(this);
+        relayout();
+        if (s == 1) sendView();
         if (s == 1 && hub.connected() && MesaAccess.instance != null) MesaAccess.instance.switchToMesa();
         main.postDelayed(() -> checkSetup(false), 400);
     }
@@ -792,11 +825,10 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 otherSide = m.optInt("side", -1);
                 updateStatus();
                 break;
-            case "view":   // el extendido sigue la forma y la orientación del principal
-                if (side != 1) {
-                    int l = m.optInt("layout", layout());
-                    boolean lk = m.optBoolean("lock", locked());
-                    if (l != layout() || lk != locked()) setLayout(l, lk, true);
+            case "view":   // el extendido sigue la orientación del principal
+                if (side != 1 && m.has("h")) {
+                    boolean hh = m.optBoolean("h", true), lk = m.optBoolean("lock", true);
+                    if (hh != prefs.getBoolean("orientH", true) || lk != locked()) setView(hh, lk, true);
                 }
                 break;
             case "full": {

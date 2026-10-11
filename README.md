@@ -2,26 +2,33 @@
 
 App de Android que une dos teléfonos en un solo escritorio: arrastras notas, imágenes y enlaces de una pantalla a la otra.
 
-## Forma
+## Regla de disposición (fija para todas las versiones)
 
-En *Ajustes → Forma de la mesa* se elige con dibujos:
+Los teléfonos se unen por el **lado largo**. Es un solo armado físico; la orientación decide cómo se ve:
 
-- **Lado a lado, en horizontal** (recomendada): extendido a la izquierda, principal a la derecha.
-- **Uno sobre otro, en horizontal**: como un notebook, principal arriba y teclado abajo.
-- **Lado a lado, en vertical**: como un libro abierto.
+| Orientación | Principal | Extendido | Los elementos cruzan |
+|---|---|---|---|
+| **Horizontal** (uso principal) | **Arriba** | Abajo | de arriba hacia abajo |
+| Vertical | **Izquierda** | Derecha | de izquierda a derecha |
 
-El principal define la forma y el extendido la copia. *Vista bloqueada* evita que la pantalla gire.
+- El **principal** es donde corren las apps; el **extendido** es pantalla extra y teclado.
+- El principal define la orientación y el extendido la copia.
+- *Vista bloqueada* (por defecto): queda fija en la orientación elegida, horizontal por defecto.
+  *Vista libre*: al girar los teléfonos cambia sola entre horizontal y vertical.
+- En el código la pantalla 0 es siempre el principal (arriba o izquierda) — ver `MainActivity` y `DeskView`.
+
 Los elementos quedan donde los sueltas (incluso montados sobre la unión) y pasan al otro teléfono
 cuando cruzas más de la mitad o los lanzas.
 
 ## Instalar
 
-1. En cada teléfono, abre la última versión: `Releases → MesaDoble.apk`, descárgala e instálala.
+1. En cada teléfono, abre la última versión en *Releases*, descarga el APK e instálalo.
 2. Conecta ambos al mismo WiFi (o uno al hotspot del otro).
 3. Abre Mesa Doble y elige **Principal** o **Extendido**. La app te guía con lo que falta:
-   - Principal: activar el teclado Mesa Doble, el cambio automático de teclado (accesibilidad) y
-     "Mostrar sobre otras apps" (para abrir apps pedidas desde el extendido).
-   - Extendido: "Mostrar sobre otras apps" (para que el teclado aparezca solo).
+   - Principal: activar el teclado Mesa Doble. Con la versión completa, además el cambio automático de
+     teclado (accesibilidad) y "Mostrar sobre otras apps".
+   - Extendido: nada obligatorio.
+   - Usa **MesaDoble-liviana.apk**: Play Protect puede bloquear la completa (pide accesibilidad).
 
 ## Uso
 

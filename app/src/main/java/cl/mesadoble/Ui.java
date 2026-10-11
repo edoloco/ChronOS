@@ -252,16 +252,16 @@ public class Ui {
                     rect(c, cx + g, cy - rh / 2, cx + g + rw, cy + rh / 2, highlight == 1, "P");
                     break;
                 }
-                case LAYOUT_SIDE_V: {   // dos teléfonos parados, lado a lado
+                case LAYOUT_SIDE_V: {   // vertical: principal a la izquierda, extendido a la derecha
                     float rw = u * 0.55f, rh = u * 1.5f, g = 1.5f * dp;
-                    rect(c, cx - g - rw, cy - rh / 2, cx - g, cy + rh / 2, highlight == 0, "E");
-                    rect(c, cx + g, cy - rh / 2, cx + g + rw, cy + rh / 2, highlight == 1, "P");
+                    rect(c, cx - g - rw, cy - rh / 2, cx - g, cy + rh / 2, highlight == 0, "P");
+                    rect(c, cx + g, cy - rh / 2, cx + g + rw, cy + rh / 2, highlight == 1, "E");
                     break;
                 }
-                case LAYOUT_STACK: {    // apaisados, uno sobre otro (como notebook)
+                case LAYOUT_STACK: {    // horizontal: principal arriba, extendido abajo
                     float rw = u * 1.5f, rh = u * 0.62f, g = 1.5f * dp;
-                    rect(c, cx - rw / 2, cy - g - rh, cx + rw / 2, cy - g, highlight == 1, "P");
-                    rect(c, cx - rw / 2, cy + g, cx + rw / 2, cy + g + rh, highlight == 0, "E");
+                    rect(c, cx - rw / 2, cy - g - rh, cx + rw / 2, cy - g, highlight == 0, "P");
+                    rect(c, cx - rw / 2, cy + g, cx + rw / 2, cy + g + rh, highlight == 1, "E");
                     break;
                 }
                 case LOCK: case UNLOCK: {

@@ -143,19 +143,20 @@ public class DeskView extends View {
 
     /** Pasa todos los elementos de "lado a lado" a "uno sobre otro" (o al revés), conservando su pantalla. */
     /**
-     * Cambia entre "lado a lado" (x 0..2: extendido a la izquierda, principal a la derecha) y
-     * "uno sobre otro" (y 0..2: principal arriba, extendido abajo). Cada elemento queda en el mismo teléfono.
+     * Cambia entre vertical (x 0..2: principal a la izquierda, extendido a la derecha) y
+     * horizontal (y 0..2: principal arriba, extendido abajo). La pantalla 0 es siempre el principal,
+     * así cada elemento queda en el mismo teléfono.
      */
     public void convertAll(boolean toVertical) {
         for (Item it : items) {
             if (toVertical) {
-                int scr = it.x + it.w / 2 >= 1 ? 1 : 0;          // 1 = principal
+                int scr = it.x + it.w / 2 >= 1 ? 1 : 0;
                 double u = it.x - scr, v = it.y;
-                it.x = u; it.y = (1 - scr) + v;                   // principal arriba
+                it.x = u; it.y = scr + v;
             } else {
-                int scr = it.y + 0.15 >= 1 ? 1 : 0;              // 1 = abajo = extendido
+                int scr = it.y + 0.15 >= 1 ? 1 : 0;
                 double u = it.x, v = it.y - scr;
-                it.x = (1 - scr) + u; it.y = v;                   // principal a la derecha
+                it.x = scr + u; it.y = v;
             }
             it.dx = Float.NaN; it.dy = Float.NaN;
         }
@@ -163,6 +164,15 @@ public class DeskView extends View {
         for (Item it : items) normalize(it);
         invalidate();
     }
+    /** Migración única: antes el principal estaba a la derecha (x 1..2); ahora es la pantalla 0. */
+    public void swapHalves() {
+        for (Item it : items) {
+            if (it.x + it.w / 2 >= 1) it.x -= 1; else it.x += 1;
+            it.dx = Float.NaN; it.dy = Float.NaN;
+        }
+        invalidate();
+    }
+
     public void setConnected(boolean c) { connected = c; invalidate(); }
     public void setGlyphRotation(float r) { glyphRot = r; invalidate(); }
 
