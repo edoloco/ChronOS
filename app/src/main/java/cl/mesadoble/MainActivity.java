@@ -60,7 +60,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private SharedPreferences prefs;
     private DeskView desk;
     private Hub hub;
-    private LinearLayout bar, navBar;
+    private LinearLayout bar;
     private SquareButton statusBtn;
     private final List<SquareButton> squares = new ArrayList<>();
     private OrientationEventListener orient;
@@ -102,16 +102,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         statusBtn = addSquare(SquareButton.STATUS, "Red", false, v -> showConnection());
         root.addView(bar, new FrameLayout.LayoutParams(-2, -2));
 
-        // botones de navegación de Android (la barra del sistema queda oculta en pantalla completa)
-        navBar = new LinearLayout(this);
-        navBar.setOrientation(LinearLayout.HORIZONTAL);
-        navBar.setPadding(dp(6), dp(6), dp(0), dp(6));
-        navBar.setBackground(pill(night ? 0xE6182129 : 0xEEFFFFFF));
-        navBar.setElevation(dp(6));
-        addNav(SquareButton.BACK, "Atrás", v -> navBack());
-        addNav(SquareButton.HOME, "Inicio", v -> navHome());
-        addNav(SquareButton.RECENTS, "Recientes", v -> navRecents());
-        root.addView(navBar, new FrameLayout.LayoutParams(-2, -2));
+
 
         // REGLA DE DISPOSICIÓN (fija para todas las versiones):
         //   horizontal → principal ARRIBA, extendido ABAJO; los elementos cruzan de arriba hacia abajo.
@@ -230,39 +221,11 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private String firstPhone() { return "el extendido"; }
     private String secondPhone() { return "el principal"; }
 
-    private void addNav(int kind, String label, View.OnClickListener l) {
-        SquareButton b = new SquareButton(this, kind, label, false, night);
-        b.setOnClickListener(l);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
-        lp.setMarginEnd(dp(6));
-        navBar.addView(b, lp);
-        squares.add(b);
-    }
-
-    // ---------------- navegación y pantalla de inicio ----------------
+    // ---------------- pantalla de inicio ----------------
 
     private boolean isLauncher() {
         return getPackageManager().getComponentEnabledSetting(new android.content.ComponentName(this, getPackageName() + ".Escritorio"))
                 == android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED;
-    }
-
-    private void navBack() {
-        if (isLauncher()) return;      // como pantalla de inicio, Atrás no la cierra
-        moveTaskToBack(true);
-    }
-
-    private void navHome() {
-        try { startActivity(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); }
-        catch (Exception ignored) { }
-    }
-
-    @SuppressWarnings("deprecation")
-    private void navRecents() {
-        if (MesaAccess.instance != null) { MesaAccess.instance.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_RECENTS); return; }
-        // versión liviana: Android no deja abrir Recientes desde una app; se muestra la barra del sistema un momento
-        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
-        Toast.makeText(this, "Usa el botón Recientes de la barra del sistema", Toast.LENGTH_SHORT).show();
-        main.postDelayed(this::immersive, 5000);
     }
 
     @SuppressWarnings("deprecation")
@@ -636,15 +599,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             bp.setMargins(dp(12), 0, dp(12), dp(14));
         }
         bar.setLayoutParams(bp);
-        FrameLayout.LayoutParams np = (FrameLayout.LayoutParams) navBar.getLayoutParams();
-        if (stacked()) {
-            np.gravity = (ds == 0 ? Gravity.TOP : Gravity.BOTTOM) | Gravity.END;
-            np.setMargins(dp(14), dp(12), dp(14), dp(12));
-        } else {   // en vertical no caben ambas barras abajo: la de navegación va arriba
-            np.gravity = Gravity.TOP | (ds == 0 ? Gravity.START : Gravity.END);
-            np.setMargins(dp(12), dp(14), dp(12), 0);
-        }
-        navBar.setLayoutParams(np);
+
         otherSide = -1;
         hub.setSide(side);
         waitingSince = System.currentTimeMillis();

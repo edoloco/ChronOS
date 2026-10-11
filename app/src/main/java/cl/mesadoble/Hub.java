@@ -282,6 +282,11 @@ public class Hub implements Link.Listener {
         } else if ("scroll".equals(t)) {
             int d = m.optInt("d");
             for (int i = 0; i < Math.abs(d); i++) key(d > 0 ? KeyEvent.KEYCODE_DPAD_UP : KeyEvent.KEYCODE_DPAD_DOWN);
+        } else if ("nav".equals(t)) {
+            String k = m.optString("k");
+            if ("back".equals(k)) key(KeyEvent.KEYCODE_BACK);          // llega a la app por el teclado Mesa Doble
+            else if ("home".equals(k)) goHome();
+            else send("navAck", "k", k, "ok", false);                 // Recientes: Android no lo permite sin accesibilidad
         } else if ("pad".equals(t) && "btn".equals(m.optString("a")) && m.optBoolean("down")) {
             switch (m.optString("id")) {
                 case "dpad_up": key(KeyEvent.KEYCODE_DPAD_UP); break;
@@ -294,6 +299,24 @@ public class Hub implements Link.Listener {
                 case "y": key(KeyEvent.KEYCODE_TAB); break;
             }
         }
+    }
+
+    /** Ir a la pantalla de inicio del principal. Si Android lo impide (app de fondo), deja un aviso de un toque. */
+    private void goHome() {
+        Intent i = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try { app.startActivity(i); return; } catch (Exception ignored) { }
+        NotificationManager nm = (NotificationManager) app.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm == null) return;
+        if (nm.getNotificationChannel("avisos") == null)
+            nm.createNotificationChannel(new NotificationChannel("avisos", "Avisos del teclado", NotificationManager.IMPORTANCE_HIGH));
+        PendingIntent pi = PendingIntent.getActivity(app, 5, i, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        int icon = app.getResources().getIdentifier("ic_stat", "drawable", app.getPackageName());
+        try {
+            nm.notify(5, new Notification.Builder(app, "avisos")
+                    .setSmallIcon(icon != 0 ? icon : android.R.drawable.stat_notify_more)
+                    .setContentTitle("Ir al inicio").setContentText("Toca para ir a la pantalla de inicio")
+                    .setContentIntent(pi).setAutoCancel(true).build());
+        } catch (Exception ignored) { }
     }
 
     /** Entrega una tecla al teclado Mesa Doble de este teléfono, como si llegara del extendido. */

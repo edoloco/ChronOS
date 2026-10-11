@@ -88,6 +88,22 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
 
         content = new LinearLayout(this);
         root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
+
+        // Atrás, Inicio y Recientes del PRINCIPAL, como la barra de navegación de Android
+        LinearLayout nav = new LinearLayout(this);
+        nav.setGravity(Gravity.CENTER);
+        nav.setPadding(0, dp(2), 0, dp(4));
+        int[] kinds = {SquareButton.BACK, SquareButton.HOME, SquareButton.RECENTS};
+        String[] labels = {"Atrás", "Inicio", "Recientes"}, keys = {"back", "home", "recents"};
+        for (int i = 0; i < 3; i++) {
+            final String k = keys[i];
+            SquareButton sb = new SquareButton(this, kinds[i], labels[i], false, night);
+            sb.setOnClickListener(v -> hub.send("nav", "k", k));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+            lp.setMargins(dp(22), 0, dp(22), 0);
+            nav.addView(sb, lp);
+        }
+        root.addView(nav, new LinearLayout.LayoutParams(-1, -2));
         setContentView(root);
 
         hub = Hub.get(this);
@@ -373,6 +389,8 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
 
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
+        if ("navAck".equals(t) && !m.optBoolean("ok"))
+            android.widget.Toast.makeText(this, "Recientes necesita la versión completa en el principal", android.widget.Toast.LENGTH_SHORT).show();
         if ("kbState".equals(t) || "kbAck".equals(t)) updateStatus();
         // abierto solo (al tocar un campo en el principal): se cierra solo cuando ya no hay dónde escribir
         if ("kbState".equals(t) && auto && (mode == KB || mode == KB_PAD || mode == DICT)) {

@@ -38,8 +38,10 @@ cuando cruzas más de la mitad o los lanzas.
 - **Teclado automático**: al tocar donde se escribe en el principal (o al abrir una app de chat), el teclado
   aparece en el extendido. El principal cambia solo al teclado Mesa Doble y vuelve al tuyo si se desconecta.
 - **Compartir desde otras apps**: *Compartir → Poner en Mesa Doble*.
-- **Navegación**: Atrás, Inicio y Recientes en su propia barra (Recientes necesita la versión completa;
-  en la liviana muestra un momento la barra del sistema).
+- **Navegación del principal**: en la pantalla de teclado (todos los modos) hay Atrás, Inicio y Recientes
+  que controlan el **principal**. Con la versión liviana: Atrás funciona cuando hay un campo de texto activo
+  (pasa por el teclado Mesa Doble), Inicio abre el inicio (o deja un aviso de un toque) y Recientes necesita
+  la versión completa.
 - **Color de fondo**: *Ajustes → Color de fondo*, se aplica en ambos teléfonos.
 - **Pantalla de inicio**: *Ajustes → Pantalla de inicio* convierte Mesa Doble en el launcher del teléfono
   (no necesita permisos; se desactiva igual).
@@ -60,7 +62,8 @@ Desde *Teclado → Usar este teléfono como teclado*, con cinco modos:
 - **Teclado + touchpad**.
 - **Touchpad**: puntero, clic, desplazar con dos dedos, Atrás e Inicio (versión completa).
   En la versión liviana mueve el cursor del texto.
-- **Gamepad**: dos joysticks, cruceta, A/B/X/Y, L1/L2/L3, R1/R2/R3, Select y Start. *Editar* para moverlos y cambiar su tamaño. Cada control
+- **Gamepad** (los emuladores no lo reconocen todavía: necesitan un control de juego real, ver issue):
+  dos joysticks, cruceta, A/B/X/Y, L1/L2/L3, R1/R2/R3, Select y Start. *Editar* para moverlos y cambiar su tamaño. Cada control
   toca el principal en el mismo lugar relativo (versión completa).
 - **Dictado**: escribe con el teclado del teléfono o dicta por voz.
 
