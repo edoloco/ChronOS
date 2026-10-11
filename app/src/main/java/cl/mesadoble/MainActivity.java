@@ -310,7 +310,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .setPositiveButton("Guardar", (dlg, w) -> {
                     String t = e.getText().toString();
                     it.text = t.length() > 2000 ? t.substring(0, 2000) : t;
-                    it.u = System.currentTimeMillis();
+                    it.touch();
                     desk.invalidate();
                     onItemChanged(it);
                 })
@@ -452,7 +452,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             link.send(hello);
             link.send(full);
         }
-        if (state != Link.CONNECTED) otherSide = -1;
+        if (state != Link.CONNECTED) { otherSide = -1; desk.clearAllRemoteDrags(); }
         updateStatus();
     }
 
@@ -467,7 +467,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 JSONArray arr = m.optJSONArray("items");
                 if (arr != null) for (int i = 0; i < arr.length(); i++) {
                     JSONObject o = arr.optJSONObject(i);
-                    if (o != null) merge(Item.fromJson(o));
+                    if (o != null) merge(Item.fromJson(o), false);
                 }
                 desk.invalidate();
                 scheduleSave();
@@ -475,7 +475,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             }
             case "up": {
                 JSONObject o = m.optJSONObject("item");
-                if (o != null) { Item in = Item.fromJson(o); desk.clearRemoteDrag(in.id); merge(in); desk.invalidate(); scheduleSave(); }
+                if (o != null) { Item in = Item.fromJson(o); desk.clearRemoteDrag(in.id); merge(in, true); desk.invalidate(); scheduleSave(); }
                 break;
             }
             case "del": {
@@ -492,11 +492,20 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         }
     }
 
-    private void merge(Item in) {
+    /**
+     * live = cambio recibido en este momento desde el otro teléfono: siempre gana
+     * (antes se comparaban relojes de ambos teléfonos y, si no estaban sincronizados,
+     * el cambio se descartaba y el elemento quedaba "perdido" fuera de pantalla).
+     * Al sincronizar todo tras reconectar, gana la versión con más cambios.
+     */
+    private void merge(Item in, boolean live) {
         Item cur = desk.find(in.id);
-        if (cur == null) desk.items.add(in);
-        else if (in.u >= cur.u) cur.copyFrom(in);
+        if (cur == null) { desk.items.add(in); return; }
+        if (live && dragging(cur)) return;
+        if (live || in.rev > cur.rev || (in.rev == cur.rev && in.u > cur.u)) cur.copyFrom(in);
     }
+
+    private boolean dragging(Item it) { return desk.isDragging(it); }
 
     // ---------------- guardado local ----------------
 

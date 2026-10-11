@@ -94,6 +94,7 @@ public class DeskView extends View {
     }
 
     public void setHost(Host h) { host = h; }
+    public boolean isDragging(Item it) { return dragging == it; }
     public void setSide(int s) { side = s; invalidate(); }
     public void setConnected(boolean c) { connected = c; invalidate(); }
 
@@ -104,6 +105,7 @@ public class DeskView extends View {
 
     public void setRemoteDrag(String id, double x, double y) { remoteDrags.put(id, new double[]{x, y}); invalidate(); }
     public void clearRemoteDrag(String id) { remoteDrags.remove(id); invalidate(); }
+    public void clearAllRemoteDrags() { remoteDrags.clear(); invalidate(); }
 
     /** Lugar libre aproximado dentro de la pantalla de este teléfono. */
     public double[] spot(double w) {
@@ -116,7 +118,7 @@ public class DeskView extends View {
         boolean onLeft = it.x + it.w / 2 < 1;
         it.x = onLeft ? 1.04 + Math.random() * 0.1 : 1 - 0.04 - it.w - Math.random() * 0.1;
         it.z = System.currentTimeMillis();
-        it.u = it.z;
+        it.touch();
         invalidate();
         if (host != null) host.onItemChanged(it);
     }
@@ -345,7 +347,7 @@ public class DeskView extends View {
                 }
                 double hf = it.hPx / H;
                 y = Math.min(Math.max(y, 0.04), Math.max(0.04, 0.97 - hf));
-                it.x = x; it.y = y; it.z = System.currentTimeMillis(); it.u = it.z;
+                it.x = x; it.y = y; it.z = System.currentTimeMillis(); it.touch();
                 invalidate();
                 if (host != null) { host.onItemChanged(it); host.onDragEnd(it); }
                 return true;
