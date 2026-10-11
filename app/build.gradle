@@ -13,7 +13,11 @@ android {
         // número de versión basado en fecha y hora: siempre crece, aunque cambie el archivo de compilación
         versionCode((System.getenv('VERSION_CODE') ?: '1').toInteger())
         versionName(System.getenv('VERSION_NAME') ?: '1.0')
+        // repositorio de GitHub (dueño/nombre) para que la app busque sus propias actualizaciones
+        resValue "string", "repo", (System.getenv('GITHUB_REPOSITORY') ?: '')
     }
+
+    buildFeatures { resValues true }
 
     // Dos versiones: "completa" (cambio de teclado automático, usa accesibilidad)
     // y "liviana" (sin permisos sensibles; Play Protect no la bloquea)

@@ -681,6 +681,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .option(Ui.CLOCK, "Reloj", "Hora, fecha y próxima alarma; al tocarlo abre las alarmas", this::addClock)
                 .option(Ui.WIDGETS, "Widget", "Widgets de tus apps (clima, calendario, música...)", this::addWidget)
                 .option(Ui.FOLDER, "Archivos", "Pasar archivos entre los dos teléfonos", this::openFiles)
+                .option(Ui.RECEIVE, "Actualizar app", "Versión instalada: " + Updater.clean(Updater.installedVersion(this)), () -> Updater.check(this, hub))
                 .button("Cerrar", false, null)
                 .show();
     }

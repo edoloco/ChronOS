@@ -37,6 +37,9 @@ cuando cruzas más de la mitad o los lanzas.
   dejar su acceso directo en la mesa o abrirla en el principal; **mantén presionada** para desinstalarla
   (Android pide confirmar en el principal).
 - **Herramientas** (primer botón de la barra): Nota, Imagen, Reloj, Widget y Archivos.
+- **Actualizar app** (*Herramientas*): busca la última versión en *Releases* de este repositorio, descarga
+  el APK de la misma versión instalada (liviana o completa) y abre el instalador. Puede actualizar también el
+  otro teléfono. La primera vez Android pide permitir que Mesa Doble instale apps. El repositorio debe ser público.
 - **Reloj**: hora, fecha y próxima alarma en la mesa; al tocarlo abre las alarmas del principal.
 - **Archivos**: a pantalla completa en los dos teléfonos a la vez (al abrirlo en uno se abre en el otro):
   cada teléfono maneja sus propios archivos, como las dos ventanas de Total Commander. Mantén presionado para
