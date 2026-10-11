@@ -65,6 +65,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private final List<SquareButton> squares = new ArrayList<>();
     private final List<SquareButton> tools = new ArrayList<>();   // los botones que se pliegan dentro del menú
     private boolean barOpen = true;
+    private String otherVersion = "";
     private LinearLayout dock, navPill;   // dock = barra de opciones + botones de navegación del principal
     // widgets de Android
     private static final int REQ_BIND = 31, REQ_CONF = 32, HOST_ID = 4711;
@@ -536,6 +537,38 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                         isLauncher() ? "Mesa Doble es tu launcher (tocar para dejar de usarla)" : "Usar Mesa Doble como launcher de este teléfono", this::toggleLauncher)
                 .option(Ui.GEAR, "Revisar configuración", principal ? "Permisos del principal" : "Permisos del extendido", () -> checkSetup(true))
                 .option(Ui.WIFI, "Conexión", statusText, this::showConnection)
+                .option(Ui.NOTE, "Acerca de la app", "Versión " + Updater.clean(Updater.installedVersion(this)), this::about)
+                .button("Cerrar", false, null)
+                .show();
+    }
+
+    /** Acerca de: versión de este teléfono y del otro, para saber si los dos están al día. */
+    private void about() {
+        String v = Updater.installedVersion(this);
+        String kind = Updater.isLiviana(this) ? "liviana" : "completa";
+        String when = "";
+        try {
+            long t = getPackageManager().getPackageInfo(getPackageName(), 0).lastUpdateTime;
+            when = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(new java.util.Date(t));
+        } catch (Exception ignored) { }
+        String repo = Updater.repo(this);
+        StringBuilder sb = new StringBuilder();
+        sb.append("Versión: ").append(Updater.clean(v)).append(" (").append(kind).append(")\n");
+        if (!when.isEmpty()) sb.append("Instalada el ").append(when).append("\n");
+        sb.append("Este teléfono es el ").append(side == 1 ? "principal" : "extendido").append("\n");
+        if (hub.connected()) {
+            String ov = Updater.clean(otherVersion);
+            sb.append("Otro teléfono: ").append(ov.isEmpty() ? "versión antigua (no informa su versión)" : ov);
+            if (!ov.isEmpty() && !ov.equals(Updater.clean(v))) sb.append("  ⚠ distinta");
+            sb.append("\n");
+        } else sb.append("Otro teléfono: sin conexión\n");
+        sb.append("Repositorio: ").append(repo.isEmpty() ? "(sin definir)" : repo).append("\n\n");
+        sb.append("Mesa Doble une dos teléfonos como si fueran uno: mesa compartida, teclado, touchpad, gamepad y archivos.\n");
+        sb.append("Diccionario: FrequencyWords (MIT).");
+        new Ui.Sheet(this)
+                .title("Acerca de Mesa Doble")
+                .message(sb.toString())
+                .option(Ui.RECEIVE, "Buscar actualización", null, () -> Updater.check(this, hub))
                 .button("Cerrar", false, null)
                 .show();
     }
@@ -1330,7 +1363,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             JSONObject hello = new JSONObject();
             JSONObject full = new JSONObject();
             try {
-                hello.put("t", "hello"); hello.put("side", side);
+                hello.put("t", "hello"); hello.put("side", side); hello.put("ver", Updater.installedVersion(this));
                 JSONArray arr = new JSONArray();
                 for (Item it : desk.items) arr.put(it.toJson(false));
                 full.put("t", "full"); full.put("items", arr);
@@ -1348,6 +1381,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         switch (t) {
             case "hello":
                 otherSide = m.optInt("side", -1);
+                otherVersion = m.optString("ver", "");
                 updateStatus();
                 break;
             case "pages": {   // ambos teléfonos muestran el mismo escritorio
