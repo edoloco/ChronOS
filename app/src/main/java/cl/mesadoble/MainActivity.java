@@ -221,17 +221,24 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 fixes.add(() -> openSettings(android.provider.Settings.ACTION_INPUT_METHOD_SETTINGS, null,
                         "Activa \"Mesa Doble\" en la lista de teclados y vuelve."));
             } else lines.add("✓ Teclado Mesa Doble activado");
-            if (!MesaAccess.isEnabled(this)) {
+            boolean full = MesaAccess.available(this);
+            if (!full) {
+                lines.add("• Versión liviana: al conectar, toca el aviso \"quiere escribir aquí\" para elegir el teclado Mesa Doble");
+            } else if (!MesaAccess.isEnabled(this)) {
                 lines.add("✗ Cambio automático de teclado (accesibilidad)");
                 fixes.add(this::guideAccessibility);
             } else lines.add("✓ Cambio automático de teclado");
-            if (!canOverlay()) {
+            if (!full) {
+                lines.add("• Versión liviana: las apps pedidas desde el extendido se abren tocando un aviso");
+            } else if (!canOverlay()) {
                 lines.add("✗ Abrir apps pedidas desde el extendido");
                 fixes.add(() -> openSettings(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()),
                         "Activa \"Mostrar sobre otras apps\" para Mesa Doble y vuelve."));
             } else lines.add("✓ Abrir apps pedidas desde el extendido");
         } else {
-            if (!canOverlay()) {
+            if (!MesaAccess.available(this)) {
+                lines.add("• Versión liviana: si la mesa está de fondo, el teclado se abre tocando un aviso");
+            } else if (!canOverlay()) {
                 lines.add("✗ Abrir el teclado solo, aunque la mesa esté de fondo");
                 fixes.add(() -> openSettings(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()),
                         "Activa \"Mostrar sobre otras apps\" para Mesa Doble y vuelve."));

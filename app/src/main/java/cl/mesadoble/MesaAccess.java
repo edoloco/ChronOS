@@ -103,6 +103,14 @@ public class MesaAccess extends AccessibilityService {
         }
     }
 
+    /** false en la versión liviana, que no incluye este servicio. */
+    static boolean available(Context c) {
+        try {
+            c.getPackageManager().getServiceInfo(new android.content.ComponentName(c, MesaAccess.class), 0);
+            return true;
+        } catch (Exception e) { return false; }
+    }
+
     static boolean isEnabled(Context c) {
         String list = Settings.Secure.getString(c.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
         return list != null && list.contains(c.getPackageName() + "/");

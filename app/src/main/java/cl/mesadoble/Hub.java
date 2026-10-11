@@ -168,6 +168,7 @@ public class Hub implements Link.Listener {
             sendImeState();
             main.removeCallbacks(restoreIme);
             if (isPrincipal() && MesaAccess.instance != null) MesaAccess.instance.switchToMesa();
+            else if (isPrincipal() && !imeSelected(app)) notifySwitch();   // versión liviana: un toque en el aviso
         } else {
             remoteImeReady = false;
             // sin el extendido no hay teclado: si la conexión no vuelve pronto, devolver el teclado normal
