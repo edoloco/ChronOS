@@ -82,6 +82,20 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         status.setEllipsize(TextUtils.TruncateAt.END);
         status.setOnClickListener(v -> help());
         top.addView(status, new LinearLayout.LayoutParams(0, -2, 1));
+        // Atrás, Inicio y Recientes del PRINCIPAL, junto al indicador "Escribiendo en el principal"
+        int[] kinds = {SquareButton.BACK, SquareButton.HOME, SquareButton.RECENTS};
+        String[] labels = {"Atrás", "Inicio", "Recientes"}, keys = {"back", "home", "recents"};
+        for (int i = 0; i < 3; i++) {
+            final String k = keys[i];
+            SquareButton sb = new SquareButton(this, kinds[i], labels[i], false, night);
+            sb.setCompact(true);
+            sb.setOnClickListener(v -> hub.send("nav", "k", k));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+            lp.setMarginEnd(dp(6));
+            top.addView(sb, lp);
+        }
+        View gap = new View(this);
+        top.addView(gap, new LinearLayout.LayoutParams(dp(6), 1));
         editBtn = chip("Editar", v -> toggleEdit());
         resetBtn = chip("Restablecer", v -> { gamepad.resetLayout(); prefs.edit().remove("padLayout").apply(); });
         modeBtn = chip(NAMES[mode], v -> pickMode());
@@ -95,21 +109,6 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         content = new LinearLayout(this);
         root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
 
-        // Atrás, Inicio y Recientes del PRINCIPAL, como la barra de navegación de Android
-        LinearLayout nav = new LinearLayout(this);
-        nav.setGravity(Gravity.CENTER);
-        nav.setPadding(0, dp(2), 0, dp(4));
-        int[] kinds = {SquareButton.BACK, SquareButton.HOME, SquareButton.RECENTS};
-        String[] labels = {"Atrás", "Inicio", "Recientes"}, keys = {"back", "home", "recents"};
-        for (int i = 0; i < 3; i++) {
-            final String k = keys[i];
-            SquareButton sb = new SquareButton(this, kinds[i], labels[i], false, night);
-            sb.setOnClickListener(v -> hub.send("nav", "k", k));
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
-            lp.setMargins(dp(22), 0, dp(22), 0);
-            nav.addView(sb, lp);
-        }
-        root.addView(nav, new LinearLayout.LayoutParams(-1, -2));
         setContentView(root);
 
         hub = Hub.get(this);

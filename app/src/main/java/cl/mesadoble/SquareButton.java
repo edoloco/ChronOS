@@ -18,7 +18,7 @@ import android.view.View;
 public class SquareButton extends View {
 
     public static final int NOTE = 0, IMAGE = 1, APPS = 2, KEYBOARD = 3, SETTINGS = 4, STATUS = 5,
-            BACK = 6, HOME = 7, RECENTS = 8, MENU = 9, DESKS = 10;
+            BACK = 6, HOME = 7, RECENTS = 8, MENU = 9, DESKS = 10, WIDGET = 11;
 
     private final int kind;
     private final String text;
@@ -60,6 +60,10 @@ public class SquareButton extends View {
 
     public void setStatus(int level) { statusLevel = level; invalidate(); }
 
+    private boolean compact;
+    /** Versión chica, solo ícono (para la barra superior del teclado). */
+    public void setCompact(boolean c) { compact = c; requestLayout(); invalidate(); }
+
     private boolean open;
     /** Botón de menú: abierto muestra una X; cerrado, tres líneas y un punto con el estado de la conexión. */
     public void setOpen(boolean o) { open = o; invalidate(); }
@@ -75,7 +79,7 @@ public class SquareButton extends View {
     }
 
     @Override protected void onMeasure(int w, int h) {
-        int s = Math.round(52 * dp);
+        int s = Math.round((compact ? 38 : 52) * dp);
         setMeasuredDimension(s, s);
     }
 
@@ -102,7 +106,7 @@ public class SquareButton extends View {
         c.drawRoundRect(new RectF(0, 0, w, h), r, r, bg);
         c.save();
         c.rotate(rot, w / 2, h / 2);
-        float cx = w / 2, cy = h * 0.42f, u = 7 * dp;   // u: unidad del ícono
+        float cx = w / 2, cy = compact ? h / 2 : h * 0.42f, u = (compact ? 6 : 7) * dp;   // u: unidad del ícono
         int ink = fgColor;
         if (kind == STATUS) ink = statusLevel == 2 ? accent : statusLevel == 1 ? warn : 0xFF8798A9;
         stroke.setColor(ink);
@@ -164,6 +168,11 @@ public class SquareButton extends View {
                     c.drawCircle(cx + u * 1.35f, cy - u * 1.1f, 3.2f * dp, fill);
                 }
                 break;
+            case WIDGET:
+                c.drawRoundRect(new RectF(cx - u * 1.2f, cy - u, cx + u * 0.1f, cy - u * 0.05f), 2 * dp, 2 * dp, stroke);
+                c.drawRoundRect(new RectF(cx + u * 0.35f, cy - u, cx + u * 1.2f, cy + u), 2 * dp, 2 * dp, stroke);
+                c.drawRoundRect(new RectF(cx - u * 1.2f, cy + u * 0.25f, cx + u * 0.1f, cy + u), 2 * dp, 2 * dp, stroke);
+                break;
             case DESKS: {
                 float pw = u * 0.7f, ph = u * 1.5f;
                 c.drawRoundRect(new RectF(cx - pw / 2, cy - ph / 2, cx + pw / 2, cy + ph / 2), 2 * dp, 2 * dp, stroke);
@@ -180,7 +189,7 @@ public class SquareButton extends View {
                 break;
         }
         label.setColor(kind == STATUS ? ink : fgColor);
-        c.drawText(text, cx, h - 8 * dp, label);
+        if (!compact) c.drawText(text, cx, h - 8 * dp, label);
         c.restore();
     }
 }

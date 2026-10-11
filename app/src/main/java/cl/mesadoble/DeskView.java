@@ -52,7 +52,14 @@ public class DeskView extends View {
         void onOpenApp(Item it);
         /** Se cambió de escritorio (deslizando o llevando un elemento al borde). */
         void onPageChange(int page, int pages);
+        /** Widgets de Android: la vista real va encima de la mesa, donde la mesa dibuja su tarjeta. */
+        void onWidgetFrame(Item it, float left, float top, float width, float height, float rot, float pivotX, float pivotY, boolean shown);
+        boolean widgetBound(Item it);
+        void onWidgetTap(Item it);
     }
+
+    /** Alto de la franja superior de un widget (nombre y botones); el widget va debajo. */
+    public float widgetBar() { return 38 * dp; }
 
     public final List<Item> items = new ArrayList<>();
     private final Map<String, double[]> remoteDrags = new HashMap<>();
@@ -402,6 +409,7 @@ public class DeskView extends View {
         Collections.sort(sorted, (p, q) -> Long.compare(p.z, q.z));
         if (dragging != null) { sorted.remove(dragging); sorted.add(dragging); }
         boolean again = false;
+        java.util.Set<Item> framed = new java.util.HashSet<>();
         for (Item it : sorted) {
             if (!visible(it)) { it.dx = Float.NaN; continue; }
             // al deslizar en vertical (lado a lado) no se muestran los elementos del otro teléfono
@@ -421,7 +429,14 @@ public class DeskView extends View {
             float reach = Math.max(width, h);   // un elemento girado puede asomar más allá de su ancho
             if (left > W + reach || left + width < -reach || top > H + reach || top + h < -reach) continue;
             drawItem(c, it, left, top, width, h, it == dragging || rd != null);
+            if (Item.WIDGET.equals(it.kind) && host != null) {
+                float bar = widgetBar();
+                host.onWidgetFrame(it, left, top + bar, width, h - bar, it.rot, width / 2, h / 2 - bar, true);
+                framed.add(it);
+            }
         }
+        if (host != null) for (Item it : items)
+            if (Item.WIDGET.equals(it.kind) && !framed.contains(it)) host.onWidgetFrame(it, 0, 0, 0, 0, 0, 0, 0, false);
         if (again) postInvalidateOnAnimation();
 
         // puntos de los escritorios
@@ -453,6 +468,8 @@ public class DeskView extends View {
             it.hPx = 8 * dp + ih + 36 * dp;
         } else if (Item.APP.equals(it.kind)) {
             it.hPx = Math.max(96 * dp, width * 0.9f);
+        } else if (Item.WIDGET.equals(it.kind)) {
+            it.hPx = widgetBar() + (float) (width * it.ar);
         } else {
             it.hPx = 132 * dp;
         }
@@ -467,15 +484,29 @@ public class DeskView extends View {
         if (lifted) c.scale(1.03f, 1.03f, width / 2, h / 2);
         RectF box = new RectF(0, 0, width, h);
 
-        boolean isNote = Item.NOTE.equals(it.kind), isImg = Item.IMG.equals(it.kind), isApp = Item.APP.equals(it.kind);
+        boolean isNote = Item.NOTE.equals(it.kind), isImg = Item.IMG.equals(it.kind), isApp = Item.APP.equals(it.kind),
+                isWidget = Item.WIDGET.equals(it.kind);
         card.setColor(isNote ? it.color : isImg ? 0xFFFFFFFF : linkBg);
         card.setShadowLayer((lifted ? 18 : 10) * dp, 0, (lifted ? 10 : 5) * dp, 0x55000000);
         c.drawRoundRect(box, isApp ? 18 * dp : r, isApp ? 18 * dp : r, card);
 
         int ink = isNote || isImg ? 0xFF2B2A22 : fg;
         label.setColor((ink & 0x00FFFFFF) | 0x77000000);
-        String tag = isNote ? "NOTA" : isImg ? "IMAGEN" : isApp ? "APP" : "ENLACE";
-        if (isImg) c.drawText(tag, 10 * dp, h - 12 * dp, label);
+        String tag = isNote ? "NOTA" : isImg ? "IMAGEN" : isApp ? "APP" : isWidget ? "WIDGET" : "ENLACE";
+        if (isWidget) {
+            small.setColor(fg);
+            small.setTextSize(13 * dp);
+            c.drawText(ellipsize(it.title, small, width - 92 * dp), 10 * dp, 24 * dp, small);
+            boolean bound = host != null && host.widgetBound(it);
+            if (!bound) {
+                small.setColor(muted);
+                small.setTextSize(13 * dp);
+                String t = "Toca para mostrar este widget aquí";
+                float bar = widgetBar();
+                c.drawText(ellipsize(t, small, width - 16 * dp), width / 2 - Math.min(small.measureText(t), width - 16 * dp) / 2,
+                        bar + (h - bar) / 2, small);
+            }
+        } else if (isImg) c.drawText(tag, 10 * dp, h - 12 * dp, label);
         else c.drawText(tag, 10 * dp, 18 * dp, label);
 
         if (isNote) {
@@ -714,6 +745,15 @@ public class DeskView extends View {
                     invalidate();
                     return true;
                 }
+                if (mode == RESIZE && Item.WIDGET.equals(pressed.kind)) {
+                    // widget: ancho y alto libres, desde la esquina
+                    float[] l = toLocal(pressed, e.getX(), e.getY());
+                    float nw = Math.max(110 * dp, l[0] - 5 * dp), ch = Math.max(50 * dp, l[1] - 5 * dp - widgetBar());
+                    pressed.w = clampW(nw / W);
+                    pressed.ar = Math.max(0.15, Math.min(4, ch / (pressed.w * W)));
+                    invalidate();
+                    return true;
+                }
                 if (mode == RESIZE) {
                     float[] c = centerOf(pressed);
                     double d = Math.hypot(e.getX() - c[0], e.getY() - c[1]);
@@ -820,6 +860,7 @@ public class DeskView extends View {
         else if (Item.NOTE.equals(it.kind)) { if (host != null) host.onEditNote(it); }
         else if (Item.LINK.equals(it.kind) && "open".equals(pressedBtn)) { if (host != null) host.onOpenLink(it); }
         else if (Item.APP.equals(it.kind)) { if (host != null) host.onOpenApp(it); }
+        else if (Item.WIDGET.equals(it.kind)) { if (host != null) host.onWidgetTap(it); }
         else { it.z = System.currentTimeMillis(); invalidate(); }
     }
 }

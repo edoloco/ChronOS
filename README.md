@@ -38,8 +38,7 @@ cuando cruzas más de la mitad o los lanzas.
 - **Teclado automático**: al tocar donde se escribe en el principal (o al abrir una app de chat), el teclado
   aparece en el extendido. El principal cambia solo al teclado Mesa Doble y vuelve al tuyo si se desconecta.
 - **Compartir desde otras apps**: *Compartir → Poner en Mesa Doble*.
-- **Navegación del principal**: en la pantalla de teclado (todos los modos) hay Atrás, Inicio y Recientes
-  que controlan el **principal**. Con la versión liviana: Atrás funciona cuando hay un campo de texto activo
+- **Navegación del principal**: Atrás, Inicio y Recientes controlan el **principal**. Con la versión liviana: Atrás funciona cuando hay un campo de texto activo
   (pasa por el teclado Mesa Doble), Inicio abre el inicio (o deja un aviso de un toque) y Recientes necesita
   la versión completa.
 - **Barra plegable**: el botón *Menú* despliega o esconde los demás botones (recuerda cómo la dejaste).
@@ -51,6 +50,12 @@ cuando cruzas más de la mitad o los lanzas.
 - **Apps ordenadas o fijas** (botón *Mesas*): *Ordenar apps ahora* las pone en cuadrícula por nombre;
   *Orden automático* las reacomoda al agregarlas o soltarlas; *Apps bloqueadas* las deja fijas (no se mueven
   ni se borran, pero se abren al tocarlas). Se aplica en ambos teléfonos.
+- **Widgets** (botón *Widget*): agrega widgets de Android (reloj, clima, calendario, música...). Se mueven
+  tomándolos por su franja superior; mantén presionada esa franja para girarlos o cambiar su ancho y alto.
+  Cada teléfono muestra su propia copia: si pasas un widget al otro teléfono, tócalo una vez ahí para activarlo
+  (la app tiene que estar instalada en ese teléfono).
+- **Navegación del principal en la mesa**: en el extendido, al lado de la barra de opciones, están Atrás, Inicio
+  y Recientes del principal. En la pantalla de teclado van arriba, junto a "Escribiendo en el principal".
 - **Pantalla unida** (*Ajustes*, activada por defecto): cuando el principal se apaga o bloquea, el extendido
   también; cuando el principal se enciende o desbloquea, el extendido igual. En el extendido, *Ajustes →
   Revisar configuración* pide lo necesario: permiso para bloquear la pantalla (administrador del dispositivo,

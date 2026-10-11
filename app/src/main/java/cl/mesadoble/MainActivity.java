@@ -65,6 +65,16 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private final List<SquareButton> squares = new ArrayList<>();
     private final List<SquareButton> tools = new ArrayList<>();   // los botones que se pliegan dentro del menú
     private boolean barOpen = true;
+    private LinearLayout dock, navPill;   // dock = barra de opciones + botones de navegación del principal
+    // widgets de Android
+    private static final int REQ_BIND = 31, REQ_CONF = 32, HOST_ID = 4711;
+    private android.appwidget.AppWidgetHost widgetHost;
+    private android.appwidget.AppWidgetManager widgetManager;
+    private FrameLayout widgetLayer;
+    private final Map<String, android.appwidget.AppWidgetHostView> widgetViews = new HashMap<>();
+    private Item pendingWidget;
+    private int pendingWidgetId = -1;
+    private boolean pendingWidgetNew;
     private OrientationEventListener orient;
     private int snapped = -1;
     private String statusText = "";
@@ -90,6 +100,11 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         desk.setDeskColor(getSharedPreferences("mesa", MODE_PRIVATE).getInt("deskColor", 0), night);
         desk.setHost(this);
         root.addView(desk, new FrameLayout.LayoutParams(-1, -1));
+        widgetLayer = new FrameLayout(this);
+        widgetLayer.setClipChildren(false);
+        root.addView(widgetLayer, new FrameLayout.LayoutParams(-1, -1));
+        widgetManager = android.appwidget.AppWidgetManager.getInstance(this);
+        widgetHost = new android.appwidget.AppWidgetHost(getApplicationContext(), HOST_ID);
 
         bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
@@ -104,11 +119,32 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         addSquare(SquareButton.NOTE, "Nota", true, v -> addNote());
         addSquare(SquareButton.IMAGE, "Imagen", false, v -> pickImage());
         addSquare(SquareButton.APPS, "Apps", false, v -> showApps());
+        addSquare(SquareButton.WIDGET, "Widget", false, v -> addWidget());
         addSquare(SquareButton.DESKS, "Mesas", false, v -> desksMenu());
         addSquare(SquareButton.KEYBOARD, "Teclado", false, v -> keyboardMenu());
         addSquare(SquareButton.SETTINGS, "Ajustes", false, v -> settingsMenu());
         statusBtn = addSquare(SquareButton.STATUS, "Red", false, v -> showConnection());
-        root.addView(bar, new FrameLayout.LayoutParams(-2, -2));
+        // Atrás, Inicio y Recientes del PRINCIPAL, al lado de la barra (solo en el extendido)
+        navPill = new LinearLayout(this);
+        navPill.setPadding(dp(6), dp(6), dp(6), dp(6));
+        navPill.setBackground(pill(night ? 0xE6182129 : 0xEEFFFFFF));
+        navPill.setElevation(dp(6));
+        int[] nk = {SquareButton.BACK, SquareButton.HOME, SquareButton.RECENTS};
+        String[] nl = {"Atrás", "Inicio", "Recientes"}, nkeys = {"back", "home", "recents"};
+        for (int i = 0; i < 3; i++) {
+            final String k = nkeys[i];
+            SquareButton nb = new SquareButton(this, nk[i], nl[i], false, night);
+            nb.setOnClickListener(v -> {
+                if (!hub.connected()) { Toast.makeText(this, "El principal no está conectado", Toast.LENGTH_SHORT).show(); return; }
+                hub.send("nav", "k", k);
+            });
+            squares.add(nb);
+            navPill.addView(nb);
+        }
+        dock = new LinearLayout(this);
+        dock.addView(bar);
+        dock.addView(navPill);
+        root.addView(dock, new FrameLayout.LayoutParams(-2, -2));
         rebuildBar();
 
 
@@ -136,6 +172,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         for (Item it : desk.items) desk.normalize(it);
         desk.setPages(Math.max(prefs.getInt("pages", 1), maxPage() + 1), prefs.getInt("page", 0), 0);
         desk.setAppsMode(prefs.getBoolean("appsLock", false), prefs.getBoolean("appsAuto", false));
+        cleanWidgets();
 
         side = hub.side();
         if (side >= 0) applySide();
@@ -152,6 +189,16 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         handleShare(intent);
+    }
+
+    @Override protected void onStart() {
+        super.onStart();
+        try { widgetHost.startListening(); } catch (Exception ignored) { }
+    }
+
+    @Override protected void onStop() {
+        try { widgetHost.stopListening(); } catch (Exception ignored) { }
+        super.onStop();
     }
 
     @Override protected void onResume() {
@@ -337,6 +384,19 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         }
         for (SquareButton b : tools) b.setVisibility(barOpen ? View.VISIBLE : View.GONE);
         menuBtn.setOpen(barOpen);
+        // navegación: misma dirección que la barra, separada por un espacio
+        navPill.setOrientation(column ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
+        for (int i = 0; i < navPill.getChildCount(); i++) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+            if (i > 0) { if (column) lp.topMargin = dp(6); else lp.setMarginStart(dp(6)); }
+            navPill.getChildAt(i).setLayoutParams(lp);
+        }
+        dock.setOrientation(LinearLayout.HORIZONTAL);
+        dock.setGravity(column ? Gravity.BOTTOM : Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(-2, -2);
+        np.setMarginStart(dp(8));
+        navPill.setLayoutParams(np);
+        navPill.setVisibility(side == 0 ? View.VISIBLE : View.GONE);   // solo el extendido controla al principal
     }
 
     private void toggleBar() {
@@ -755,7 +815,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         desk.setSide(ds);
         rebuildBar();
         // la barra va en el borde exterior, lejos de la unión entre teléfonos
-        FrameLayout.LayoutParams bp = (FrameLayout.LayoutParams) bar.getLayoutParams();
+        FrameLayout.LayoutParams bp = (FrameLayout.LayoutParams) dock.getLayoutParams();
         if (stacked()) {
             bp.gravity = (ds == 0 ? Gravity.TOP : Gravity.BOTTOM) | Gravity.START;
             bp.setMargins(dp(14), dp(12), dp(14), dp(12));
@@ -763,7 +823,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             bp.gravity = Gravity.BOTTOM | (ds == 0 ? Gravity.START : Gravity.END);
             bp.setMargins(dp(12), 0, dp(12), dp(14));
         }
-        bar.setLayoutParams(bp);
+        dock.setLayoutParams(bp);
 
         otherSide = -1;
         hub.setSide(side);
@@ -944,6 +1004,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     @Override public void onItemDeleted(Item it) {
+        if (Item.WIDGET.equals(it.kind)) releaseWidget(it.id);
         JSONObject m = new JSONObject();
         try { m.put("t", "del"); m.put("id", it.id); } catch (JSONException ignored) { }
         hub.send(m);
@@ -965,6 +1026,167 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         hub.send(m);
     }
 
+    // ---------------- widgets de Android ----------------
+    // Cada teléfono tiene su propia copia del widget (Android no deja mostrar el de otro teléfono):
+    // la mesa guarda qué widget es y dónde va; cada teléfono lo activa la primera vez que lo muestra.
+
+    private Map<String, Integer> widgetMapCache;
+
+    private Map<String, Integer> widgetMap() {
+        if (widgetMapCache != null) return widgetMapCache;
+        Map<String, Integer> m = new HashMap<>();
+        widgetMapCache = m;
+        try {
+            JSONObject o = new JSONObject(prefs.getString("widgetMap", "{}"));
+            java.util.Iterator<String> k = o.keys();
+            while (k.hasNext()) { String id = k.next(); m.put(id, o.getInt(id)); }
+        } catch (JSONException ignored) { }
+        return m;
+    }
+
+    private void saveWidgetMap(Map<String, Integer> m) {
+        prefs.edit().putString("widgetMap", new JSONObject(m).toString()).apply();
+    }
+
+    @Override public boolean widgetBound(Item it) { return widgetViews.containsKey(it.id) || widgetMap().containsKey(it.id); }
+
+    @Override public void onWidgetTap(Item it) { if (!widgetMap().containsKey(it.id)) bindWidget(it, false); }
+
+    private void addWidget() {
+        WidgetsDialog.show(this, night, (info, label) -> {
+            Item it = new Item();
+            it.kind = Item.WIDGET;
+            it.url = info.provider.flattenToString();
+            it.pkg = info.provider.getPackageName();
+            it.title = label;
+            int W = Math.max(1, desk.getWidth());
+            float minW = Math.max(info.minWidth, dp(140)), minH = Math.max(info.minHeight, dp(60));
+            it.w = Math.max(0.25, Math.min(0.95, (minW + dp(40)) / W));
+            it.ar = Math.max(0.2, Math.min(3, (minH + dp(20)) / (it.w * W)));
+            double[] p = desk.spot(it.w);
+            it.x = p[0]; it.y = p[1];
+            bindWidget(it, true);
+        });
+    }
+
+    private android.appwidget.AppWidgetProviderInfo providerOf(Item it) {
+        android.content.ComponentName cn = android.content.ComponentName.unflattenFromString(it.url);
+        if (cn == null) return null;
+        for (android.appwidget.AppWidgetProviderInfo i : widgetManager.getInstalledProviders()) if (cn.equals(i.provider)) return i;
+        return null;
+    }
+
+    /** Activa el widget en este teléfono: permiso para usarlo y, si lo tiene, su pantalla de configuración. */
+    private void bindWidget(Item it, boolean isNew) {
+        android.appwidget.AppWidgetProviderInfo info = providerOf(it);
+        if (info == null) {
+            Toast.makeText(this, "Ese widget no está instalado en este teléfono (" + it.title + ")", Toast.LENGTH_LONG).show();
+            return;
+        }
+        pendingWidget = it; pendingWidgetNew = isNew;
+        pendingWidgetId = widgetHost.allocateAppWidgetId();
+        boolean ok;
+        try { ok = widgetManager.bindAppWidgetIdIfAllowed(pendingWidgetId, info.provider); } catch (Exception e) { ok = false; }
+        if (ok) { configureWidget(); return; }
+        Intent i = new Intent(android.appwidget.AppWidgetManager.ACTION_APPWIDGET_BIND);
+        i.putExtra(android.appwidget.AppWidgetManager.EXTRA_APPWIDGET_ID, pendingWidgetId);
+        i.putExtra(android.appwidget.AppWidgetManager.EXTRA_APPWIDGET_PROVIDER, info.provider);
+        try { startActivityForResult(i, REQ_BIND); }
+        catch (Exception e) { cancelPendingWidget("Este teléfono no permite agregar widgets aquí"); }
+    }
+
+    private void configureWidget() {
+        android.appwidget.AppWidgetProviderInfo info = widgetManager.getAppWidgetInfo(pendingWidgetId);
+        if (info != null && info.configure != null) {
+            try { widgetHost.startAppWidgetConfigureActivityForResult(this, pendingWidgetId, 0, REQ_CONF, null); return; }
+            catch (Exception ignored) { }
+        }
+        finishWidget();
+    }
+
+    private void finishWidget() {
+        Item it = pendingWidget;
+        if (it == null) return;
+        Map<String, Integer> m = widgetMap();
+        m.put(it.id, pendingWidgetId);
+        saveWidgetMap(m);
+        pendingWidget = null; pendingWidgetId = -1;
+        if (pendingWidgetNew) addItem(it);
+        desk.invalidate();
+    }
+
+    private void cancelPendingWidget(String msg) {
+        if (pendingWidgetId >= 0) try { widgetHost.deleteAppWidgetId(pendingWidgetId); } catch (Exception ignored) { }
+        pendingWidget = null; pendingWidgetId = -1;
+        if (msg != null) Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+    }
+
+    private void releaseWidget(String itemId) {
+        android.appwidget.AppWidgetHostView v = widgetViews.remove(itemId);
+        if (v != null) widgetLayer.removeView(v);
+        Map<String, Integer> m = widgetMap();
+        Integer wid = m.remove(itemId);
+        if (wid != null) { try { widgetHost.deleteAppWidgetId(wid); } catch (Exception ignored) { } saveWidgetMap(m); }
+    }
+
+    /** Borra widgets que quedaron activados pero ya no están en la mesa. */
+    private void cleanWidgets() {
+        Map<String, Integer> m = widgetMap();
+        Set<Integer> used = new HashSet<>();
+        boolean changed = false;
+        for (java.util.Iterator<Map.Entry<String, Integer>> i = m.entrySet().iterator(); i.hasNext(); ) {
+            Map.Entry<String, Integer> e = i.next();
+            if (desk.find(e.getKey()) == null) { try { widgetHost.deleteAppWidgetId(e.getValue()); } catch (Exception ignored) { } i.remove(); changed = true; }
+            else used.add(e.getValue());
+        }
+        if (changed) saveWidgetMap(m);
+        try { for (int id : widgetHost.getAppWidgetIds()) if (!used.contains(id)) widgetHost.deleteAppWidgetId(id); } catch (Exception ignored) { }
+    }
+
+    private final Map<String, int[]> widgetSizes = new HashMap<>();
+
+    /** La mesa avisa dónde dibujó la tarjeta del widget: la vista real se pone justo ahí. */
+    @SuppressWarnings("deprecation")
+    @Override public void onWidgetFrame(Item it, float left, float top, float width, float height, float rot, float px, float py, boolean shown) {
+        android.appwidget.AppWidgetHostView v = widgetViews.get(it.id);
+        if (!shown) { if (v != null && v.getVisibility() != View.GONE) v.setVisibility(View.GONE); return; }
+        if (v == null) {
+            Integer wid = widgetMap().get(it.id);
+            if (wid == null) return;
+            android.appwidget.AppWidgetProviderInfo info = widgetManager.getAppWidgetInfo(wid);
+            if (info == null) { Map<String, Integer> m = widgetMap(); m.remove(it.id); saveWidgetMap(m); return; }
+            v = widgetHost.createView(getApplicationContext(), wid, info);
+            v.setAppWidget(wid, info);
+            widgetLayer.addView(v, new FrameLayout.LayoutParams(Math.max(1, Math.round(width)), Math.max(1, Math.round(height))));
+            widgetViews.put(it.id, v);
+        }
+        if (v.getVisibility() != View.VISIBLE) v.setVisibility(View.VISIBLE);
+        int iw = Math.max(1, Math.round(width)), ih = Math.max(1, Math.round(height));
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) v.getLayoutParams();
+        if (lp.width != iw || lp.height != ih) {
+            lp.width = iw; lp.height = ih;
+            v.setLayoutParams(lp);
+            final android.appwidget.AppWidgetHostView fv = v;
+            final int wdp = Math.round(iw / getResources().getDisplayMetrics().density), hdp = Math.round(ih / getResources().getDisplayMetrics().density);
+            widgetSizes.put(it.id, new int[]{wdp, hdp});
+            main.removeCallbacks(widgetResize);
+            main.postDelayed(widgetResize, 350);
+        }
+        v.setTranslationX(left); v.setTranslationY(top);
+        v.setPivotX(px); v.setPivotY(py);
+        v.setRotation(rot);
+    }
+
+    /** Informa el nuevo tamaño a los widgets cuando se dejó de cambiar (algunos cambian su diseño). */
+    @SuppressWarnings("deprecation")
+    private final Runnable widgetResize = () -> {
+        for (Map.Entry<String, int[]> e : widgetSizes.entrySet()) {
+            android.appwidget.AppWidgetHostView v = widgetViews.get(e.getKey());
+            if (v != null) try { v.updateAppWidgetSize(null, e.getValue()[0], e.getValue()[1], e.getValue()[0], e.getValue()[1]); } catch (Exception ignored) { }
+        }
+        widgetSizes.clear();
+    };
+
     // ---------------- imágenes ----------------
 
     private void pickImage() {
@@ -978,6 +1200,14 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     @Override protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
         if (req == PICK_IMAGE && res == RESULT_OK && data != null && data.getData() != null) addImage(data.getData());
+        if (req == REQ_BIND) {
+            if (res == RESULT_OK && pendingWidget != null) configureWidget();
+            else cancelPendingWidget("No se permitió el widget");
+        }
+        if (req == REQ_CONF) {
+            if (res == RESULT_OK) finishWidget();
+            else cancelPendingWidget(null);
+        }
     }
 
     private void addImage(final Uri uri) {
@@ -1111,7 +1341,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             }
             case "del": {
                 Item it = desk.find(m.optString("id"));
-                if (it != null) { desk.items.remove(it); desk.invalidate(); scheduleSave(); }
+                if (it != null) { desk.items.remove(it); if (Item.WIDGET.equals(it.kind)) releaseWidget(it.id); desk.invalidate(); scheduleSave(); }
                 break;
             }
             case "drag":
@@ -1133,6 +1363,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 if (ik.equals(it.ik) || it.ik.isEmpty()) { it.img = data; it.ik = ik; it.bmp = null; desk.invalidate(); scheduleSave(); }
                 break;
             }
+            case "navAck":
+                if (!m.optBoolean("ok")) Toast.makeText(this, "Recientes necesita la versión completa en el principal", Toast.LENGTH_SHORT).show();
+                break;
             case "launchAck": {
                 int r = m.optInt("r");
                 String label = m.optString("label");
