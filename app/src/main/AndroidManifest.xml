@@ -54,6 +54,19 @@
             android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize" />
 
+        <!-- Mesa Doble como pantalla de inicio: desactivado hasta que se active en Ajustes -->
+        <activity-alias
+            android:name=".Escritorio"
+            android:targetActivity=".MainActivity"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity-alias>
+
         <activity-alias
             android:name=".TecladoLauncher"
             android:targetActivity=".KeyboardActivity"

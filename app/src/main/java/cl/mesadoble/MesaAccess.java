@@ -170,6 +170,7 @@ public class MesaAccess extends AccessibilityService {
 
     // ---- gamepad: cada control toca el principal en el mismo lugar relativo
     private GestureDescription.StrokeDescription joyStroke;
+    private String joyOwner = "";
     private float joyX, joyY, joyTX, joyTY;
     private final Runnable joyHold = new Runnable() {
         @Override public void run() {
@@ -204,7 +205,10 @@ public class MesaAccess extends AccessibilityService {
         int phase = m.optInt("ph");
         float r = (float) m.optDouble("r", 0.2) * Math.min(sc.x, sc.y);
         float tx = x + (float) m.optDouble("nx") * r, ty = y + (float) m.optDouble("ny") * r;
+        String id = m.optString("id");
+        if (phase != 0 && !id.equals(joyOwner)) return;   // Android ejecuta un gesto a la vez: manda el último joystick tocado
         if (phase == 0) {
+            joyOwner = id;
             h.removeCallbacks(joyHold);
             Path p = new Path();
             p.moveTo(x, y);

@@ -38,6 +38,11 @@ cuando cruzas más de la mitad o los lanzas.
 - **Teclado automático**: al tocar donde se escribe en el principal (o al abrir una app de chat), el teclado
   aparece en el extendido. El principal cambia solo al teclado Mesa Doble y vuelve al tuyo si se desconecta.
 - **Compartir desde otras apps**: *Compartir → Poner en Mesa Doble*.
+- **Navegación**: Atrás, Inicio y Recientes en su propia barra (Recientes necesita la versión completa;
+  en la liviana muestra un momento la barra del sistema).
+- **Color de fondo**: *Ajustes → Color de fondo*, se aplica en ambos teléfonos.
+- **Pantalla de inicio**: *Ajustes → Pantalla de inicio* convierte Mesa Doble en el launcher del teléfono
+  (no necesita permisos; se desactiva igual).
 
 Los teléfonos se hablan directo por la red local (puerto 47820); no se usa internet.
 
@@ -50,11 +55,12 @@ También se puede abrir la carpeta en Android Studio y presionar *Run*.
 
 Desde *Teclado → Usar este teléfono como teclado*, con cinco modos:
 
-- **Teclado**: con sugerencias en español (completa palabras, agrega tildes, corrige errores).
+- **Teclado**: con sugerencias en español (completa palabras, agrega tildes, corrige errores) y tecla
+  **Enviar** (en WhatsApp conviene activar *Ajustes → Chats → Enter para enviar*).
 - **Teclado + touchpad**.
 - **Touchpad**: puntero, clic, desplazar con dos dedos, Atrás e Inicio (versión completa).
   En la versión liviana mueve el cursor del texto.
-- **Gamepad**: joystick, cruceta y botones. *Editar* para moverlos y cambiar su tamaño. Cada control
+- **Gamepad**: dos joysticks, cruceta, A/B/X/Y, L1/L2/L3, R1/R2/R3, Select y Start. *Editar* para moverlos y cambiar su tamaño. Cada control
   toca el principal en el mismo lugar relativo (versión completa).
 - **Dictado**: escribe con el teclado del teléfono o dicta por voz.
 

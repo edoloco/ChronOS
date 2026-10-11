@@ -83,16 +83,22 @@ public class GamepadView extends View {
 
     public void resetLayout() {
         ctls.clear();
-        ctls.add(new Ctl("joy", JOY, "", 0.16f, 0.62f, 0.42f));
-        ctls.add(new Ctl("dpad", DPAD, "", 0.40f, 0.70f, 0.34f));
-        ctls.add(new Ctl("a", BTN, "A", 0.86f, 0.70f, 0.17f));
-        ctls.add(new Ctl("b", BTN, "B", 0.94f, 0.50f, 0.17f));
-        ctls.add(new Ctl("x", BTN, "X", 0.78f, 0.50f, 0.17f));
-        ctls.add(new Ctl("y", BTN, "Y", 0.86f, 0.30f, 0.17f));
-        ctls.add(new Ctl("l", BTN, "L", 0.10f, 0.14f, 0.15f));
-        ctls.add(new Ctl("r", BTN, "R", 0.90f, 0.12f, 0.15f));
-        ctls.add(new Ctl("select", BTN, "Select", 0.44f, 0.16f, 0.12f));
-        ctls.add(new Ctl("start", BTN, "Start", 0.58f, 0.16f, 0.12f));
+        // distribución estilo control de consola (horizontal)
+        ctls.add(new Ctl("joy", JOY, "", 0.13f, 0.62f, 0.36f));       // joystick izquierdo
+        ctls.add(new Ctl("dpad", DPAD, "", 0.33f, 0.80f, 0.28f));
+        ctls.add(new Ctl("joyR", JOY, "", 0.66f, 0.78f, 0.30f));      // joystick derecho
+        ctls.add(new Ctl("a", BTN, "A", 0.88f, 0.74f, 0.15f));
+        ctls.add(new Ctl("b", BTN, "B", 0.95f, 0.56f, 0.15f));
+        ctls.add(new Ctl("x", BTN, "X", 0.81f, 0.56f, 0.15f));
+        ctls.add(new Ctl("y", BTN, "Y", 0.88f, 0.38f, 0.15f));
+        ctls.add(new Ctl("l", BTN, "L1", 0.07f, 0.13f, 0.13f));
+        ctls.add(new Ctl("l2", BTN, "L2", 0.19f, 0.13f, 0.13f));
+        ctls.add(new Ctl("r2", BTN, "R2", 0.81f, 0.13f, 0.13f));
+        ctls.add(new Ctl("r", BTN, "R1", 0.93f, 0.13f, 0.13f));
+        ctls.add(new Ctl("l3", BTN, "L3", 0.13f, 0.33f, 0.11f));
+        ctls.add(new Ctl("r3", BTN, "R3", 0.66f, 0.50f, 0.11f));
+        ctls.add(new Ctl("select", BTN, "Select", 0.43f, 0.15f, 0.11f));
+        ctls.add(new Ctl("start", BTN, "Start", 0.57f, 0.15f, 0.11f));
         invalidate();
     }
 
@@ -182,10 +188,11 @@ public class GamepadView extends View {
                 cv.drawPath(tri, fill);
             } else {
                 fill.setColor(on ? ctlDown : ctlColor);
-                if (c.label.length() > 1) cv.drawRoundRect(new RectF(x - r, y - r * 0.55f, x + r, y + r * 0.55f), r * 0.55f, r * 0.55f, fill);
+                boolean wide = c.label.length() > 2;
+                if (wide) cv.drawRoundRect(new RectF(x - r, y - r * 0.55f, x + r, y + r * 0.55f), r * 0.55f, r * 0.55f, fill);
                 else cv.drawCircle(x, y, r, fill);
                 text.setColor(on ? bg : fg);
-                text.setTextSize(c.label.length() > 1 ? Math.min(r * 0.5f, 14 * dp) : r * 0.8f);
+                text.setTextSize(wide ? Math.min(r * 0.5f, 14 * dp) : c.label.length() == 2 ? r * 0.62f : r * 0.8f);
                 cv.drawText(c.label, x, y + text.getTextSize() * 0.36f, text);
             }
             if (editing) cv.drawCircle(x, y, r + 4 * dp, dash);

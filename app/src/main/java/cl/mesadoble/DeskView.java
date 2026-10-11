@@ -71,7 +71,8 @@ public class DeskView extends View {
             outline = new Paint(Paint.ANTI_ALIAS_FLAG), handle = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final TextPaint hand = new TextPaint(Paint.ANTI_ALIAS_FLAG), small = new TextPaint(Paint.ANTI_ALIAS_FLAG),
             label = new TextPaint(Paint.ANTI_ALIAS_FLAG), empty = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-    private final int deskColor, deskColor2, accent, fg, muted, linkBg;
+    private int deskColor, deskColor2;
+    private final int accent, fg, muted, linkBg;
 
     // ---- estado del toque
     private static final int NONE = 0, DRAG = 1, ROTATE = 2, RESIZE = 3, PINCH = 4;
@@ -121,6 +122,21 @@ public class DeskView extends View {
     }
 
     public void setHost(Host h) { host = h; }
+
+    /** Color de fondo elegido por el usuario (0 = el del tema). Se ajustan el brillo y los puntos para que se vean. */
+    public void setDeskColor(int c, boolean night) {
+        if (c == 0) c = night ? 0xFF18212B : 0xFFDDE3E8;
+        deskColor = c;
+        int r = Color.red(c), g = Color.green(c), b = Color.blue(c);
+        boolean dark = (0.299 * r + 0.587 * g + 0.114 * b) < 140;
+        float k = 0.10f;
+        deskColor2 = dark ? Color.rgb((int) (r + (255 - r) * k), (int) (g + (255 - g) * k), (int) (b + (255 - b) * k))
+                          : Color.rgb((int) (r * (1 - k)), (int) (g * (1 - k)), (int) (b * (1 - k)));
+        bg.setColor(deskColor);
+        dot.setColor(dark ? 0x1FFFFFFF : 0x29000000);
+        empty.setColor(dark ? 0xFFB0BCC8 : 0xFF4B5966);
+        invalidate();
+    }
     public boolean isDragging(Item it) { return dragging == it || (editing == it && mode != NONE); }
     public void setSide(int s) { side = s; invalidate(); }
     public void setVertical(boolean v) { vertical = v; invalidate(); }

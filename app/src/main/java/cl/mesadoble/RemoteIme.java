@@ -101,6 +101,21 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
 
     @Override public void onState(int state, String info) { updateLabel(); }
 
+    /**
+     * "Enviar": usa la acción que la app definió para su campo (enviar, buscar, ir...).
+     * Si el campo no define ninguna (por ejemplo, WhatsApp sin "Enter para enviar"), prueba "enviar" y si no, Enter.
+     */
+    private void send(InputConnection ic) {
+        EditorInfo ei = getCurrentInputEditorInfo();
+        int act = ei != null ? ei.imeOptions & EditorInfo.IME_MASK_ACTION : EditorInfo.IME_ACTION_UNSPECIFIED;
+        boolean noAction = ei != null && (ei.imeOptions & EditorInfo.IME_FLAG_NO_ENTER_ACTION) != 0;
+        if (act != EditorInfo.IME_ACTION_NONE && act != EditorInfo.IME_ACTION_UNSPECIFIED && !noAction) {
+            ic.performEditorAction(act);
+        } else if (!ic.performEditorAction(EditorInfo.IME_ACTION_SEND)) {
+            sendKeyChar('\n');
+        }
+    }
+
     @Override public void onMessage(JSONObject m) {
         if (!"kb".equals(m.optString("t"))) return;
         InputConnection ic = getCurrentInputConnection();
@@ -125,6 +140,7 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
                 break;
             }
             case "act": {
+                if ("send".equals(m.optString("x"))) { send(ic); break; }
                 int id = 0;
                 switch (m.optString("x")) {
                     case "copy": id = android.R.id.copy; break;

@@ -43,7 +43,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     private GamepadView gamepad;
     private EditText field;
     private LinearLayout content, suggestBar;
-    private TextView status, modeBtn, editBtn, resetBtn;
+    private TextView status, modeBtn, editBtn, resetBtn, sendBtn;
     private int mode;
 
     // sugerencias: palabra que se está escribiendo
@@ -81,7 +81,8 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         editBtn = chip("Editar", v -> toggleEdit());
         resetBtn = chip("Restablecer", v -> { gamepad.resetLayout(); prefs.edit().remove("padLayout").apply(); });
         modeBtn = chip(NAMES[mode], v -> pickMode());
-        top.addView(resetBtn); top.addView(editBtn); top.addView(modeBtn);
+        sendBtn = chip("Enviar ➤", v -> { hub.send("kb", "a", "act", "x", "send"); });
+        top.addView(sendBtn); top.addView(resetBtn); top.addView(editBtn); top.addView(modeBtn);
         top.addView(chip("Cerrar", v -> finish()));
         root.addView(top, new LinearLayout.LayoutParams(-1, dp(44)));
 
@@ -220,6 +221,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         boolean land = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
         InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
         editBtn.setVisibility(mode == GAME ? View.VISIBLE : View.GONE);
+        sendBtn.setVisibility(mode == DICT ? View.VISIBLE : View.GONE);
         resetBtn.setVisibility(mode == GAME && gamepad.isEditing() ? View.VISIBLE : View.GONE);
         modeBtn.setText(NAMES[mode]);
         if (mode != GAME && gamepad.isEditing()) gamepad.setEditing(false);
@@ -329,7 +331,9 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
                         + "Touchpad y gamepad: con la versión completa (accesibilidad activa en el principal) mueven un puntero y "
                         + "tocan la pantalla. Con la versión liviana el touchpad mueve el cursor del texto.\n\n"
                         + "Gamepad: cada botón toca el principal en el mismo lugar donde lo pones aquí. Usa \"Editar\" para "
-                        + "moverlos (arrastrar) y cambiar su tamaño (pellizcar con dos dedos).")
+                        + "moverlos (arrastrar) y cambiar su tamaño (pellizcar con dos dedos).\n\n"
+                        + "Enviar: usa el botón de enviar del campo. En WhatsApp actívalo en Ajustes → Chats → \"Enter para enviar\" "
+                        + "para que funcione siempre.")
                 .button("Entendido", true, null)
                 .show();
     }

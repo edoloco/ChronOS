@@ -6,6 +6,7 @@ import android.content.Context;
 import android.content.res.Configuration;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
@@ -30,7 +31,8 @@ public class Ui {
     // ---- íconos de línea
     public static final int LAYOUT_SIDE_H = 1, LAYOUT_SIDE_V = 2, LAYOUT_STACK = 3, LOCK = 4, UNLOCK = 5,
             KEYBOARD = 6, KB_TOUCHPAD = 7, TOUCHPAD = 8, GAMEPAD = 9, MIC = 10, WIFI = 11, GEAR = 12,
-            AUTO = 13, CHECK = 14, CROSS = 15, PIN = 16, OPEN = 17, STORE = 18, RECEIVE = 19, NOTE = 20;
+            AUTO = 13, CHECK = 14, CROSS = 15, PIN = 16, OPEN = 17, STORE = 18, RECEIVE = 19, NOTE = 20,
+            PALETTE = 21, HOME = 22, SEND = 23;
 
     public static boolean night(Context c) {
         return (c.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
@@ -354,6 +356,27 @@ public class Ui {
                     c.drawRoundRect(new RectF(cx - u * 0.75f, cy - u * 0.35f, cx + u * 0.75f, cy + u * 0.8f), 3 * dp, 3 * dp, st);
                     c.drawArc(new RectF(cx - u * 0.35f, cy - u * 0.85f, cx + u * 0.35f, cy - u * 0.05f), 180, 180, false, st);
                     break;
+                case PALETTE:
+                    c.drawCircle(cx, cy, u * 0.85f, st);
+                    for (int i = 0; i < 4; i++) {
+                        double ang = Math.PI / 2 * i - Math.PI / 4;
+                        c.drawCircle(cx + (float) Math.cos(ang) * u * 0.45f, cy + (float) Math.sin(ang) * u * 0.45f, 2.3f * dp, fl);
+                    }
+                    break;
+                case HOME: {
+                    Path hp = new Path();
+                    hp.moveTo(cx - u * 0.85f, cy - u * 0.05f); hp.lineTo(cx, cy - u * 0.8f); hp.lineTo(cx + u * 0.85f, cy - u * 0.05f);
+                    c.drawPath(hp, st);
+                    c.drawRoundRect(new RectF(cx - u * 0.6f, cy - u * 0.2f, cx + u * 0.6f, cy + u * 0.8f), 2 * dp, 2 * dp, st);
+                    break;
+                }
+                case SEND: {
+                    Path sp = new Path();
+                    sp.moveTo(cx - u * 0.8f, cy - u * 0.7f); sp.lineTo(cx + u * 0.85f, cy); sp.lineTo(cx - u * 0.8f, cy + u * 0.7f);
+                    sp.lineTo(cx - u * 0.45f, cy); sp.close();
+                    c.drawPath(sp, st);
+                    break;
+                }
                 case NOTE:
                     c.drawRoundRect(new RectF(cx - u * 0.7f, cy - u * 0.8f, cx + u * 0.7f, cy + u * 0.8f), 3 * dp, 3 * dp, st);
                     for (int i = 0; i < 3; i++) c.drawLine(cx - u * 0.4f, cy - u * 0.35f + i * u * 0.35f, cx + u * 0.4f, cy - u * 0.35f + i * u * 0.35f, st);

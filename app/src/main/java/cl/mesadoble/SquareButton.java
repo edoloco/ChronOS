@@ -17,7 +17,8 @@ import android.view.View;
  */
 public class SquareButton extends View {
 
-    public static final int NOTE = 0, IMAGE = 1, APPS = 2, KEYBOARD = 3, SETTINGS = 4, STATUS = 5;
+    public static final int NOTE = 0, IMAGE = 1, APPS = 2, KEYBOARD = 3, SETTINGS = 4, STATUS = 5,
+            BACK = 6, HOME = 7, RECENTS = 8;
 
     private final int kind;
     private final String text;
@@ -136,6 +137,18 @@ public class SquareButton extends View {
                             cx + (float) Math.cos(a) * u * 1.15f, cy + (float) Math.sin(a) * u * 1.15f, stroke);
                 }
                 c.drawCircle(cx, cy, u * 0.8f, stroke);
+                break;
+            case BACK: {   // triángulo de "atrás", como la barra de Android
+                Path t = new Path();
+                t.moveTo(cx - u * 0.75f, cy); t.lineTo(cx + u * 0.55f, cy - u * 0.8f); t.lineTo(cx + u * 0.55f, cy + u * 0.8f); t.close();
+                c.drawPath(t, stroke);
+                break;
+            }
+            case HOME:
+                c.drawCircle(cx, cy, u * 0.8f, stroke);
+                break;
+            case RECENTS:
+                c.drawRoundRect(new RectF(cx - u * 0.7f, cy - u * 0.7f, cx + u * 0.7f, cy + u * 0.7f), 2.5f * dp, 2.5f * dp, stroke);
                 break;
             case STATUS:
                 for (int i = 1; i <= 2; i++) {

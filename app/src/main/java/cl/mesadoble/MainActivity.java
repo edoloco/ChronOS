@@ -60,7 +60,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private SharedPreferences prefs;
     private DeskView desk;
     private Hub hub;
-    private LinearLayout bar;
+    private LinearLayout bar, navBar;
     private SquareButton statusBtn;
     private final List<SquareButton> squares = new ArrayList<>();
     private OrientationEventListener orient;
@@ -85,6 +85,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
         FrameLayout root = new FrameLayout(this);
         desk = new DeskView(this, night);
+        desk.setDeskColor(getSharedPreferences("mesa", MODE_PRIVATE).getInt("deskColor", 0), night);
         desk.setHost(this);
         root.addView(desk, new FrameLayout.LayoutParams(-1, -1));
 
@@ -100,6 +101,17 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         addSquare(SquareButton.SETTINGS, "Ajustes", false, v -> settingsMenu());
         statusBtn = addSquare(SquareButton.STATUS, "Red", false, v -> showConnection());
         root.addView(bar, new FrameLayout.LayoutParams(-2, -2));
+
+        // botones de navegación de Android (la barra del sistema queda oculta en pantalla completa)
+        navBar = new LinearLayout(this);
+        navBar.setOrientation(LinearLayout.HORIZONTAL);
+        navBar.setPadding(dp(6), dp(6), dp(0), dp(6));
+        navBar.setBackground(pill(night ? 0xE6182129 : 0xEEFFFFFF));
+        navBar.setElevation(dp(6));
+        addNav(SquareButton.BACK, "Atrás", v -> navBack());
+        addNav(SquareButton.HOME, "Inicio", v -> navHome());
+        addNav(SquareButton.RECENTS, "Recientes", v -> navRecents());
+        root.addView(navBar, new FrameLayout.LayoutParams(-2, -2));
 
         // REGLA DE DISPOSICIÓN (fija para todas las versiones):
         //   horizontal → principal ARRIBA, extendido ABAJO; los elementos cruzan de arriba hacia abajo.
@@ -203,6 +215,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (side != 1) return;
         boolean h = locked() ? prefs.getBoolean("orientH", true) : landscapeNow();
         hub.send("view", "h", h, "lock", locked());
+        hub.send("bg", "c", prefs.getInt("deskColor", 0));
     }
 
     @Override public void onConfigurationChanged(Configuration c) {
@@ -216,6 +229,110 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private String sideName(int s) { return s == 1 ? "PRINCIPAL" : "EXTENDIDO"; }
     private String firstPhone() { return "el extendido"; }
     private String secondPhone() { return "el principal"; }
+
+    private void addNav(int kind, String label, View.OnClickListener l) {
+        SquareButton b = new SquareButton(this, kind, label, false, night);
+        b.setOnClickListener(l);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.setMarginEnd(dp(6));
+        navBar.addView(b, lp);
+        squares.add(b);
+    }
+
+    // ---------------- navegación y pantalla de inicio ----------------
+
+    private boolean isLauncher() {
+        return getPackageManager().getComponentEnabledSetting(new android.content.ComponentName(this, getPackageName() + ".Escritorio"))
+                == android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED;
+    }
+
+    private void navBack() {
+        if (isLauncher()) return;      // como pantalla de inicio, Atrás no la cierra
+        moveTaskToBack(true);
+    }
+
+    private void navHome() {
+        try { startActivity(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); }
+        catch (Exception ignored) { }
+    }
+
+    @SuppressWarnings("deprecation")
+    private void navRecents() {
+        if (MesaAccess.instance != null) { MesaAccess.instance.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_RECENTS); return; }
+        // versión liviana: Android no deja abrir Recientes desde una app; se muestra la barra del sistema un momento
+        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+        Toast.makeText(this, "Usa el botón Recientes de la barra del sistema", Toast.LENGTH_SHORT).show();
+        main.postDelayed(this::immersive, 5000);
+    }
+
+    @SuppressWarnings("deprecation")
+    @Override public void onBackPressed() {
+        if (isLauncher()) return;
+        super.onBackPressed();
+    }
+
+    /** Activa o desactiva Mesa Doble como pantalla de inicio (launcher). No necesita permisos especiales. */
+    private void toggleLauncher() {
+        boolean on = !isLauncher();
+        getPackageManager().setComponentEnabledSetting(new android.content.ComponentName(this, getPackageName() + ".Escritorio"),
+                on ? android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED : android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                android.content.pm.PackageManager.DONT_KILL_APP);
+        if (on) {
+            new Ui.Sheet(this)
+                    .title("Elige Mesa Doble como inicio")
+                    .message("Se abrirá la lista de apps de inicio: elige Mesa Doble. Desde ahí el botón Inicio te trae a la mesa "
+                            + "y las apps se abren desde el botón Apps.\n\nEn Xiaomi, si la navegación por gestos deja de funcionar con "
+                            + "otro inicio, usa los botones de navegación.")
+                    .button("Abrir ajustes", true, () -> openSettings(android.provider.Settings.ACTION_HOME_SETTINGS, null, "Elige Mesa Doble"))
+                    .show();
+        } else {
+            Toast.makeText(this, "Mesa Doble ya no es la pantalla de inicio", Toast.LENGTH_SHORT).show();
+            try { startActivity(new Intent(android.provider.Settings.ACTION_HOME_SETTINGS)); } catch (Exception ignored) { }
+        }
+    }
+
+    // ---------------- color de fondo ----------------
+
+    static final int[] COLORS = {0, 0xFF18212B, 0xFF0F2A44, 0xFF173A2E, 0xFF3B1622, 0xFF2A2A2E,
+            0xFFDDE3E8, 0xFFE9DFC9, 0xFFE4E0F2, 0xFFDDEBDD, 0xFFF3D9CF, 0xFFFFFFFF};
+
+    private void chooseColor() {
+        int cur = prefs.getInt("deskColor", 0);
+        final android.app.Dialog[] dlg = new android.app.Dialog[1];
+        LinearLayout grid = new LinearLayout(this);
+        grid.setOrientation(LinearLayout.VERTICAL);
+        for (int r = 0; r < 2; r++) {
+            LinearLayout row = new LinearLayout(this);
+            row.setGravity(Gravity.CENTER);
+            for (int i = r * 6; i < r * 6 + 6; i++) {
+                final int col = COLORS[i];
+                View sw = new View(this);
+                GradientDrawable g = new GradientDrawable();
+                g.setShape(GradientDrawable.OVAL);
+                g.setColor(col == 0 ? (night ? 0xFF18212B : 0xFFDDE3E8) : col);
+                g.setStroke(dp(col == cur ? 4 : 1), col == cur ? (night ? 0xFF5CC3CF : 0xFF1F7F8C) : 0x55888888);
+                sw.setBackground(g);
+                sw.setContentDescription(col == 0 ? "Según el tema" : "Color");
+                sw.setOnClickListener(v -> { setDeskColor(col, false); if (dlg[0] != null) dlg[0].dismiss(); });
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(44), dp(44));
+                lp.setMargins(dp(6), dp(6), dp(6), dp(6));
+                row.addView(sw, lp);
+            }
+            grid.addView(row);
+        }
+        dlg[0] = new Ui.Sheet(this)
+                .title("Color de fondo")
+                .message("Se aplica en ambos teléfonos. El primero sigue el modo claro u oscuro del sistema.")
+                .view(grid)
+                .button("Cerrar", false, null)
+                .show();
+    }
+
+    private void setDeskColor(int c, boolean fromRemote) {
+        prefs.edit().putInt("deskColor", c).apply();
+        desk.setDeskColor(c, night);
+        if (!fromRemote) hub.send("bg", "c", c);
+    }
 
     private SquareButton addSquare(int kind, String label, boolean primary, View.OnClickListener l) {
         SquareButton b = new SquareButton(this, kind, label, primary, night);
@@ -266,6 +383,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                             prefs.edit().putBoolean("autoKb", !auto).apply();
                             Toast.makeText(this, !auto ? "El teclado se abrirá solo en el extendido" : "Teclado automático desactivado", Toast.LENGTH_SHORT).show();
                         })
+                .option(Ui.PALETTE, "Color de fondo", "Elegir el color de la mesa", this::chooseColor)
+                .option(Ui.HOME, isLauncher() ? "Pantalla de inicio: sí" : "Pantalla de inicio: no",
+                        isLauncher() ? "Mesa Doble es tu launcher (tocar para dejar de usarla)" : "Usar Mesa Doble como launcher de este teléfono", this::toggleLauncher)
                 .option(Ui.GEAR, "Revisar configuración", principal ? "Permisos del principal" : "Permisos del extendido", () -> checkSetup(true))
                 .option(Ui.WIFI, "Conexión", statusText, this::showConnection)
                 .button("Cerrar", false, null)
@@ -516,6 +636,15 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             bp.setMargins(dp(12), 0, dp(12), dp(14));
         }
         bar.setLayoutParams(bp);
+        FrameLayout.LayoutParams np = (FrameLayout.LayoutParams) navBar.getLayoutParams();
+        if (stacked()) {
+            np.gravity = (ds == 0 ? Gravity.TOP : Gravity.BOTTOM) | Gravity.END;
+            np.setMargins(dp(14), dp(12), dp(14), dp(12));
+        } else {   // en vertical no caben ambas barras abajo: la de navegación va arriba
+            np.gravity = Gravity.TOP | (ds == 0 ? Gravity.START : Gravity.END);
+            np.setMargins(dp(12), dp(14), dp(12), 0);
+        }
+        navBar.setLayoutParams(np);
         otherSide = -1;
         hub.setSide(side);
         waitingSince = System.currentTimeMillis();
@@ -824,6 +953,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             case "hello":
                 otherSide = m.optInt("side", -1);
                 updateStatus();
+                break;
+            case "bg":
+                if (m.optInt("c") != prefs.getInt("deskColor", 0)) setDeskColor(m.optInt("c"), true);
                 break;
             case "view":   // el extendido sigue la orientación del principal
                 if (side != 1 && m.has("h")) {

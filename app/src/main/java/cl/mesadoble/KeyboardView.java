@@ -52,6 +52,8 @@ public class KeyboardView extends View {
     private static Key mod(String l, int bit, float u) { return new Key(MOD, l, null, null, bit, null, u); }
     private static Key act(String l, String a) { return new Key(ACT, l, null, null, 0, a, 1.5f); }
     private static Key media(String l, String a) { return new Key(MEDIA, l, null, null, 0, a, 1.5f); }
+    /** Envía lo escrito (como el botón de enviar del chat). */
+    private static Key sendKey() { return new Key(ACT, "Enviar ➤", null, null, 0, "send", 2f); }
 
     private final List<Key[]> rows = new ArrayList<>();
     private final float[] rowWeights = {0.72f, 1, 1, 1, 1, 1};
@@ -108,7 +110,7 @@ public class KeyboardView extends View {
                 mod("Mayús", SHIFT, 1.25f), c("<", ">", null), l("z"), l("x"), l("c"), l("v"), l("b"), l("n"),
                 l("m"), c(",", ";", null), c(".", ":", null), c("-", "_", null), mod("Mayús", SHIFT, 2.75f)});
         rows.add(new Key[]{
-                mod("Ctrl", CTRL, 1.5f), mod("AltGr", ALTGR, 1.5f), c(" ", null, null, 7f),
+                mod("Ctrl", CTRL, 1.5f), mod("AltGr", ALTGR, 1.5f), c(" ", null, null, 5f), sendKey(),
                 key("←", KeyEvent.KEYCODE_DPAD_LEFT, 1.25f), key("↑", KeyEvent.KEYCODE_DPAD_UP, 1.25f),
                 key("↓", KeyEvent.KEYCODE_DPAD_DOWN, 1.25f), key("→", KeyEvent.KEYCODE_DPAD_RIGHT, 1.25f)});
     }
@@ -142,7 +144,8 @@ public class KeyboardView extends View {
             boolean active = k.down || (k.type == MOD && k.code != 0 && (mods & k.code) != 0)
                     || (k.type == MOD && k.code == 0 && caps) || (k.type == CHAR && k.label.equals(deadKey));
             boolean special = !(k.type == CHAR);
-            keyBg.setColor(active ? accent : special ? keyDark : keyColor);
+            boolean send = k.type == ACT && "send".equals(k.act);
+            keyBg.setColor(active || send ? accent : special ? keyDark : keyColor);
             float r = 7 * dp;
             cv.drawRoundRect(k.r, r, r, keyBg);
             String label = k.label;
@@ -152,7 +155,7 @@ public class KeyboardView extends View {
             float size = Math.min(k.r.height() * (label.length() == 1 ? 0.42f : 0.28f), 26 * dp);
             if (label.length() > 1) size = Math.min(size, k.r.width() / (label.length() * 0.6f));
             main.setTextSize(size);
-            main.setColor(active ? bg : space ? muted : fg);
+            main.setColor(active || send ? bg : space ? muted : fg);
             cv.drawText(label, k.r.centerX(), k.r.centerY() + size * 0.36f, main);
             float ss = Math.min(11 * dp, k.r.height() * 0.24f);
             sub.setTextSize(ss);
