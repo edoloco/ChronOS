@@ -386,7 +386,7 @@ public class FilesActivity extends Activity implements Link.Listener {
         boolean landscape = dirY != 0;
         String mine = hub.isPrincipal() ? (landscape ? "arriba" : "izquierda") : (landscape ? "abajo" : "derecha");
         String theirs = hub.isPrincipal() ? (landscape ? "abajo" : "derecha") : (landscape ? "arriba" : "izquierda");
-        phoneChip.setText("Principal · ventana " + mine);
+        phoneChip.setText("Archivos del principal · ventana " + mine);
         String shown = dir();
         if (!root.isEmpty() && shown.startsWith(root)) shown = "Almacenamiento" + shown.substring(root.length());
         pathText.setText(shown);
@@ -581,50 +581,13 @@ public class FilesActivity extends Activity implements Link.Listener {
         transfer.update("Cancelando…", -1, "");
     }
 
-    /** Trae una copia de un archivo del principal para abrirlo en esta pantalla. */
-    private void download(String remotePath, File dst, FileServer.Progress pr) throws IOException {
-        FileServer fs = FileServer.get(this);
-        String ip = hub.link.peerIp();
-        if (ip == null || fs.remoteToken == null) throw new IOException("Reconecta los teléfonos para abrir archivos del principal");
-        try (Socket s = new Socket()) {
-            s.connect(new InetSocketAddress(ip, fs.remotePort), 6000);
-            s.setSoTimeout(60000);
-            InputStream in = new BufferedInputStream(s.getInputStream());
-            OutputStream out = new BufferedOutputStream(s.getOutputStream());
-            JSONObject h = new JSONObject();
-            try { h.put("k", fs.remoteToken); h.put("op", "get"); h.put("path", remotePath); } catch (JSONException ignored) { }
-            FileServer.writeLine(out, h);
-            JSONObject r = new JSONObject(FileServer.readLine(in));
-            if (!r.optBoolean("ok")) throw new IOException("permiso".equals(r.optString("err"))
-                    ? "Falta el permiso de archivos en el principal" : r.optString("err", "No se pudo leer"));
-            try (OutputStream fo = new java.io.FileOutputStream(dst)) { FileServer.pipe(in, fo, r.optLong("size"), pr); }
-        } catch (JSONException e) { throw new IOException("Respuesta inválida"); }
-    }
-
+    /** Abrir: los archivos son del principal y se abren en el principal (como las apps). */
     private void openEntry(Entry e) {
         String p = child(dir(), e.name);
         if (!remote) { view(new File(p)); return; }
-        File d = new File(getCacheDir(), "abrir");
-        File[] old = d.listFiles();
-        if (old != null) for (File o : old) FileServer.delete(o);
-        //noinspection ResultOfMethodCallIgnored
-        d.mkdirs();
-        File dst = new File(d, e.name);
-        transfer.begin(false, "Abriendo " + e.name, dirX, dirY, false);
-        work.execute(() -> {
-            try {
-                final long[] got = {0};
-                download(p, dst, n -> {
-                    got[0] += n;
-                    float pr = e.size > 0 ? got[0] / (float) e.size : -1;
-                    main.post(() -> transfer.update(e.name, pr, pr >= 0 ? Math.round(pr * 100) + "%" : ""));
-                    return true;
-                });
-                main.post(() -> { transfer.end(); view(dst); });
-            } catch (IOException ex) {
-                main.post(() -> { transfer.end(); Toast.makeText(this, ex.getMessage(), Toast.LENGTH_LONG).show(); });
-            }
-        });
+        if (!hub.connected()) { Toast.makeText(this, "El principal no está conectado", Toast.LENGTH_SHORT).show(); return; }
+        hub.send("fmOpenFile", "path", p);
+        Toast.makeText(this, "Abriendo " + e.name + " en el principal", Toast.LENGTH_SHORT).show();
     }
 
     // ---------------- eliminar, renombrar, nueva carpeta ----------------

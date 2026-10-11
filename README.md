@@ -46,8 +46,8 @@ cuando cruzas más de la mitad o los lanzas.
   se abre en el otro. Mantén presionado para elegir; aparecen botones flotantes **Copiar**, **Mover**,
   **Eliminar** (y Renombrar con uno solo). Copiar/Mover llevan lo elegido a la carpeta abierta en la otra
   ventana. También se puede **arrastrar o lanzar** lo elegido hacia la otra pantalla para moverlo, con una
-  animación de hojas que vuelan de una pantalla a la otra. El trabajo siempre lo hace el principal. Al tocar
-  un archivo en el extendido, se trae una copia y se abre ahí. Solo el principal necesita *Acceso a todos
+  animación de hojas que vuelan de una pantalla a la otra. El trabajo siempre lo hace el principal. Los archivos
+  nunca pasan al extendido: al tocar uno, se abre en el principal. Solo el principal necesita *Acceso a todos
   los archivos*.
 - **Widget propio "Mesa Doble · Reloj"**: hora, fecha y próxima alarma; al tocarlo abre las alarmas. Está en
   *Herramientas → Widget* (primero de la lista) y también en el inicio normal del teléfono.

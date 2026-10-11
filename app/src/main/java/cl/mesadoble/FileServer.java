@@ -254,6 +254,16 @@ public class FileServer {
 
     void cancelJob() { jobCancel = true; }
 
+    /** Abre un archivo del principal en el principal (pedido desde la ventana del extendido). */
+    static void openHere(Context c, Hub hub, String path) {
+        File f = new File(path);
+        if (!f.isFile()) return;
+        Intent i = new Intent(Intent.ACTION_VIEW);
+        i.setDataAndType(FilesProvider.uriFor(c, f), FilesProvider.mime(f.getName()));
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+        hub.startOrNotify(i, path.hashCode(), "Abrir " + f.getName(), "Toca para abrirlo en este teléfono");
+    }
+
     void runJob(JSONObject m, Hub hub) {
         if (jobRunning) return;
         jobRunning = true;
@@ -350,28 +360,8 @@ public class FileServer {
                 r.put("ok", false); r.put("err", "clave"); writeLine(out, r); return;
             }
             if (!hasAccess(app)) { askAccess(); r.put("ok", false); r.put("err", "permiso"); writeLine(out, r); return; }
-            if ("get".equals(h.optString("op"))) {
-                File f = resolve(h.optString("path"));
-                if (!f.isFile()) { r.put("ok", false); r.put("err", "No existe " + f.getName()); writeLine(out, r); return; }
-                long size = f.length();
-                r.put("ok", true); r.put("size", size); r.put("m", f.lastModified());
-                writeLine(out, r);
-                try (InputStream fin = new FileInputStream(f)) { pipe(fin, out, size, null); }
-            } else if ("put".equals(h.optString("op"))) {
-                File dir = resolve(h.optString("path"));
-                File dst = unique(dir, h.optString("name"));
-                File part = new File(dir, "." + dst.getName() + ".parte");
-                long size = h.optLong("size");
-                boolean ok = false;
-                try (OutputStream fout = new FileOutputStream(part)) { pipe(in, fout, size, null); ok = true; }
-                finally { if (!ok) //noinspection ResultOfMethodCallIgnored
-                    part.delete(); }
-                if (!part.renameTo(dst)) throw new IOException("No pude guardar " + dst.getName());
-                if (h.has("m")) //noinspection ResultOfMethodCallIgnored
-                    dst.setLastModified(h.optLong("m"));
-                r.put("ok", true); r.put("path", dst.getAbsolutePath());
-                writeLine(out, r);
-            }
+            // el gestor de archivos solo administra el principal: no se copian archivos entre teléfonos
+            r.put("ok", false); r.put("err", "no disponible"); writeLine(out, r);
         } catch (Exception ignored) { }
     }
 }
