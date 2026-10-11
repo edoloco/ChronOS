@@ -142,7 +142,13 @@ public class FileServer {
         return f.delete() || !f.exists();
     }
 
-    static File copy(File src, File dstDir, boolean move) throws IOException {
+    static File copy(File src, File dstDir, boolean move) throws IOException { return copy(src, dstDir, move, null, null); }
+
+    interface Step { void on(String name, long done, long size); }
+
+    /** Copia (o mueve) un archivo o carpeta; informa el avance y se puede cancelar. */
+    static File copy(File src, File dstDir, boolean move, Step st, java.util.function.BooleanSupplier cancel) throws IOException {
+        if (cancel != null && cancel.getAsBoolean()) throw new IOException("Cancelado");
         File dst = unique(dstDir, src.getName());
         if (move && src.renameTo(dst)) return dst;
         if (src.getCanonicalPath().equals(dstDir.getCanonicalPath()) || dstDir.getCanonicalPath().startsWith(src.getCanonicalPath() + "/"))
@@ -150,9 +156,19 @@ public class FileServer {
         if (src.isDirectory()) {
             if (!dst.mkdirs()) throw new IOException("No pude crear " + dst.getName());
             File[] cs = src.listFiles();
-            if (cs != null) for (File c : cs) copy(c, dst, false);
+            if (cs != null) for (File c : cs) copy(c, dst, false, st, cancel);
         } else {
-            try (InputStream in = new FileInputStream(src); OutputStream out = new FileOutputStream(dst)) { pipe(in, out, src.length(), null); }
+            final long size = src.length();
+            final long[] done = {0};
+            if (st != null) st.on(src.getName(), 0, size);
+            try (InputStream in = new FileInputStream(src); OutputStream out = new FileOutputStream(dst)) {
+                pipe(in, out, size, n -> {
+                    done[0] += n;
+                    if (st != null) st.on(src.getName(), done[0], size);
+                    return cancel == null || !cancel.getAsBoolean();
+                });
+            } catch (IOException e) { //noinspection ResultOfMethodCallIgnored
+                dst.delete(); throw e; }
             //noinspection ResultOfMethodCallIgnored
             dst.setLastModified(src.lastModified());
         }
@@ -228,6 +244,66 @@ public class FileServer {
             r.put("ok", false);
             r.put("err", e.getMessage());
         }
+    }
+
+    // ---------------- copiar o mover dentro del principal ----------------
+    // Las dos ventanas del gestor (una en cada pantalla) muestran carpetas del PRINCIPAL:
+    // el trabajo siempre corre aquí, en el principal, y avisa el avance a las dos pantallas.
+
+    private volatile boolean jobCancel, jobRunning;
+
+    void cancelJob() { jobCancel = true; }
+
+    void runJob(JSONObject m, Hub hub) {
+        if (jobRunning) return;
+        jobRunning = true;
+        jobCancel = false;
+        work.execute(() -> {
+            String src = m.optString("src");
+            JSONArray items = m.optJSONArray("items");
+            boolean move = m.optBoolean("move");
+            int total = items != null ? items.length() : 0;
+            emit(hub, "begin", src, m.optString("title"), "", -1, "", null);
+            String err = null;
+            int done = 0;
+            try {
+                if (!hasAccess(app)) { askAccess(); throw new IOException("Falta el permiso de archivos en el principal"); }
+                File dst = resolve(m.optString("to"));
+                final long[] last = {0};
+                for (int i = 0; i < total && !jobCancel; i++) {
+                    File f = new File(items.optString(i));
+                    final int idx = i;
+                    try {
+                        if (move && f.getParentFile() != null && f.getParentFile().getCanonicalPath().equals(dst.getCanonicalPath())) continue;
+                        copy(f, dst, move, (name, d, size) -> {
+                            long now = System.currentTimeMillis();
+                            if (now - last[0] < 150 && d < size) return;
+                            last[0] = now;
+                            float p = size > 0 ? d / (float) size : -1;
+                            emit(hub, "prog", src, null, name, p, (p >= 0 ? Math.round(p * 100) + "% · " : "") + (idx + 1) + " de " + total, null);
+                        }, () -> jobCancel);
+                        done++;
+                    } catch (IOException e) { if (!jobCancel) err = f.getName() + ": " + e.getMessage(); }
+                }
+            } catch (IOException e) { err = e.getMessage(); }
+            String msg = jobCancel ? "Cancelado" : err != null ? err
+                    : (move ? "Movido" : "Copiado") + (done == 1 ? "" : ": " + done + " elementos");
+            emit(hub, "end", src, null, "", 1, "", msg);
+            jobRunning = false;
+        });
+    }
+
+    /** Avance para las dos pantallas: la de este teléfono (oyentes locales) y la del otro. */
+    private static void emit(Hub hub, String s, String src, String title, String name, float p, String d, String msg) {
+        JSONObject o = new JSONObject();
+        try {
+            o.put("t", "fmAnim"); o.put("s", s); o.put("src", src);
+            if (title != null) o.put("title", title);
+            o.put("name", name); o.put("p", (double) p); o.put("d", d);
+            if (msg != null) o.put("msg", msg);
+        } catch (JSONException ignored) { }
+        hub.send(o);
+        hub.local(o);
     }
 
     // ---------------- canal de contenido ----------------

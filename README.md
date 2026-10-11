@@ -41,13 +41,14 @@ cuando cruzas más de la mitad o los lanzas.
   el APK de la misma versión instalada (liviana o completa) y abre el instalador. Puede actualizar también el
   otro teléfono. La primera vez Android pide permitir que Mesa Doble instale apps. El repositorio debe ser público.
 - **Reloj**: hora, fecha y próxima alarma en la mesa; al tocarlo abre las alarmas del principal.
-- **Archivos**: a pantalla completa en los dos teléfonos a la vez (al abrirlo en uno se abre en el otro):
-  cada teléfono maneja sus propios archivos, como las dos ventanas de Total Commander. Mantén presionado para
-  elegir; aparecen botones flotantes **Copiar**, **Mover**, **Eliminar** (y Renombrar con uno solo). Lo copiado
-  o movido va a la carpeta abierta en el otro teléfono. También se puede **arrastrar o lanzar** lo elegido hacia
-  el otro teléfono para moverlo, con una animación de hojas que vuelan de una pantalla a la otra.
-  Necesita *Acceso a todos los archivos* en ambos. El contenido viaja por un canal aparte (puerto 47821)
-  protegido con una clave que solo conocen los dos teléfonos.
+- **Archivos**: administra los archivos del **principal**, como Total Commander con dos ventanas: una en cada
+  pantalla (en horizontal, arriba y abajo), las dos mostrando carpetas del principal. Al abrirlo en un teléfono
+  se abre en el otro. Mantén presionado para elegir; aparecen botones flotantes **Copiar**, **Mover**,
+  **Eliminar** (y Renombrar con uno solo). Copiar/Mover llevan lo elegido a la carpeta abierta en la otra
+  ventana. También se puede **arrastrar o lanzar** lo elegido hacia la otra pantalla para moverlo, con una
+  animación de hojas que vuelan de una pantalla a la otra. El trabajo siempre lo hace el principal. Al tocar
+  un archivo en el extendido, se trae una copia y se abre ahí. Solo el principal necesita *Acceso a todos
+  los archivos*.
 - **Widget propio "Mesa Doble · Reloj"**: hora, fecha y próxima alarma; al tocarlo abre las alarmas. Está en
   *Herramientas → Widget* (primero de la lista) y también en el inicio normal del teléfono.
 - **Girar y cambiar tamaño**: mantén presionado un elemento o usa dos dedos.

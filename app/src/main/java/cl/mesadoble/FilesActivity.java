@@ -35,6 +35,7 @@ import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -92,8 +93,7 @@ public class FilesActivity extends Activity implements Link.Listener {
     private TextView copyFab, moveFab, renameFab;
     private DragLayer dragLayer;
     private TransferView transfer;
-    private volatile boolean cancelled;
-    private long lastAnimSend;
+    private boolean remote;   // true en el extendido: muestra los archivos del principal a distancia
 
     private int dp(float v) { return Math.round(v * getResources().getDisplayMetrics().density); }
 
@@ -105,6 +105,7 @@ public class FilesActivity extends Activity implements Link.Listener {
         MainActivity.applyOrientation(this);
         hub = Hub.get(this);
         hub.ensureStarted();
+        remote = !hub.isPrincipal();
         fg = night ? 0xFFE6EDF3 : 0xFF1D2733;
         muted = night ? 0xFF93A4B5 : 0xFF5B6B7A;
         accent = night ? 0xFF5CC3CF : 0xFF1F7F8C;
@@ -135,7 +136,7 @@ public class FilesActivity extends Activity implements Link.Listener {
             Entry e = entries.get(pos);
             if (!sel.isEmpty()) { toggle(e); return; }
             if (e.dir) { path = child(dir(), e.name); load(); }
-            else view(new File(child(dir(), e.name)));
+            else openEntry(e);
         });
         list.setOnItemLongClickListener((p, v, pos, id) -> {
             if (error == null) { toggle(entries.get(pos)); v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS); }
@@ -149,19 +150,19 @@ public class FilesActivity extends Activity implements Link.Listener {
         root.addView(buildFab(), fabParams());
 
         transfer = new TransferView(this, night);
-        transfer.setListener(() -> { cancelled = true; transfer.update("Cancelando…", -1, ""); });
+        transfer.setListener(this::cancelTransfer);
         root.addView(transfer, new FrameLayout.LayoutParams(-1, -1));
 
         setContentView(root);
         updateDirection();
         hub.add(this);
-        if (!FileServer.hasAccess(this)) askAccess(); else load();
+        if (!remote && !FileServer.hasAccess(this)) askAccess(); else load();
     }
 
     @Override protected void onResume() {
         super.onResume();
         immersive();
-        if (FileServer.hasAccess(this) && error != null) load();
+        if ((remote || FileServer.hasAccess(this)) && error != null) load();
     }
 
     @Override public void onWindowFocusChanged(boolean f) { super.onWindowFocusChanged(f); if (f) immersive(); }
@@ -175,7 +176,6 @@ public class FilesActivity extends Activity implements Link.Listener {
 
     @Override protected void onDestroy() {
         hub.remove(this);
-        cancelled = true;
         work.shutdownNow();
         super.onDestroy();
     }
@@ -205,8 +205,8 @@ public class FilesActivity extends Activity implements Link.Listener {
         }
         new Ui.Sheet(this)
                 .title("Acceso a los archivos")
-                .message("Para ver y pasar archivos, Android pide activar \"Permitir acceso a todos los archivos\" para Mesa Doble "
-                        + "en los dos teléfonos.")
+                .message("Para administrar los archivos del principal, Android pide activar \"Permitir acceso a todos los archivos\" "
+                        + "para Mesa Doble en este teléfono (solo en el principal).")
                 .button("Después", false, this::load)
                 .button("Activar", true, () -> {
                     try { startActivity(FileServer.accessIntent(this)); } catch (Exception e) { Toast.makeText(this, "No pude abrir ese permiso", Toast.LENGTH_SHORT).show(); }
@@ -382,7 +382,11 @@ public class FilesActivity extends Activity implements Link.Listener {
 
     private void refreshTexts() {
         if (phoneChip == null) return;
-        phoneChip.setText(here().toUpperCase(Locale.ROOT));
+        // las dos ventanas muestran el teléfono PRINCIPAL; cada pantalla maneja una
+        boolean landscape = dirY != 0;
+        String mine = hub.isPrincipal() ? (landscape ? "arriba" : "izquierda") : (landscape ? "abajo" : "derecha");
+        String theirs = hub.isPrincipal() ? (landscape ? "abajo" : "derecha") : (landscape ? "arriba" : "izquierda");
+        phoneChip.setText("Principal · ventana " + mine);
         String shown = dir();
         if (!root.isEmpty() && shown.startsWith(root)) shown = "Almacenamiento" + shown.substring(root.length());
         pathText.setText(shown);
@@ -390,8 +394,8 @@ public class FilesActivity extends Activity implements Link.Listener {
         String rd = FileServer.remoteDir;
         String rn = rd == null || rd.isEmpty() ? "Almacenamiento" : nameOf(rd);
         destText.setText(hub.connected()
-                ? "Destino: " + other() + " " + arrow() + " " + rn + "  ·  mantén presionado para elegir; arrastra o lanza hacia el " + other() + " para mover"
-                : "El " + other() + " no está conectado");
+                ? "Ventana de " + theirs + " " + arrow() + " " + rn + "  ·  mantén presionado para elegir; arrastra o lanza hacia allá para mover"
+                : (remote ? "El principal no está conectado" : "El extendido no está conectado: la otra ventana no está disponible"));
         copyFab.setText("Copiar " + arrow());
         moveFab.setText("Mover " + arrow());
         renameFab.setVisibility(sel.size() == 1 ? View.VISIBLE : View.GONE);
@@ -418,22 +422,32 @@ public class FilesActivity extends Activity implements Link.Listener {
 
     // ---------------- lista ----------------
 
+    /** Lista una carpeta del PRINCIPAL: directo si este es el principal, o pidiéndola por la conexión. */
     private void load() {
         final String p = path;
         work.execute(() -> {
             List<Entry> out = new ArrayList<>();
             String err = null, resolved = p, rt = "";
             try {
-                if (!FileServer.hasAccess(this)) throw new IOException("Falta el permiso de archivos en este teléfono. Toca para reintentar después de activarlo.");
-                File d = FileServer.resolve(p);
-                resolved = d.getAbsolutePath();
-                rt = FileServer.root().getAbsolutePath();
-                File[] fs = d.listFiles();
-                if (fs == null) throw new IOException("No se puede abrir esta carpeta");
-                for (File f : fs) {
-                    if (!showHidden && f.getName().startsWith(".")) continue;
+                JSONArray arr;
+                if (!remote) {
+                    if (!FileServer.hasAccess(this)) throw new IOException("Falta el permiso de archivos en este teléfono. Toca para reintentar después de activarlo.");
+                    File d = FileServer.resolve(p);
+                    resolved = d.getAbsolutePath();
+                    rt = FileServer.root().getAbsolutePath();
+                    arr = FileServer.list(d);
+                } else {
+                    JSONObject r = request("fsList", "path", p);
+                    if (r.has("err")) throw new IOException(r.optString("err"));
+                    resolved = r.optString("path");
+                    rt = r.optString("root");
+                    arr = r.optJSONArray("entries");
+                }
+                for (int i = 0; arr != null && i < arr.length(); i++) {
+                    JSONObject o = arr.getJSONObject(i);
                     Entry e = new Entry();
-                    e.name = f.getName(); e.dir = f.isDirectory(); e.size = e.dir ? 0 : f.length(); e.mtime = f.lastModified();
+                    e.name = o.optString("n"); e.dir = o.optBoolean("d"); e.size = o.optLong("s"); e.mtime = o.optLong("m");
+                    if (!showHidden && e.name.startsWith(".")) continue;
                     out.add(e);
                 }
                 Collator col = Collator.getInstance(new Locale("es"));
@@ -450,7 +464,7 @@ public class FilesActivity extends Activity implements Link.Listener {
                 sel.retainAll(names);
                 adapter.notifyDataSetChanged();
                 refreshTexts();
-                if (fe == null && hub.connected()) hub.send("fmPath", "path", path);   // el otro teléfono sabe dónde dejar lo que mande
+                if (fe == null && hub.connected()) hub.send("fmPath", "path", path);   // la otra ventana sabe dónde dejar lo que se copie
             });
         });
     }
@@ -466,9 +480,11 @@ public class FilesActivity extends Activity implements Link.Listener {
     @Override public void onState(int state, String info) {
         main.post(() -> {
             refreshTexts();
-            if (state == Link.CONNECTED && error == null) hub.send("fmPath", "path", path);
+            if (state == Link.CONNECTED) { if (remote) load(); else if (error == null) hub.send("fmPath", "path", path); }
         });
     }
+
+    private String mySide() { return hub.isPrincipal() ? "p" : "e"; }
 
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
@@ -479,23 +495,29 @@ public class FilesActivity extends Activity implements Link.Listener {
                 break;
             }
             case "fmPath": main.post(this::refreshTexts); break;
-            case "fmReload": main.post(this::load); break;
             case "fmClose": main.post(this::finish); break;
-            case "fmAnim":   // el otro teléfono está mandando archivos hacia acá
+            case "fmAnim":   // avance de una copia (corre en el principal): las hojas vuelan de una ventana a la otra
                 main.post(() -> {
                     String s = m.optString("s");
-                    if ("begin".equals(s)) transfer.begin(false, m.optString("title"), dirX, dirY, false);
+                    boolean mine = mySide().equals(m.optString("src"));
+                    if ("begin".equals(s)) transfer.begin(mine, m.optString("title"), dirX, dirY, true);
                     else if ("prog".equals(s)) transfer.update(m.optString("name"), (float) m.optDouble("p", -1), m.optString("d"));
-                    else if ("end".equals(s)) { transfer.end(); load(); }
+                    else if ("end".equals(s)) {
+                        transfer.end();
+                        sel.clear();
+                        load();
+                        String msg = m.optString("msg");
+                        if (mine && !msg.isEmpty()) Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+                    }
                 });
                 break;
         }
     }
 
-    // ---------------- envío al otro teléfono ----------------
+    // ---------------- pedidos al principal ----------------
 
     private JSONObject request(String t, Object... kv) throws IOException {
-        if (!hub.connected()) throw new IOException("El " + other() + " no está conectado");
+        if (!hub.connected()) throw new IOException("El principal no está conectado");
         int id = seq.incrementAndGet();
         JSONObject m = new JSONObject();
         try {
@@ -506,121 +528,129 @@ public class FilesActivity extends Activity implements Link.Listener {
         waits.put(id, w);
         hub.send(m);
         try {
-            if (!w.l.await(25, TimeUnit.SECONDS)) throw new IOException("El " + other() + " no responde");
+            if (!w.l.await(25, TimeUnit.SECONDS)) throw new IOException("El principal no responde");
         } catch (InterruptedException e) { throw new IOException("Cancelado"); }
         finally { waits.remove(id); }
         if ("permiso".equals(w.r.optString("err")))
-            throw new IOException("Falta el permiso de archivos en el " + other() + ": toca el aviso que apareció allá");
-        if (!w.r.optBoolean("ok")) throw new IOException(w.r.optString("err", "No se pudo"));
+            throw new IOException("Falta el permiso de archivos en el principal: toca el aviso que apareció allá");
+        if ("fsOpR".equals(w.r.optString("t")) && !w.r.optBoolean("ok")) throw new IOException(w.r.optString("err", "No se pudo"));
         return w.r;
     }
 
-    private void upload(File src, String remoteDir, FileServer.Progress pr) throws IOException {
+    /** mkdir, delete, rename en el principal (aquí mismo o pidiéndolo). */
+    private void op(String op, Object... kv) throws IOException {
+        if (remote) {
+            Object[] all = new Object[kv.length + 2];
+            all[0] = "op"; all[1] = op;
+            System.arraycopy(kv, 0, all, 2, kv.length);
+            request("fsOp", all);
+            return;
+        }
+        JSONObject m = new JSONObject(), r = new JSONObject();
+        try {
+            m.put("op", op);
+            for (int i = 0; i + 1 < kv.length; i += 2) m.put((String) kv[i], kv[i + 1]);
+            FileServer.op(m, r);
+        } catch (JSONException ignored) { }
+        if (!r.optBoolean("ok")) throw new IOException(r.optString("err", "No se pudo"));
+    }
+
+    /** Copiar o mover lo elegido a la carpeta abierta en la otra ventana (las dos son del principal). */
+    private void startTransfer(boolean move) {
+        List<Entry> items = selected();
+        if (items.isEmpty()) return;
+        if (!hub.connected()) { Toast.makeText(this, "El otro teléfono no está conectado", Toast.LENGTH_SHORT).show(); return; }
+        if (transfer.isActive()) return;
+        String to = FileServer.remoteDir == null ? "" : FileServer.remoteDir;
+        if (move && to.equals(dir())) { Toast.makeText(this, "La otra ventana está en la misma carpeta", Toast.LENGTH_SHORT).show(); return; }
+        JSONArray arr = new JSONArray();
+        for (Entry e : items) arr.put(child(dir(), e.name));
+        String what = items.size() == 1 ? items.get(0).name : items.size() + " elementos";
+        String dest = to.isEmpty() ? "Almacenamiento" : nameOf(to);
+        JSONObject job = new JSONObject();
+        try {
+            job.put("t", "fmJob"); job.put("items", arr); job.put("to", to); job.put("move", move); job.put("src", mySide());
+            job.put("title", (move ? "Moviendo " : "Copiando ") + what + " a " + dest);
+        } catch (JSONException ignored) { }
+        showFab(false);
+        if (remote) hub.send(job); else FileServer.get(this).runJob(job, hub);
+    }
+
+    private void cancelTransfer() {
+        if (remote) hub.send("fmCancel"); else FileServer.get(this).cancelJob();
+        transfer.update("Cancelando…", -1, "");
+    }
+
+    /** Trae una copia de un archivo del principal para abrirlo en esta pantalla. */
+    private void download(String remotePath, File dst, FileServer.Progress pr) throws IOException {
         FileServer fs = FileServer.get(this);
         String ip = hub.link.peerIp();
-        if (ip == null || fs.remoteToken == null) throw new IOException("Reconecta los teléfonos para pasar archivos");
+        if (ip == null || fs.remoteToken == null) throw new IOException("Reconecta los teléfonos para abrir archivos del principal");
         try (Socket s = new Socket()) {
             s.connect(new InetSocketAddress(ip, fs.remotePort), 6000);
             s.setSoTimeout(60000);
             InputStream in = new BufferedInputStream(s.getInputStream());
             OutputStream out = new BufferedOutputStream(s.getOutputStream());
             JSONObject h = new JSONObject();
-            try {
-                h.put("k", fs.remoteToken); h.put("op", "put"); h.put("path", remoteDir);
-                h.put("name", src.getName()); h.put("size", src.length()); h.put("m", src.lastModified());
-            } catch (JSONException ignored) { }
+            try { h.put("k", fs.remoteToken); h.put("op", "get"); h.put("path", remotePath); } catch (JSONException ignored) { }
             FileServer.writeLine(out, h);
-            try (InputStream fi = new FileInputStream(src)) { FileServer.pipe(fi, out, src.length(), pr); }
             JSONObject r = new JSONObject(FileServer.readLine(in));
             if (!r.optBoolean("ok")) throw new IOException("permiso".equals(r.optString("err"))
-                    ? "Falta el permiso de archivos en el " + other() : r.optString("err", "No se pudo guardar"));
+                    ? "Falta el permiso de archivos en el principal" : r.optString("err", "No se pudo leer"));
+            try (OutputStream fo = new java.io.FileOutputStream(dst)) { FileServer.pipe(in, fo, r.optLong("size"), pr); }
         } catch (JSONException e) { throw new IOException("Respuesta inválida"); }
     }
 
-    private int done, total;
-
-    private void startTransfer(boolean move) {
-        List<Entry> items = selected();
-        if (items.isEmpty()) return;
-        if (!hub.connected()) { Toast.makeText(this, "El " + other() + " no está conectado", Toast.LENGTH_SHORT).show(); return; }
-        if (transfer.isActive()) return;
-        cancelled = false;
-        done = 0; total = items.size();
-        final String srcDir = dir(), dst = FileServer.remoteDir == null ? "" : FileServer.remoteDir;
-        String head = (move ? "Moviendo " : "Copiando ") + (total == 1 ? items.get(0).name : total + " elementos") + " al " + other();
-        transfer.begin(true, head, dirX, dirY, true);
-        hub.send("fmAnim", "s", "begin", "title", "Recibiendo " + (total == 1 ? items.get(0).name : total + " elementos") + " del " + here());
-        showFab(false);
+    private void openEntry(Entry e) {
+        String p = child(dir(), e.name);
+        if (!remote) { view(new File(p)); return; }
+        File d = new File(getCacheDir(), "abrir");
+        File[] old = d.listFiles();
+        if (old != null) for (File o : old) FileServer.delete(o);
+        //noinspection ResultOfMethodCallIgnored
+        d.mkdirs();
+        File dst = new File(d, e.name);
+        transfer.begin(false, "Abriendo " + e.name, dirX, dirY, false);
         work.execute(() -> {
-            String err = null;
-            for (Entry e : items) {
-                if (cancelled) break;
-                try { send(child(srcDir, e.name), e.dir, e.size, dst, move); done++; }
-                catch (Exception ex) { if (!cancelled) err = e.name + ": " + ex.getMessage(); }
+            try {
+                final long[] got = {0};
+                download(p, dst, n -> {
+                    got[0] += n;
+                    float pr = e.size > 0 ? got[0] / (float) e.size : -1;
+                    main.post(() -> transfer.update(e.name, pr, pr >= 0 ? Math.round(pr * 100) + "%" : ""));
+                    return true;
+                });
+                main.post(() -> { transfer.end(); view(dst); });
+            } catch (IOException ex) {
+                main.post(() -> { transfer.end(); Toast.makeText(this, ex.getMessage(), Toast.LENGTH_LONG).show(); });
             }
-            final String fe = cancelled ? "Cancelado" : err;
-            final int n = done;
-            main.post(() -> {
-                transfer.end();
-                hub.send("fmAnim", "s", "end");
-                sel.clear();
-                load();
-                Toast.makeText(this, fe != null ? fe : (move ? "Movido" : "Copiado") + (n == 1 ? "" : ": " + n + " elementos") + " al " + other(),
-                        Toast.LENGTH_LONG).show();
-            });
         });
     }
 
-    private void progress(String name, long bytes, long size) {
-        float p = size > 0 ? bytes / (float) size : -1;
-        String d = (p >= 0 ? Math.round(p * 100) + "% · " : "") + Math.min(done + 1, total) + " de " + total;
-        main.post(() -> transfer.update(name, p, d));
-        long now = System.currentTimeMillis();
-        if (now - lastAnimSend > 200 || (size > 0 && bytes >= size)) {
-            lastAnimSend = now;
-            hub.send("fmAnim", "s", "prog", "name", name, "p", (double) p, "d", d);
-        }
+    // ---------------- eliminar, renombrar, nueva carpeta ----------------
+
+    private void background(Runnable done, IoTask task) {
+        work.execute(() -> {
+            String err = null;
+            try { task.run(); } catch (IOException e) { err = e.getMessage(); }
+            final String fe = err;
+            main.post(() -> { if (fe != null) Toast.makeText(this, fe, Toast.LENGTH_LONG).show(); if (done != null) done.run(); });
+        });
     }
 
-    /** Pasa un archivo o carpeta de este teléfono a la carpeta abierta en el otro. */
-    private void send(String srcPath, boolean isDir, long size, String dstDir, boolean move) throws IOException {
-        if (cancelled) throw new IOException("Cancelado");
-        File f = new File(srcPath);
-        String name = f.getName();
-        progress(name, 0, isDir ? 0 : size);
-        if (isDir) {
-            String nd = request("fsOp", "op", "mkdir", "path", dstDir, "name", name, "unique", true).optString("path");
-            File[] cs = f.listFiles();
-            if (cs != null) for (File c : cs) send(c.getAbsolutePath(), c.isDirectory(), c.length(), nd, false);
-        } else {
-            final long[] sent = {0};
-            final long[] last = {0};
-            upload(f, dstDir, n -> {
-                sent[0] += n;
-                long now = System.currentTimeMillis();
-                if (now - last[0] > 100 || sent[0] >= size) { last[0] = now; progress(name, sent[0], size); }
-                return !cancelled;
-            });
-        }
-        if (move) FileServer.delete(f);
-    }
-
-    // ---------------- operaciones locales ----------------
+    private interface IoTask { void run() throws IOException; }
 
     private void deleteSel() {
         List<Entry> items = selected();
         if (items.isEmpty()) return;
         new Ui.Sheet(this)
                 .title("Eliminar " + (items.size() == 1 ? "\"" + items.get(0).name + "\"" : items.size() + " elementos"))
-                .message("Se borran del " + here() + ". No se puede deshacer.")
+                .message("Se borran del teléfono principal. No se puede deshacer.")
                 .button("Cancelar", false, null)
                 .button("Eliminar", true, () -> {
                     final String d = dir();
-                    work.execute(() -> {
-                        String err = null;
-                        for (Entry e : items) if (!FileServer.delete(new File(child(d, e.name)))) err = "No pude borrar " + e.name;
-                        final String fe = err;
-                        main.post(() -> { if (fe != null) Toast.makeText(this, fe, Toast.LENGTH_LONG).show(); sel.clear(); load(); });
+                    background(() -> { sel.clear(); load(); }, () -> {
+                        for (Entry e : items) op("delete", "path", child(d, e.name));
                     });
                 })
                 .show();
@@ -648,11 +678,8 @@ public class FilesActivity extends Activity implements Link.Listener {
                 .button("Guardar", true, () -> {
                     String nn = f.getText().toString().trim();
                     if (nn.isEmpty() || nn.contains("/") || nn.equals(e.name)) return;
-                    File to = new File(dir(), nn);
-                    if (to.exists()) { Toast.makeText(this, "Ya existe " + nn, Toast.LENGTH_SHORT).show(); return; }
-                    if (!new File(child(dir(), e.name)).renameTo(to)) Toast.makeText(this, "No pude cambiar el nombre", Toast.LENGTH_SHORT).show();
-                    sel.clear();
-                    load();
+                    final String d = dir();
+                    background(() -> { sel.clear(); load(); }, () -> op("rename", "path", child(d, e.name), "name", nn));
                 })
                 .show();
     }
@@ -665,9 +692,8 @@ public class FilesActivity extends Activity implements Link.Listener {
                 .button("Crear", true, () -> {
                     String nn = f.getText().toString().trim();
                     if (nn.isEmpty() || nn.contains("/")) return;
-                    File d = new File(dir(), nn);
-                    if (!d.isDirectory() && !d.mkdirs()) Toast.makeText(this, "No pude crear la carpeta", Toast.LENGTH_SHORT).show();
-                    load();
+                    final String d = dir();
+                    background(this::load, () -> op("mkdir", "path", d, "name", nn));
                 })
                 .show();
     }

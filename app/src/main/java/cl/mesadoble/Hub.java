@@ -125,6 +125,9 @@ public class Hub implements Link.Listener {
 
     public void remove(Link.Listener l) { listeners.remove(l); }
 
+    /** Entrega un mensaje a las pantallas de ESTE teléfono, como si hubiera llegado del otro. */
+    public void local(JSONObject m) { for (Link.Listener l : listeners) l.onMessage(m); }
+
     public void send(JSONObject m) { link.send(m); }
 
     public void send(String type, Object... kv) {
@@ -219,6 +222,8 @@ public class Hub implements Link.Listener {
             return;
         }
         if ("fmPath".equals(t)) FileServer.remoteDir = m.optString("path");
+        if ("fmJob".equals(t)) { if (isPrincipal()) FileServer.get(app).runJob(m, this); return; }
+        if ("fmCancel".equals(t)) { FileServer.get(app).cancelJob(); return; }
         if ("appsReq".equals(t)) { AppsDialog.sendList(app, this); return; }
         if (t.startsWith("fs") && !t.endsWith("R") && !"fsTok".equals(t)) { FileServer.get(app).handle(m, this); return; }
         if ("fsTok".equals(t)) FileServer.get(app).setRemote(m.optString("k"), m.optInt("port"));
