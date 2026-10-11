@@ -101,9 +101,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         statusBtn = addSquare(SquareButton.STATUS, "Red", false, v -> showConnection());
         root.addView(bar, new FrameLayout.LayoutParams(-2, -2));
 
-        // Forma fija: dos teléfonos parados, lado a lado, que juntos forman una pantalla apaisada.
-        // Cada pantalla queda en vertical; solo los íconos giran según cómo se sostiene.
-        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+        // La orientación depende de la forma elegida (apaisada por defecto) y del bloqueo de vista.
+        applyOrientation(this);
         orient = new OrientationEventListener(this) {
             @Override public void onOrientationChanged(int o) { onPhysicalOrientation(o); }
         };
@@ -146,12 +145,48 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     /** Mesa horizontal = teléfonos uno sobre otro; vertical = lado a lado. Siempre unidos por el lado largo. */
-    private boolean stacked() { return false; }
+    // Formas de la mesa (siempre unidos por el borde que se toca)
+    static final int LAYOUT_SIDE_H = 0, LAYOUT_SIDE_V = 1, LAYOUT_STACK = 2;
+    private int layout() { return prefs.getInt("layout", LAYOUT_SIDE_H); }
+    private boolean locked() { return prefs.getBoolean("viewLock", true); }
+    private boolean stacked() { return layout() == LAYOUT_STACK; }
+    /** Posición de este teléfono en la mesa: lado a lado = extendido izq. / principal der.; uno sobre otro = principal arriba. */
+    private int deskSide() { boolean p = side == 1; return stacked() ? (p ? 0 : 1) : (p ? 1 : 0); }
+    private int layoutIcon(int l) { return l == LAYOUT_SIDE_V ? Ui.LAYOUT_SIDE_V : l == LAYOUT_STACK ? Ui.LAYOUT_STACK : Ui.LAYOUT_SIDE_H; }
+    private String layoutName(int l) {
+        return l == LAYOUT_SIDE_V ? "Lado a lado, en vertical" : l == LAYOUT_STACK ? "Uno sobre otro, en horizontal" : "Lado a lado, en horizontal";
+    }
+
+    /** Orientación de pantalla según la forma y el bloqueo. La usan también el teclado y otras pantallas. */
+    static void applyOrientation(Activity a) {
+        SharedPreferences p = a.getSharedPreferences("mesa", MODE_PRIVATE);
+        boolean portrait = p.getInt("layout", LAYOUT_SIDE_H) == LAYOUT_SIDE_V, lock = p.getBoolean("viewLock", true);
+        a.setRequestedOrientation(portrait
+                ? (lock ? ActivityInfo.SCREEN_ORIENTATION_PORTRAIT : ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT)
+                : (lock ? ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE : ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE));
+    }
+
+    /** Cambia la forma; el principal la comparte para que el extendido quede igual. */
+    private void setLayout(int l, boolean lock, boolean fromRemote) {
+        boolean wasStacked = stacked();
+        prefs.edit().putInt("layout", l).putBoolean("viewLock", lock).apply();
+        if (stacked() != wasStacked) {
+            desk.convertAll(stacked());
+            prefs.edit().putBoolean("savedStacked", stacked()).apply();
+            scheduleSave();
+        }
+        snapped = -1;
+        applySide();
+        applyOrientation(this);
+        if (!fromRemote) hub.send("view", "layout", l, "lock", lock);
+    }
+
+    private void sendView() { hub.send("view", "layout", layout(), "lock", locked()); }
     /** Ancho inicial de un elemento: en horizontal la pantalla es más ancha, así que se usa la mitad. */
-    private double sized(double base) { return stacked() ? base * 0.5 : base; }
+    private double sized(double base) { return layout() == LAYOUT_SIDE_V ? base : base * 0.5; }
     private String sideName(int s) { return s == 1 ? "PRINCIPAL (derecha)" : "EXTENDIDO (izquierda)"; }
-    private String firstPhone() { return "el extendido (izquierda)"; }
-    private String secondPhone() { return "el principal (derecha)"; }
+    private String firstPhone() { return "el extendido"; }
+    private String secondPhone() { return "el principal"; }
 
     private SquareButton addSquare(int kind, String label, boolean primary, View.OnClickListener l) {
         SquareButton b = new SquareButton(this, kind, label, primary, night);
@@ -184,22 +219,39 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     private void settingsMenu() {
         boolean auto = hub.autoKeyboard();
-        String[] opts = {
-                "Este teléfono es el " + sideName(side) + " (cambiar)",
-                hub.isPrincipal() ? "Revisar configuración del principal" : "Revisar configuración del extendido",
-                "Teclado automático: " + (auto ? "SÍ" : "NO") + " (cambiar)",
-                "Conexión y dirección IP"};
-        new AlertDialog.Builder(this)
-                .setTitle("Ajustes")
-                .setItems(opts, (d, w) -> {
-                    if (w == 0) chooseSide();
-                    else if (w == 1) checkSetup(true);
-                    else if (w == 2) {
-                        prefs.edit().putBoolean("autoKb", !auto).apply();
-                        Toast.makeText(this, !auto ? "El teclado se abrirá solo en el extendido" : "Teclado automático desactivado", Toast.LENGTH_SHORT).show();
-                    }
-                    else showConnection();
-                })
+        new Ui.Sheet(this)
+                .title("Ajustes")
+                .option(layoutIcon(layout()), deskSide(), "Forma de la mesa", layoutName(layout()), false, this::chooseLayout)
+                .option(locked() ? Ui.LOCK : Ui.UNLOCK, -1, locked() ? "Vista bloqueada" : "Vista libre",
+                        locked() ? "La pantalla no gira aunque muevas el teléfono" : "Gira 180° si das vuelta los teléfonos", false,
+                        () -> setLayout(layout(), !locked(), false))
+                .option(layoutIcon(layout()), deskSide(), "Este teléfono es el " + (side == 1 ? "principal" : "extendido"),
+                        side == 1 ? "Aquí corren las apps" : "Pantalla extra y teclado", false, this::chooseSide)
+                .option(Ui.AUTO, -1, "Teclado automático: " + (auto ? "sí" : "no"),
+                        "El teclado aparece solo en el extendido al escribir", false, () -> {
+                            prefs.edit().putBoolean("autoKb", !auto).apply();
+                            Toast.makeText(this, !auto ? "El teclado se abrirá solo en el extendido" : "Teclado automático desactivado", Toast.LENGTH_SHORT).show();
+                        })
+                .option(Ui.GEAR, "Revisar configuración", hub.isPrincipal() ? "Permisos del principal" : "Permisos del extendido", () -> checkSetup(true))
+                .option(Ui.WIFI, "Conexión", statusText, this::showConnection)
+                .button("Cerrar", false, null)
+                .show();
+    }
+
+    /** Elegir la forma de la mesa con dibujos de cómo van los teléfonos. */
+    private void chooseLayout() {
+        int cur = layout();
+        new Ui.Sheet(this)
+                .title("Forma de la mesa")
+                .message("P = principal (corren las apps) · E = extendido (pantalla extra y teclado). "
+                        + "Los elementos cruzan por el borde donde se tocan los teléfonos.")
+                .option(Ui.LAYOUT_SIDE_H, -1, "Lado a lado, en horizontal", "Como una pantalla ancha. La forma recomendada.", cur == LAYOUT_SIDE_H,
+                        () -> setLayout(LAYOUT_SIDE_H, locked(), false))
+                .option(Ui.LAYOUT_STACK, -1, "Uno sobre otro, en horizontal", "Como un notebook: principal arriba, teclado abajo.", cur == LAYOUT_STACK,
+                        () -> setLayout(LAYOUT_STACK, locked(), false))
+                .option(Ui.LAYOUT_SIDE_V, -1, "Lado a lado, en vertical", "Como un libro abierto.", cur == LAYOUT_SIDE_V,
+                        () -> setLayout(LAYOUT_SIDE_V, locked(), false))
+                .button("Cerrar", false, null)
                 .show();
     }
 
@@ -245,17 +297,18 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             } else lines.add("✓ Abrir el teclado solo");
         }
         if (fixes.isEmpty() && !always) return;
-        StringBuilder msg = new StringBuilder();
-        for (String l : lines) msg.append(l).append("\n");
-        if (fixes.isEmpty()) msg.append("\nTodo listo.");
-        else msg.append("\nEn teléfonos Xiaomi revisa también: Ajustes → Apps → Mesa Doble → Otros permisos → "
-                + "\"Mostrar ventanas emergentes mientras se ejecuta en segundo plano\".");
-        AlertDialog.Builder b = new AlertDialog.Builder(this)
-                .setTitle(hub.isPrincipal() ? "Configurar el principal" : "Configurar el extendido")
-                .setMessage(msg.toString());
-        if (!fixes.isEmpty()) b.setPositiveButton("Resolver el primero", (d, w) -> fixes.get(0).run()).setNegativeButton("Después", null);
-        else b.setPositiveButton("Listo", null);
-        b.show();
+        Ui.Sheet sh = new Ui.Sheet(this)
+                .title(hub.isPrincipal() ? "Configurar el principal" : "Configurar el extendido")
+                .message(fixes.isEmpty() ? "Todo listo." : "Toca lo que falta para resolverlo. En teléfonos Xiaomi revisa también: "
+                        + "Ajustes → Apps → Mesa Doble → Otros permisos → \"Mostrar ventanas emergentes en segundo plano\".");
+        int fi = 0;
+        for (String l : lines) {
+            boolean ok = l.startsWith("✓"), bad = l.startsWith("✗");
+            String text = l.substring(1).trim();
+            Runnable r = bad ? fixes.get(fi++) : null;
+            sh.option(ok ? Ui.CHECK : bad ? Ui.CROSS : Ui.GEAR, text, bad ? "Tocar para resolver" : null, r);
+        }
+        sh.button(fixes.isEmpty() ? "Listo" : "Después", !fixes.isEmpty() ? false : true, null).show();
     }
 
     private void openSettings(String action, Uri data, String toast) {
@@ -270,19 +323,16 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     private void guideAccessibility() {
-        new AlertDialog.Builder(this)
-                .setTitle("Cambio automático de teclado")
-                .setMessage("Mesa Doble usa un servicio de accesibilidad solo para cambiar al teclado Mesa Doble "
-                        + "(y devolver el tuyo al desconectarse) y para saber cuándo abres una app de chat. "
-                        + "No lee lo que hay en tu pantalla.\n\n"
-                        + "1. Si la opción aparece bloqueada (\"ajuste restringido\"): abre Info de la app → menú ⋮ → "
-                        + "\"Permitir ajustes restringidos\".\n"
-                        + "2. En Accesibilidad → Apps descargadas, activa \"Mesa Doble\".")
-                .setPositiveButton("Abrir Accesibilidad", (d, w) -> openSettings(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS, null,
-                        "Busca Mesa Doble en Apps descargadas y actívalo."))
-                .setNeutralButton("Info de la app", (d, w) -> openSettings(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                        Uri.parse("package:" + getPackageName()), "Menú ⋮ → Permitir ajustes restringidos"))
-                .setNegativeButton("Después", null)
+        new Ui.Sheet(this)
+                .title("Cambio automático de teclado")
+                .message("Mesa Doble usa un servicio de accesibilidad solo para cambiar al teclado Mesa Doble "
+                        + "(y devolver el tuyo al desconectarse) y para saber cuándo abres una app de chat. No lee tu pantalla.")
+                .option(Ui.LOCK, "1. Permitir ajustes restringidos", "Si aparece bloqueado: Info de la app → menú ⋮", () ->
+                        openSettings(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName()),
+                                "Menú ⋮ → Permitir ajustes restringidos"))
+                .option(Ui.GEAR, "2. Activar en Accesibilidad", "Apps descargadas → Mesa Doble", () ->
+                        openSettings(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS, null, "Busca Mesa Doble en Apps descargadas y actívalo."))
+                .button("Después", false, null)
                 .show();
     }
 
@@ -305,14 +355,14 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private void openApp(String pkg, String label) {
         int r = hub.launchHere(pkg, label);
         if (r == Hub.NOT_INSTALLED) {
-            new AlertDialog.Builder(this)
-                    .setTitle("No está instalada en este teléfono")
-                    .setMessage("Las apps se abren en el principal. ¿Quieres buscarla en Play Store?")
-                    .setPositiveButton("Buscar", (d, w) -> {
+            new Ui.Sheet(this)
+                    .title("No está instalada en el principal")
+                    .message("Las apps se abren en el principal.")
+                    .option(Ui.STORE, "Buscar en Play Store", null, () -> {
                         try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=" + pkg))); }
                         catch (Exception e) { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=" + pkg))); }
                     })
-                    .setNegativeButton("Cancelar", null)
+                    .button("Cerrar", false, null)
                     .show();
         }
     }
@@ -334,12 +384,12 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     // ---------------- teclado ----------------
 
     private void keyboardMenu() {
-        new AlertDialog.Builder(this)
-                .setTitle("Teclado")
-                .setItems(new String[]{"Este teléfono es el teclado", "Este teléfono recibe lo que escribo"}, (d, w) -> {
-                    if (w == 0) startActivity(new Intent(this, KeyboardActivity.class));
-                    else setupReceiver();
-                })
+        new Ui.Sheet(this)
+                .title("Teclado")
+                .option(Ui.KEYBOARD, "Usar este teléfono como teclado", "Teclado, touchpad, gamepad o dictado",
+                        () -> startActivity(new Intent(this, KeyboardActivity.class)))
+                .option(Ui.RECEIVE, "Recibir aquí lo que escribo", "Elegir el teclado Mesa Doble en este teléfono", this::setupReceiver)
+                .button("Cerrar", false, null)
                 .show();
     }
 
@@ -347,36 +397,31 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     private void setupReceiver() {
         if (Hub.imeSelected(this)) {
-            new AlertDialog.Builder(this)
-                    .setTitle("Listo para recibir")
-                    .setMessage("El teclado Mesa Doble ya está elegido en este teléfono. Abre cualquier app, toca donde se escribe "
-                            + "y escribe desde el otro teléfono.\n\nPara volver a tu teclado normal toca \"Cambiar teclado\" en la barra.")
-                    .setPositiveButton("Entendido", null)
-                    .setNeutralButton("Cambiar teclado", (d, w) -> startActivity(new Intent(this, ImePickerActivity.class)))
+            new Ui.Sheet(this)
+                    .title("Listo para recibir")
+                    .message("El teclado Mesa Doble ya está elegido. Abre cualquier app, toca donde se escribe y escribe desde el otro teléfono. "
+                            + "Para volver a tu teclado normal toca \"Cambiar teclado\" en la barra.")
+                    .button("Cambiar teclado", false, () -> startActivity(new Intent(this, ImePickerActivity.class)))
+                    .button("Entendido", true, null)
                     .show();
             return;
         }
         if (!imeEnabled()) {
-            new AlertDialog.Builder(this)
-                    .setTitle("Activa el teclado Mesa Doble")
-                    .setMessage("Se abrirá la lista de teclados. Activa \"Mesa Doble\" y vuelve aquí.\n\n"
-                            + "Android mostrará un aviso general sobre teclados: Mesa Doble solo escribe lo que mandas "
-                            + "desde tu otro teléfono y no guarda nada.")
-                    .setPositiveButton("Abrir ajustes", (d, w) -> {
-                        try { startActivity(new Intent(android.provider.Settings.ACTION_INPUT_METHOD_SETTINGS)); }
-                        catch (Exception e) { Toast.makeText(this, "Busca \"Gestionar teclados\" en Ajustes", Toast.LENGTH_LONG).show(); }
-                    })
-                    .setNegativeButton("Cancelar", null)
+            new Ui.Sheet(this)
+                    .title("Activa el teclado Mesa Doble")
+                    .message("Se abrirá la lista de teclados. Activa \"Mesa Doble\" y vuelve aquí. Android muestra un aviso general "
+                            + "sobre teclados: Mesa Doble solo escribe lo que mandas desde tu otro teléfono y no guarda nada.")
+                    .button("Cancelar", false, null)
+                    .button("Abrir ajustes", true, () -> openSettings(android.provider.Settings.ACTION_INPUT_METHOD_SETTINGS, null,
+                            "Activa \"Mesa Doble\" y vuelve."))
                     .show();
             return;
         }
-        new AlertDialog.Builder(this)
-                .setTitle("Elige \"Mesa Doble\"")
-                .setMessage("En la lista que aparece elige Mesa Doble. Luego abre WhatsApp, Chrome o la app que quieras "
-                        + "y toca donde se escribe: verás una barra delgada y podrás escribir desde el otro teléfono.\n\n"
-                        + "Para volver a tu teclado normal toca \"Cambiar teclado\" en esa barra.")
-                .setPositiveButton("Elegir teclado", (d, w) -> startActivity(new Intent(this, ImePickerActivity.class)))
-                .setNegativeButton("Cancelar", null)
+        new Ui.Sheet(this)
+                .title("Elige \"Mesa Doble\"")
+                .message("En la lista que aparece elige Mesa Doble. Al tocar donde se escribe verás una barra delgada en vez del teclado.")
+                .button("Cancelar", false, null)
+                .button("Elegir teclado", true, () -> startActivity(new Intent(this, ImePickerActivity.class)))
                 .show();
     }
 
@@ -426,15 +471,16 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     private void applySide() {
-        desk.setSide(side);
-        // la barra va en el borde exterior, lejos de la unión entre teléfonos
+        int ds = deskSide();
         desk.setVertical(stacked());
+        desk.setSide(ds);
+        // la barra va en el borde exterior, lejos de la unión entre teléfonos
         FrameLayout.LayoutParams bp = (FrameLayout.LayoutParams) bar.getLayoutParams();
         if (stacked()) {
-            bp.gravity = (side == 0 ? Gravity.TOP : Gravity.BOTTOM) | Gravity.START;
+            bp.gravity = (ds == 0 ? Gravity.TOP : Gravity.BOTTOM) | Gravity.START;
             bp.setMargins(dp(14), dp(12), dp(14), dp(12));
         } else {
-            bp.gravity = Gravity.BOTTOM | (side == 0 ? Gravity.START : Gravity.END);
+            bp.gravity = Gravity.BOTTOM | (ds == 0 ? Gravity.START : Gravity.END);
             bp.setMargins(dp(12), 0, dp(12), dp(14));
         }
         bar.setLayoutParams(bp);
@@ -456,15 +502,14 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     private void chooseSide() {
-        String last = side == 1 ? "\n\nLa última vez este teléfono fue el principal." : side == 0 ? "\n\nLa última vez este teléfono fue el extendido." : "";
-        new AlertDialog.Builder(this)
-                .setTitle("¿Qué es este teléfono?")
-                .setMessage("Pon los dos teléfonos parados, uno al lado del otro: juntos forman una pantalla apaisada.\n\n"
-                        + "PRINCIPAL (derecha): aquí corren las apps.\n"
-                        + "EXTENDIDO (izquierda): pantalla extra y teclado." + last)
-                .setPositiveButton("Principal (derecha)", (d, w) -> setSide(1))
-                .setNegativeButton("Extendido (izquierda)", (d, w) -> setSide(0))
-                .setCancelable(side >= 0)
+        int l = layout(), ic = layoutIcon(l);
+        boolean st = stacked();
+        new Ui.Sheet(this)
+                .title("¿Qué es este teléfono?")
+                .message(layoutName(l) + ". Puedes cambiar la forma en Ajustes.")
+                .option(ic, st ? 0 : 1, "Principal", (st ? "Arriba" : "A la derecha") + " · aquí corren las apps", side == 1, () -> setSide(1))
+                .option(ic, st ? 1 : 0, "Extendido", (st ? "Abajo" : "A la izquierda") + " · pantalla extra y teclado", side == 0, () -> setSide(0))
+                .cancelable(side >= 0)
                 .show();
     }
 
@@ -499,34 +544,44 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private final Runnable statusTick = this::updateStatus;
 
     private void showConnection() {
-        final EditText ip = new EditText(this);
-        ip.setHint("Ej: 192.168.1.20");
+        final EditText ip = field("Ej: 192.168.1.20");
         ip.setInputType(InputType.TYPE_CLASS_PHONE);
         ip.setText(prefs.getString("lastIp", ""));
-        LinearLayout box = new LinearLayout(this);
-        box.setPadding(dp(22), dp(4), dp(22), 0);
-        box.addView(ip, new LinearLayout.LayoutParams(-1, -2));
-        String state = statusText;
-        AlertDialog.Builder b = new AlertDialog.Builder(this).setTitle("Conexión");
+        Ui.Sheet sh = new Ui.Sheet(this).title("Conexión");
         if (side == 0) {
-            b.setMessage(state + "\n\nEste es " + firstPhone() + " y espera la conexión.\nSu IP es " + Link.localIp()
-                    + "\n\nSi " + secondPhone() + " no lo encuentra solo, escribe esa IP en él.")
-             .setPositiveButton("Listo", null);
+            sh.message(statusText + "\n\nEste es el extendido y espera la conexión. Su IP es " + Link.localIp()
+                    + ". Si el principal no lo encuentra solo, escribe esa IP en el principal.")
+              .button("Listo", true, null);
         } else {
-            b.setMessage(state + "\n\nEste es " + secondPhone() + " y busca a " + firstPhone().replace("el teléfono", "el") + " en el WiFi. "
-                    + "Si no lo encuentra, escribe la IP que muestra " + firstPhone() + ".")
-             .setView(box)
-             .setPositiveButton("Conectar", (d, w) -> {
-                 String v = ip.getText().toString().trim();
-                 if (v.isEmpty()) return;
-                 prefs.edit().putString("lastIp", v).apply();
-                 linkInfo = "Conectando con " + v + "…";
-                 updateStatus();
-                 hub.link.connectTo(v);
-             })
-             .setNegativeButton("Cancelar", null);
+            sh.message(statusText + "\n\nEl principal busca al extendido en el WiFi. Si no lo encuentra, escribe la IP que muestra el extendido.")
+              .view(ip)
+              .button("Cancelar", false, null)
+              .button("Conectar", true, () -> {
+                  String v = ip.getText().toString().trim();
+                  if (v.isEmpty()) return;
+                  prefs.edit().putString("lastIp", v).apply();
+                  linkInfo = "Conectando con " + v + "…";
+                  updateStatus();
+                  hub.link.connectTo(v);
+              });
         }
-        b.show();
+        sh.show();
+    }
+
+    /** Campo de texto con el estilo de la app. */
+    private EditText field(String hint) {
+        EditText e = new EditText(this);
+        e.setHint(hint);
+        e.setTextSize(17);
+        e.setTextColor(night ? 0xFFE6EDF3 : 0xFF1D2733);
+        e.setHintTextColor(night ? 0xFF6F8294 : 0xFF8A99A8);
+        e.setPadding(dp(16), dp(12), dp(16), dp(12));
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(night ? 0xFF253445 : 0xFFFFFFFF);
+        g.setCornerRadius(dp(16));
+        g.setStroke(dp(1), night ? 0xFF33465A : 0xFFD8E0E7);
+        e.setBackground(g);
+        return e;
     }
 
     // ---------------- elementos ----------------
@@ -569,29 +624,27 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     @Override public void onEditNote(final Item it) {
-        final EditText e = new EditText(this);
+        final EditText e = field("Escribe tu nota");
         e.setText(it.text);
         e.setSelection(e.getText().length());
         e.setMinLines(3);
+        e.setMaxLines(8);
         e.setGravity(Gravity.TOP);
         e.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
-        LinearLayout box = new LinearLayout(this);
-        box.setPadding(dp(22), dp(8), dp(22), 0);
-        box.addView(e, new LinearLayout.LayoutParams(-1, -2));
-        AlertDialog d = new AlertDialog.Builder(this)
-                .setTitle("Nota")
-                .setView(box)
-                .setPositiveButton("Guardar", (dlg, w) -> {
+        android.app.Dialog d = new Ui.Sheet(this)
+                .title("Nota")
+                .view(e)
+                .button("Cancelar", false, null)
+                .button("Guardar", true, () -> {
                     String t = e.getText().toString();
                     it.text = t.length() > 2000 ? t.substring(0, 2000) : t;
                     it.touch();
                     desk.invalidate();
                     onItemChanged(it);
                 })
-                .setNegativeButton("Cancelar", null)
-                .create();
-        d.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
-        d.show();
+                .show();
+        if (d.getWindow() != null) d.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
+        e.requestFocus();
     }
 
     @Override public void onOpenLink(Item it) {
@@ -724,6 +777,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 for (Item it : desk.items) arr.put(it.toJson(false));
                 full.put("t", "full"); full.put("items", arr);
             } catch (JSONException ignored) { }
+            if (side == 1) sendView();   // el principal define la forma; va antes que los elementos
             hub.send(hello);
             hub.send(full);
         }
@@ -737,6 +791,13 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             case "hello":
                 otherSide = m.optInt("side", -1);
                 updateStatus();
+                break;
+            case "view":   // el extendido sigue la forma y la orientación del principal
+                if (side != 1) {
+                    int l = m.optInt("layout", layout());
+                    boolean lk = m.optBoolean("lock", locked());
+                    if (l != layout() || lk != locked()) setLayout(l, lk, true);
+                }
                 break;
             case "full": {
                 JSONArray arr = m.optJSONArray("items");

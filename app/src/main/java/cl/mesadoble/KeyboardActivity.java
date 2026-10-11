@@ -1,44 +1,56 @@
 package cl.mesadoble;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
+import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.InputType;
+import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.view.Gravity;
+import android.view.HapticFeedbackConstants;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
-import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import org.json.JSONObject;
 
-/** Pantalla del teléfono que ESCRIBE en el otro, usando la misma conexión WiFi de la mesa. */
+import java.util.List;
+
+/**
+ * Pantalla del teléfono que controla al principal, por la misma conexión WiFi de la mesa.
+ * Modos: teclado, teclado + touchpad, touchpad, gamepad y dictado.
+ */
 public class KeyboardActivity extends Activity implements Link.Listener, KeyboardView.Sink {
 
-    private static final String[] MODES = {"Teclado grande", "Teclado del teléfono / dictado"};
+    static final int KB = 0, KB_PAD = 1, PAD = 2, GAME = 3, DICT = 4;
+    private static final String[] NAMES = {"Teclado", "Teclado + touchpad", "Touchpad", "Gamepad", "Dictado"};
 
     private boolean night;
     private SharedPreferences prefs;
     private Hub hub;
     private KeyboardView keyboard;
+    private TouchpadView touchpad;
+    private GamepadView gamepad;
     private EditText field;
-    private LinearLayout content;
-    private TextView status;
-    private Button modeBtn;
+    private LinearLayout content, suggestBar;
+    private TextView status, modeBtn, editBtn, resetBtn;
     private int mode;
 
-    // modo "teclado del teléfono": lo escrito se refleja en el otro teléfono
+    // sugerencias: palabra que se está escribiendo
+    private final StringBuilder word = new StringBuilder();
+    private Dict dict;
+
+    // dictado: lo escrito se refleja en el otro teléfono
     private String last = "";
     private boolean resetting;
 
@@ -47,8 +59,10 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         setTheme(night ? android.R.style.Theme_Material_NoActionBar : android.R.style.Theme_Material_Light_NoActionBar);
         super.onCreate(b);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        MainActivity.applyOrientation(this);   // misma orientación que la mesa
         prefs = getSharedPreferences("mesa", MODE_PRIVATE);
-        mode = Math.min(1, Math.max(0, prefs.getInt("kbMode2", 0)));
+        mode = Math.min(DICT, Math.max(KB, prefs.getInt("kbMode3", KB)));
+        dict = Dict.get(this);
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -57,51 +71,98 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         LinearLayout top = new LinearLayout(this);
         top.setOrientation(LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        top.setPadding(dp(10), dp(4), dp(4), 0);
+        top.setPadding(dp(12), dp(6), dp(6), dp(2));
         status = new TextView(this);
         status.setTextSize(13);
         status.setSingleLine(true);
+        status.setEllipsize(TextUtils.TruncateAt.END);
         status.setOnClickListener(v -> help());
         top.addView(status, new LinearLayout.LayoutParams(0, -2, 1));
-        Button helpBtn = small("Ayuda");
-        helpBtn.setOnClickListener(v -> help());
-        modeBtn = small(mode == 0 ? "Teclado" : "Dictado");
-        modeBtn.setOnClickListener(v -> pickMode());
-        Button close = small("Cerrar");
-        close.setOnClickListener(v -> finish());
-        top.addView(helpBtn); top.addView(modeBtn); top.addView(close);
-        root.addView(top, new LinearLayout.LayoutParams(-1, dp(40)));
+        editBtn = chip("Editar", v -> toggleEdit());
+        resetBtn = chip("Restablecer", v -> { gamepad.resetLayout(); prefs.edit().remove("padLayout").apply(); });
+        modeBtn = chip(NAMES[mode], v -> pickMode());
+        top.addView(resetBtn); top.addView(editBtn); top.addView(modeBtn);
+        top.addView(chip("Cerrar", v -> finish()));
+        root.addView(top, new LinearLayout.LayoutParams(-1, dp(44)));
 
         content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
         root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(root);
 
+        hub = Hub.get(this);
+        hub.ensureStarted();
+        LinkService.start(this);
+        buildViews();
+        arrange();
+    }
+
+    private void buildViews() {
         keyboard = new KeyboardView(this, night);
         keyboard.setSink(this);
+
+        suggestBar = new LinearLayout(this);
+        suggestBar.setOrientation(LinearLayout.HORIZONTAL);
+        suggestBar.setPadding(dp(6), dp(4), dp(6), 0);
+        for (int i = 0; i < 3; i++) {
+            TextView t = new TextView(this);
+            t.setGravity(Gravity.CENTER);
+            t.setTextSize(16);
+            t.setSingleLine(true);
+            t.setEllipsize(TextUtils.TruncateAt.END);
+            t.setTextColor(night ? 0xFFE6EDF3 : 0xFF1D2733);
+            t.setTypeface(Typeface.create("sans-serif", i == 0 ? Typeface.BOLD : Typeface.NORMAL));
+            GradientDrawable g = new GradientDrawable();
+            g.setColor(night ? 0xFF1E2934 : 0xFFE6EBEF);
+            g.setCornerRadius(dp(12));
+            t.setBackground(g);
+            t.setOnClickListener(v -> pickSuggestion(((TextView) v).getText().toString()));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -1, 1);
+            lp.setMargins(dp(3), 0, dp(3), 0);
+            suggestBar.addView(t, lp);
+        }
+
+        touchpad = new TouchpadView(this, night);
+        touchpad.setSink(new TouchpadView.Sink() {
+            @Override public void move(int dx, int dy) { hub.send("mouse", "dx", dx, "dy", dy); }
+            @Override public void click() { hub.send("click"); }
+            @Override public void scroll(int steps) { hub.send("scroll", "d", steps); }
+            @Override public void nav(String what) { hub.send("nav", "k", what); }
+        });
+
+        gamepad = new GamepadView(this, night);
+        gamepad.fromJson(prefs.getString("padLayout", ""));
+        gamepad.setSink(new GamepadView.Sink() {
+            @Override public void button(String id, boolean down, float x, float y) {
+                hub.send("pad", "a", "btn", "id", id, "down", down, "x", (double) x, "y", (double) y);
+            }
+            @Override public void joy(String id, int phase, float cx, float cy, float r, float nx, float ny) {
+                hub.send("pad", "a", "joy", "id", id, "ph", phase, "x", (double) cx, "y", (double) cy,
+                        "r", (double) r, "nx", (double) nx, "ny", (double) ny);
+            }
+            @Override public void layoutChanged(String json) { prefs.edit().putString("padLayout", json).apply(); }
+        });
+
         field = new EditText(this);
-        field.setHint("Escribe o dicta aquí: aparece en el otro teléfono");
+        field.setHint("Escribe o dicta aquí: aparece en el principal");
         field.setTextSize(20);
         field.setGravity(Gravity.TOP);
         field.setPadding(dp(16), dp(14), dp(16), dp(14));
+        field.setTextColor(night ? 0xFFE6EDF3 : 0xFF1D2733);
         field.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
                 | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES | InputType.TYPE_TEXT_FLAG_AUTO_CORRECT);
         field.setImeOptions(EditorInfo.IME_FLAG_NO_EXTRACT_UI | EditorInfo.IME_FLAG_NO_FULLSCREEN);
         GradientDrawable fb = new GradientDrawable();
         fb.setColor(night ? 0xFF1E2934 : 0xFFFFFFFF);
-        fb.setCornerRadius(dp(12));
+        fb.setCornerRadius(dp(16));
         field.setBackground(fb);
         field.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int a, int b2, int c) { }
             @Override public void onTextChanged(CharSequence s, int a, int b2, int c) { }
             @Override public void afterTextChanged(Editable e) { mirror(e); }
         });
-        arrange();
-
-        hub = Hub.get(this);
-        hub.ensureStarted();
-        LinkService.start(this);
     }
+
+    // ---------------- ciclo de vida ----------------
 
     private boolean auto;
     private final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
@@ -127,9 +188,14 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         super.onPause();
     }
 
+    @Override public void onConfigurationChanged(Configuration c) {
+        super.onConfigurationChanged(c);
+        arrange();
+    }
+
     @Override public void onWindowFocusChanged(boolean f) {
         super.onWindowFocusChanged(f);
-        if (f && mode == 0) immersive();
+        if (f && mode != DICT) immersive();
     }
 
     @SuppressWarnings("deprecation")
@@ -140,70 +206,131 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
                         | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
     }
 
+    // ---------------- distribución ----------------
+
+    private static void detach(View v) {
+        if (v != null && v.getParent() instanceof android.view.ViewGroup) ((android.view.ViewGroup) v.getParent()).removeView(v);
+    }
+
+    /** Arma la pantalla según el modo y la orientación. */
     @SuppressWarnings("deprecation")
     private void arrange() {
+        for (View v : new View[]{keyboard, suggestBar, touchpad, gamepad, field}) detach(v);
         content.removeAllViews();
+        boolean land = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
         InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-        if (mode == 0) {
+        editBtn.setVisibility(mode == GAME ? View.VISIBLE : View.GONE);
+        resetBtn.setVisibility(mode == GAME && gamepad.isEditing() ? View.VISIBLE : View.GONE);
+        modeBtn.setText(NAMES[mode]);
+        if (mode != GAME && gamepad.isEditing()) gamepad.setEditing(false);
+        if (mode != DICT) {
             if (imm != null) imm.hideSoftInputFromWindow(field.getWindowToken(), 0);
             getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN);
-            content.addView(keyboard, new LinearLayout.LayoutParams(-1, -1));
             immersive();
-        } else {
-            getWindow().getDecorView().setSystemUiVisibility(0);
-            getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE | WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -1);
-            lp.setMargins(dp(10), dp(8), dp(10), dp(10));
-            content.addView(field, lp);
-            field.requestFocus();
-            field.post(() -> { if (imm != null) imm.showSoftInput(field, InputMethodManager.SHOW_IMPLICIT); });
         }
+        switch (mode) {
+            case KB:
+                content.setOrientation(LinearLayout.VERTICAL);
+                content.addView(suggestBar, new LinearLayout.LayoutParams(-1, dp(42)));
+                content.addView(keyboard, new LinearLayout.LayoutParams(-1, 0, 1));
+                break;
+            case KB_PAD: {
+                LinearLayout kbCol = new LinearLayout(this);
+                kbCol.setOrientation(LinearLayout.VERTICAL);
+                kbCol.addView(suggestBar, new LinearLayout.LayoutParams(-1, dp(42)));
+                kbCol.addView(keyboard, new LinearLayout.LayoutParams(-1, 0, 1));
+                if (land) {
+                    content.setOrientation(LinearLayout.HORIZONTAL);
+                    content.addView(kbCol, new LinearLayout.LayoutParams(0, -1, 3f));
+                    content.addView(touchpad, new LinearLayout.LayoutParams(0, -1, 1.2f));
+                } else {
+                    content.setOrientation(LinearLayout.VERTICAL);
+                    content.addView(touchpad, new LinearLayout.LayoutParams(-1, 0, 1f));
+                    content.addView(kbCol, new LinearLayout.LayoutParams(-1, 0, 1.3f));
+                }
+                break;
+            }
+            case PAD:
+                content.setOrientation(LinearLayout.VERTICAL);
+                content.addView(touchpad, new LinearLayout.LayoutParams(-1, -1));
+                break;
+            case GAME:
+                content.setOrientation(LinearLayout.VERTICAL);
+                content.addView(gamepad, new LinearLayout.LayoutParams(-1, -1));
+                break;
+            default: {
+                getWindow().getDecorView().setSystemUiVisibility(0);
+                getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE | WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+                content.setOrientation(LinearLayout.VERTICAL);
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -1);
+                lp.setMargins(dp(10), dp(8), dp(10), dp(10));
+                content.addView(field, lp);
+                field.requestFocus();
+                field.post(() -> { if (imm != null) imm.showSoftInput(field, InputMethodManager.SHOW_IMPLICIT); });
+            }
+        }
+        updateTouchpadHint();
+        refreshSuggestions();
     }
 
     private void pickMode() {
-        new AlertDialog.Builder(this)
-                .setTitle("¿Cómo quieres escribir?")
-                .setSingleChoiceItems(MODES, mode, (d, w) -> {
-                    mode = w;
-                    prefs.edit().putInt("kbMode2", w).apply();
-                    modeBtn.setText(w == 0 ? "Teclado" : "Dictado");
-                    arrange();
-                    d.dismiss();
-                })
-                .show();
+        int[] icons = {Ui.KEYBOARD, Ui.KB_TOUCHPAD, Ui.TOUCHPAD, Ui.GAMEPAD, Ui.MIC};
+        String[] subs = {
+                "Teclado completo con sugerencias",
+                "Teclado y touchpad juntos",
+                "Mover el puntero, clic, desplazar, atrás e inicio",
+                "Joystick, cruceta y botones que se pueden mover",
+                "Escribir con el teclado del teléfono o dictar por voz"};
+        Ui.Sheet sh = new Ui.Sheet(this).title("¿Cómo quieres controlar el principal?");
+        for (int i = 0; i < NAMES.length; i++) {
+            final int m = i;
+            sh.option(icons[i], -1, NAMES[i], subs[i], mode == i, () -> {
+                mode = m;
+                prefs.edit().putInt("kbMode3", m).apply();
+                arrange();
+            });
+        }
+        sh.button("Cerrar", false, null).show();
+    }
+
+    private void toggleEdit() {
+        gamepad.setEditing(!gamepad.isEditing());
+        editBtn.setText(gamepad.isEditing() ? "Listo" : "Editar");
+        resetBtn.setVisibility(gamepad.isEditing() ? View.VISIBLE : View.GONE);
+        if (!gamepad.isEditing()) prefs.edit().putString("padLayout", gamepad.toJson()).apply();
     }
 
     private int dp(float v) { return Math.round(v * getResources().getDisplayMetrics().density); }
 
-    private Button small(String t) {
-        Button b = new Button(this);
+    private TextView chip(String t, View.OnClickListener l) {
+        TextView b = new TextView(this);
         b.setText(t);
-        b.setAllCaps(false);
         b.setTextSize(13);
-        b.setMinWidth(0); b.setMinimumWidth(0); b.setMinHeight(0); b.setMinimumHeight(0);
-        b.setPadding(dp(12), 0, dp(12), 0);
+        b.setGravity(Gravity.CENTER);
+        b.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        b.setPadding(dp(14), 0, dp(14), 0);
         b.setTextColor(night ? 0xFFE6EDF3 : 0xFF1D2733);
         GradientDrawable g = new GradientDrawable();
         g.setColor(night ? 0xFF2A3848 : 0xFFFFFFFF);
-        g.setCornerRadius(dp(10));
+        g.setCornerRadius(dp(18));
         b.setBackground(g);
-        b.setStateListAnimator(null);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, dp(32));
-        lp.setMarginStart(dp(4));
+        b.setOnClickListener(l);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, dp(36));
+        lp.setMarginStart(dp(6));
         b.setLayoutParams(lp);
         return b;
     }
 
     private void help() {
-        new AlertDialog.Builder(this)
-                .setTitle("Escribir en el otro teléfono")
-                .setMessage("En el OTRO teléfono, una sola vez:\n"
-                        + "1. Abre Mesa Doble, toca \"Teclado\" y luego \"Este teléfono recibe\".\n"
-                        + "2. Activa el teclado \"Mesa Doble\" y elígelo.\n\n"
-                        + "Desde ahí, al tocar un campo de texto (WhatsApp, Chrome, etc.) aparece una barra delgada "
-                        + "en vez del teclado, y todo lo que escribas aquí se escribe allá.\n\n"
-                        + "Para volver al teclado normal en ese teléfono, toca \"Cambiar teclado\" en la barra.")
-                .setPositiveButton("Entendido", null)
+        new Ui.Sheet(this)
+                .title("Controlar el principal")
+                .message("Teclado y dictado escriben donde tocas en el principal, si ahí está elegido el teclado Mesa Doble "
+                        + "(barra delgada en vez del teclado). Si no, en el principal aparece un aviso para elegirlo con un toque.\n\n"
+                        + "Touchpad y gamepad: con la versión completa (accesibilidad activa en el principal) mueven un puntero y "
+                        + "tocan la pantalla. Con la versión liviana el touchpad mueve el cursor del texto.\n\n"
+                        + "Gamepad: cada botón toca el principal en el mismo lugar donde lo pones aquí. Usa \"Editar\" para "
+                        + "moverlos (arrastrar) y cambiar su tamaño (pellizcar con dos dedos).")
+                .button("Entendido", true, null)
                 .show();
     }
 
@@ -212,18 +339,27 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     private void updateStatus() {
         String t;
         boolean ok = false;
+        boolean typing = mode == KB || mode == KB_PAD || mode == DICT;
         if (!hub.connected()) {
-            t = "Sin conexión con el otro teléfono. Abre Mesa Doble en ambos";
+            t = "Sin conexión. Abre Mesa Doble en ambos teléfonos";
+        } else if (!typing) {
+            t = hub.remotePointer() ? "● Conectado al principal" : "● Conectado · versión liviana: sin puntero";
+            ok = hub.remotePointer();
         } else if (!hub.remoteImeSelected()) {
-            t = "En el otro teléfono toca el aviso \"quiere escribir aquí\" para elegir el teclado Mesa Doble";
+            t = "En el principal toca el aviso para elegir el teclado Mesa Doble";
         } else if (!hub.remoteImeReady()) {
-            t = "Toca un campo de texto en el otro teléfono";
+            t = "Toca donde se escribe en el principal";
         } else {
-            t = "● Escribiendo en el otro teléfono" + (hub.acksOk > 0 ? "  ✓" + hub.acksOk : "");
+            t = "● Escribiendo en el principal";
             ok = true;
         }
         status.setText(t);
         status.setTextColor(ok ? (night ? 0xFF5CC3CF : 0xFF1F7F8C) : (night ? 0xFFF0A26B : 0xFFB4541A));
+        updateTouchpadHint();
+    }
+
+    private void updateTouchpadHint() {
+        if (touchpad != null) touchpad.setHint(hub != null && hub.remotePointer() ? "Touchpad" : "Touchpad · mueve el cursor del texto");
     }
 
     @Override public void onState(int state, String info) {
@@ -235,20 +371,58 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         String t = m.optString("t");
         if ("kbState".equals(t) || "kbAck".equals(t)) updateStatus();
         // abierto solo (al tocar un campo en el principal): se cierra solo cuando ya no hay dónde escribir
-        if ("kbState".equals(t) && auto) {
+        if ("kbState".equals(t) && auto && (mode == KB || mode == KB_PAD || mode == DICT)) {
             h.removeCallbacks(autoClose);
             if (!hub.remoteImeReady()) h.postDelayed(autoClose, 3000);
         }
     }
 
-    // ---------------- envío ----------------
+    // ---------------- envío y sugerencias ----------------
 
-    @Override public void text(String s) { hub.send("kb", "a", "text", "s", s); }
-    @Override public void key(int code, int meta) { hub.send("kb", "a", "key", "k", code, "m", meta); }
-    @Override public void action(String what) { hub.send("kb", "a", "act", "x", what); }
+    private void sendText(String s) { hub.send("kb", "a", "text", "s", s); }
+    private void sendKey(int code, int meta, int n) { hub.send("kb", "a", "key", "k", code, "m", meta, "n", n); }
+
+    @Override public void text(String s) {
+        sendText(s);
+        boolean letters = !s.isEmpty();
+        for (int i = 0; i < s.length(); i++) if (!Character.isLetter(s.charAt(i))) { letters = false; break; }
+        if (letters) word.append(s); else word.setLength(0);
+        refreshSuggestions();
+    }
+
+    @Override public void key(int code, int meta) {
+        sendKey(code, meta, 1);
+        if (code == KeyEvent.KEYCODE_DEL && meta == 0 && word.length() > 0) word.setLength(word.length() - 1);
+        else word.setLength(0);
+        refreshSuggestions();
+    }
+
+    @Override public void action(String what) { hub.send("kb", "a", "act", "x", what); word.setLength(0); refreshSuggestions(); }
     @Override public void media(String what) { hub.send("media", "k", what); }
 
-    /** Refleja en el otro teléfono los cambios del campo de texto (incluye autocorrección y dictado). */
+    private void refreshSuggestions() {
+        if (suggestBar == null) return;
+        List<String> s = dict.suggest(word.toString(), 3);
+        for (int i = 0; i < 3; i++) {
+            TextView t = (TextView) suggestBar.getChildAt(i);
+            String v = i < s.size() ? s.get(i) : "";
+            t.setText(v);
+            t.setVisibility(v.isEmpty() ? View.INVISIBLE : View.VISIBLE);
+        }
+    }
+
+    /** Reemplaza la palabra a medio escribir por la sugerencia elegida. */
+    private void pickSuggestion(String s) {
+        if (s.isEmpty()) return;
+        suggestBar.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+        int n = word.codePointCount(0, word.length());
+        if (n > 0) sendKey(KeyEvent.KEYCODE_DEL, 0, n);
+        sendText(s + " ");
+        word.setLength(0);
+        refreshSuggestions();
+    }
+
+    /** Refleja en el principal los cambios del campo de dictado (incluye autocorrección). */
     private void mirror(Editable e) {
         if (resetting) return;
         String now = e.toString();
@@ -256,16 +430,15 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         while (p < last.length() && p < now.length() && last.charAt(p) == now.charAt(p)) p++;
         int del = last.codePointCount(p, last.length());
         String add = now.substring(p);
-        if (del > 0) hub.send("kb", "a", "key", "k", KeyEvent.KEYCODE_DEL, "m", 0, "n", del);
+        if (del > 0) sendKey(KeyEvent.KEYCODE_DEL, 0, del);
         boolean enter = add.indexOf('\n') >= 0;
         String[] parts = add.split("\n", -1);
         for (int i = 0; i < parts.length; i++) {
-            if (!parts[i].isEmpty()) text(parts[i]);
-            if (i < parts.length - 1) key(KeyEvent.KEYCODE_ENTER, 0);
+            if (!parts[i].isEmpty()) sendText(parts[i]);
+            if (i < parts.length - 1) sendKey(KeyEvent.KEYCODE_ENTER, 0, 1);
         }
         last = now;
         if (enter || now.length() > 400) {
-            // vacía el campo sin borrar nada en el otro teléfono
             resetting = true;
             e.clear();
             resetting = false;

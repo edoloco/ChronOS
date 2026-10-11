@@ -1,6 +1,19 @@
 package cl.mesadoble;
 
 import android.accessibilityservice.AccessibilityService;
+import android.accessibilityservice.GestureDescription;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.PixelFormat;
+import android.graphics.Point;
+import android.os.Handler;
+import android.os.Looper;
+import android.view.Gravity;
+import android.view.View;
+import android.view.WindowManager;
+
+import org.json.JSONObject;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Build;
@@ -15,9 +28,10 @@ import java.util.HashSet;
 import java.util.Set;
 
 /**
- * Servicio de accesibilidad del teléfono PRINCIPAL. Solo hace dos cosas:
+ * Servicio de accesibilidad del teléfono PRINCIPAL (versión completa):
  * 1) cambia el método de entrada a Mesa Doble (y lo devuelve al anterior al desconectarse);
- * 2) avisa al extendido cuando se abre una app de chat, para mostrar el teclado allá.
+ * 2) avisa al extendido cuando se abre una app de chat, para mostrar el teclado allá;
+ * 3) ejecuta el touchpad (puntero, clic, desplazar, atrás/inicio) y el gamepad (toques en pantalla).
  * No lee el contenido de las pantallas.
  */
 public class MesaAccess extends AccessibilityService {
@@ -61,6 +75,152 @@ public class MesaAccess extends AccessibilityService {
     }
 
     @Override public void onInterrupt() { }
+
+    // ---------------- touchpad y gamepad ----------------
+
+    private final Handler h = new Handler(Looper.getMainLooper());
+    private View cursor;
+    private WindowManager.LayoutParams cursorLp;
+    private float px = -1, py = -1;
+    private final Runnable hideCursor = () -> { if (cursor != null) cursor.setVisibility(View.GONE); };
+
+    private Point screen() {
+        Point p = new Point();
+        WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
+        if (wm != null) wm.getDefaultDisplay().getRealSize(p);
+        return p;
+    }
+
+    /** Mensajes del extendido: mouse, click, scroll, nav, pad. Devuelve false si no los maneja. */
+    public boolean handle(JSONObject m) {
+        String t = m.optString("t");
+        switch (t) {
+            case "mouse": movePointer(m.optInt("dx"), m.optInt("dy")); return true;
+            case "click": showPointer(); tap(px, py, 40); return true;
+            case "scroll": {
+                showPointer();
+                float d = m.optInt("d") * 90 * getResources().getDisplayMetrics().density / 2.5f;
+                swipe(px, py, px, py + d, 160);
+                return true;
+            }
+            case "nav": {
+                String w = m.optString("k");
+                performGlobalAction("home".equals(w) ? GLOBAL_ACTION_HOME : "recents".equals(w) ? GLOBAL_ACTION_RECENTS : GLOBAL_ACTION_BACK);
+                return true;
+            }
+            case "pad": pad(m); return true;
+        }
+        return false;
+    }
+
+    private void showPointer() {
+        Point sc = screen();
+        if (px < 0) { px = sc.x / 2f; py = sc.y / 2f; }
+        if (cursor == null) {
+            final float dp = getResources().getDisplayMetrics().density;
+            cursor = new View(this) {
+                final Paint f = new Paint(Paint.ANTI_ALIAS_FLAG), s = new Paint(Paint.ANTI_ALIAS_FLAG);
+                @Override protected void onDraw(Canvas c) {
+                    Path p = new Path();
+                    p.moveTo(2 * dp, 2 * dp); p.lineTo(2 * dp, 20 * dp); p.lineTo(7 * dp, 15 * dp);
+                    p.lineTo(11 * dp, 23 * dp); p.lineTo(14 * dp, 21.5f * dp); p.lineTo(10 * dp, 14 * dp); p.lineTo(16 * dp, 14 * dp); p.close();
+                    f.setColor(0xFFFFFFFF); s.setColor(0xFF1D2733); s.setStyle(Paint.Style.STROKE); s.setStrokeWidth(1.5f * dp);
+                    c.drawPath(p, f); c.drawPath(p, s);
+                }
+            };
+            cursorLp = new WindowManager.LayoutParams(Math.round(20 * dp), Math.round(26 * dp),
+                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                    PixelFormat.TRANSLUCENT);
+            cursorLp.gravity = Gravity.TOP | Gravity.START;
+            try { ((WindowManager) getSystemService(WINDOW_SERVICE)).addView(cursor, cursorLp); } catch (Exception e) { cursor = null; return; }
+        }
+        cursor.setVisibility(View.VISIBLE);
+        cursorLp.x = Math.round(px); cursorLp.y = Math.round(py);
+        try { ((WindowManager) getSystemService(WINDOW_SERVICE)).updateViewLayout(cursor, cursorLp); } catch (Exception ignored) { }
+        h.removeCallbacks(hideCursor);
+        h.postDelayed(hideCursor, 6000);
+    }
+
+    private void movePointer(int dx, int dy) {
+        Point sc = screen();
+        if (px < 0) { px = sc.x / 2f; py = sc.y / 2f; }
+        float k = getResources().getDisplayMetrics().density * 0.9f;
+        px = Math.max(0, Math.min(sc.x - 1, px + dx * k));
+        py = Math.max(0, Math.min(sc.y - 1, py + dy * k));
+        showPointer();
+    }
+
+    private void tap(float x, float y, long ms) {
+        Path p = new Path();
+        p.moveTo(x, y);
+        try { dispatchGesture(new GestureDescription.Builder().addStroke(new GestureDescription.StrokeDescription(p, 0, ms)).build(), null, null); }
+        catch (Exception ignored) { }
+    }
+
+    private void swipe(float x1, float y1, float x2, float y2, long ms) {
+        Point sc = screen();
+        y2 = Math.max(1, Math.min(sc.y - 2, y2));
+        Path p = new Path();
+        p.moveTo(x1, y1); p.lineTo(x2, y2);
+        try { dispatchGesture(new GestureDescription.Builder().addStroke(new GestureDescription.StrokeDescription(p, 0, ms)).build(), null, null); }
+        catch (Exception ignored) { }
+    }
+
+    // ---- gamepad: cada control toca el principal en el mismo lugar relativo
+    private GestureDescription.StrokeDescription joyStroke;
+    private float joyX, joyY, joyTX, joyTY;
+    private final Runnable joyHold = new Runnable() {
+        @Override public void run() {
+            if (joyStroke == null) return;
+            continueJoy(joyTX, joyTY, true);
+            h.postDelayed(this, 45);
+        }
+    };
+
+    private void continueJoy(float tx, float ty, boolean willContinue) {
+        if (joyStroke == null) return;
+        Path p = new Path();
+        p.moveTo(joyX, joyY);
+        p.lineTo(tx, ty);
+        try {
+            joyStroke = joyStroke.continueStroke(p, 0, 60, willContinue);
+            dispatchGesture(new GestureDescription.Builder().addStroke(joyStroke).build(), null, null);
+            joyX = tx; joyY = ty;
+        } catch (Exception e) { joyStroke = null; }
+        if (!willContinue) joyStroke = null;
+    }
+
+    private void pad(JSONObject m) {
+        Point sc = screen();
+        float x = (float) m.optDouble("x", 0.5) * sc.x, y = (float) m.optDouble("y", 0.5) * sc.y;
+        String a = m.optString("a");
+        if ("btn".equals(a)) {
+            if (m.optBoolean("down")) tap(x, y, 50);
+            return;
+        }
+        // joystick
+        int phase = m.optInt("ph");
+        float r = (float) m.optDouble("r", 0.2) * Math.min(sc.x, sc.y);
+        float tx = x + (float) m.optDouble("nx") * r, ty = y + (float) m.optDouble("ny") * r;
+        if (phase == 0) {
+            h.removeCallbacks(joyHold);
+            Path p = new Path();
+            p.moveTo(x, y);
+            p.lineTo(tx, ty);
+            joyStroke = new GestureDescription.StrokeDescription(p, 0, 60, true);
+            try { dispatchGesture(new GestureDescription.Builder().addStroke(joyStroke).build(), null, null); }
+            catch (Exception e) { joyStroke = null; return; }
+            joyX = tx; joyY = ty; joyTX = tx; joyTY = ty;
+            h.postDelayed(joyHold, 45);
+        } else if (phase == 1) {
+            joyTX = tx; joyTY = ty;
+        } else {
+            h.removeCallbacks(joyHold);
+            continueJoy(x, y, false);
+        }
+    }
 
     // ---------------- cambio de teclado ----------------
 

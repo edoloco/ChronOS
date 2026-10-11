@@ -4,12 +4,15 @@ App de Android que une dos teléfonos en un solo escritorio: arrastras notas, im
 
 ## Forma
 
-Los dos teléfonos van **parados, uno al lado del otro**, unidos por el lado largo: juntos forman una pantalla apaisada.
+En *Ajustes → Forma de la mesa* se elige con dibujos:
 
-- **Principal (derecha):** aquí corren las apps.
-- **Extendido (izquierda):** pantalla extra y teclado.
+- **Lado a lado, en horizontal** (recomendada): extendido a la izquierda, principal a la derecha.
+- **Uno sobre otro, en horizontal**: como un notebook, principal arriba y teclado abajo.
+- **Lado a lado, en vertical**: como un libro abierto.
 
-Al abrir la app se elige qué es cada teléfono.
+El principal define la forma y el extendido la copia. *Vista bloqueada* evita que la pantalla gire.
+Los elementos quedan donde los sueltas (incluso montados sobre la unión) y pasan al otro teléfono
+cuando cruzas más de la mitad o los lanzas.
 
 ## Instalar
 
@@ -36,18 +39,18 @@ Los teléfonos se hablan directo por la red local (puerto 47820); no se usa inte
 Cada `push` a `main` compila el APK con GitHub Actions y lo publica en *Releases*.
 También se puede abrir la carpeta en Android Studio y presionar *Run*.
 
-## Modo teclado (por WiFi, sin Bluetooth)
+## Teclado, touchpad y gamepad
 
-Usa la misma conexión de la mesa: si la mesa está conectada, el teclado también.
+Desde *Teclado → Usar este teléfono como teclado*, con cinco modos:
 
-**En el teléfono que recibe (una sola vez):** Mesa Doble → *Teclado* → *Este teléfono recibe*.
-Activa el teclado "Mesa Doble" y elígelo. Al tocar un campo de texto en cualquier app aparece una barra
-delgada en vez del teclado grande. Para volver al teclado normal: *Cambiar teclado* en esa barra.
+- **Teclado**: con sugerencias en español (completa palabras, agrega tildes, corrige errores).
+- **Teclado + touchpad**.
+- **Touchpad**: puntero, clic, desplazar con dos dedos, Atrás e Inicio (versión completa).
+  En la versión liviana mueve el cursor del texto.
+- **Gamepad**: joystick, cruceta y botones. *Editar* para moverlos y cambiar su tamaño. Cada control
+  toca el principal en el mismo lugar relativo (versión completa).
+- **Dictado**: escribe con el teclado del teléfono o dicta por voz.
 
-**En el teléfono que escribe:** Mesa Doble → *Teclado* → *Este teléfono es el teclado*.
+El principal debe tener elegido el teclado Mesa Doble para recibir texto.
 
-- *Teclado grande*: teclado en pantalla completa (ideal en horizontal) con ñ, tildes (´ y luego la vocal),
-  AltGr (@ = AltGr + q), copiar/pegar, deshacer, flechas, reproducir/pausa y volumen.
-- *Teclado del teléfono / dictado*: escribe con Gboard (autocorrector, deslizar) o dicta por voz.
-
-La reproducción y el volumen funcionan aunque el teclado Mesa Doble no esté elegido en el otro teléfono.
+Diccionario: lista de frecuencias [FrequencyWords](https://github.com/hermitdave/FrequencyWords) (MIT).

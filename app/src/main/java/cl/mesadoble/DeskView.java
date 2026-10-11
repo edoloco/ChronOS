@@ -136,21 +136,26 @@ public class DeskView extends View {
 
     /** Mantiene el elemento dentro de la mesa doble. */
     public void normalize(Item it) {
-        if (vertical) { it.x = clamp(it.x, 0, 1 - it.w); it.y = clamp(it.y, 0, 1.92); }
-        else { it.x = clamp(it.x, 0, 2 - it.w); it.y = clamp(it.y, 0, 0.92); }
+        // holgado: un elemento puede quedar en cualquier parte mientras se vea al menos un trozo
+        if (vertical) { it.x = clamp(it.x, -0.6 * it.w, 1 - 0.4 * it.w); it.y = clamp(it.y, -0.15, 1.9); }
+        else { it.x = clamp(it.x, -0.6 * it.w, 2 - 0.4 * it.w); it.y = clamp(it.y, -0.15, 0.9); }
     }
 
     /** Pasa todos los elementos de "lado a lado" a "uno sobre otro" (o al revés), conservando su pantalla. */
+    /**
+     * Cambia entre "lado a lado" (x 0..2: extendido a la izquierda, principal a la derecha) y
+     * "uno sobre otro" (y 0..2: principal arriba, extendido abajo). Cada elemento queda en el mismo teléfono.
+     */
     public void convertAll(boolean toVertical) {
         for (Item it : items) {
-            if (toVertical) {   // x: 0..2 → pantalla + posición horizontal
-                int scr = it.x + it.w / 2 >= 1 ? 1 : 0;
+            if (toVertical) {
+                int scr = it.x + it.w / 2 >= 1 ? 1 : 0;          // 1 = principal
                 double u = it.x - scr, v = it.y;
-                it.x = u; it.y = scr + v;
+                it.x = u; it.y = (1 - scr) + v;                   // principal arriba
             } else {
-                int scr = it.y >= 1 ? 1 : 0;
+                int scr = it.y + 0.15 >= 1 ? 1 : 0;              // 1 = abajo = extendido
                 double u = it.x, v = it.y - scr;
-                it.x = scr + u; it.y = v;
+                it.x = (1 - scr) + u; it.y = v;                   // principal a la derecha
             }
             it.dx = Float.NaN; it.dy = Float.NaN;
         }
@@ -559,7 +564,7 @@ public class DeskView extends View {
                 if (!moved) { moved = true; mode = DRAG; dragging = pressed; dragging.z = System.currentTimeMillis(); }
                 dragX = ox + ddx / W;
                 dragY = oy + ddy / H;
-                if (vertical) dragX = clamp(dragX, -0.05, 0.95); else dragY = clamp(dragY, -0.05, 0.95);
+                if (vertical) dragX = clamp(dragX, -0.5, 0.95); else dragY = clamp(dragY, -0.4, 0.95);
                 if (host != null) host.onDrag(dragging, dragX, dragY);
                 invalidate();
                 return true;
@@ -587,16 +592,18 @@ public class DeskView extends View {
                 }
                 dragging = null;
                 double a = vertical ? dragY : dragX, b = vertical ? dragX : dragY, sz = alongSize(it);
-                double over = side == 0 ? (a + sz) - 1 : 1 - a;
+                double szB = vertical ? it.w : it.hPx / H;
+                double over = side == 0 ? (a + sz) - 1 : 1 - a;   // cuánto pasó al otro teléfono
                 boolean flung = side == 0 ? vel > 1.6 : vel < -1.6;
-                if (over > sz * 0.35 || (flung && over > -sz * 0.6)) {
-                    a = side == 0 ? 1.04 + Math.random() * 0.08 : 1 - 0.04 - sz - Math.random() * 0.08;
+                if (over > sz * 0.5 || (flung && over > -sz * 0.6)) {
+                    // pasó más de la mitad (o se lanzó): queda entero en el otro teléfono
+                    a = side == 0 ? 1.03 + Math.random() * 0.05 : 1 - 0.03 - sz - Math.random() * 0.05;
                     if (it == editing) finishEditing();
                 } else {
-                    a = clamp(a, side + 0.02, side + 0.98 - sz);
+                    // queda donde se soltó: se puede usar todo el espacio, incluso montado sobre la unión
+                    a = clamp(a, -0.6 * sz, 2 - 0.4 * sz);
                 }
-                if (vertical) b = clamp(b, 0.02, 0.98 - it.w);
-                else b = clamp(b, 0.04, 0.97 - it.hPx / H);
+                b = clamp(b, -0.6 * szB, 1 - 0.4 * szB);
                 it.x = vertical ? b : a;
                 it.y = vertical ? a : b;
                 commit(it);

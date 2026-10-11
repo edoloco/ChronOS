@@ -1,7 +1,6 @@
 package cl.mesadoble;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.app.Dialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -126,13 +125,14 @@ public class AppsDialog {
         grid.setAdapter(adapter);
         grid.setOnItemClickListener((parent, view, pos, id) -> {
             App app = shown.get(pos);
-            new AlertDialog.Builder(a)
-                    .setTitle(app.label)
-                    .setItems(new String[]{"Poner acceso directo en la mesa", "Abrir ahora en el principal"}, (dd, w) -> {
+            new Ui.Sheet(a)
+                    .title(app.label)
+                    .option(Ui.PIN, "Poner acceso directo en la mesa", "Al tocarlo se abre en el principal", () -> {
                         d.dismiss();
-                        if (w == 0) host.putOnDesk(app.pkg, app.label, iconPng(app.icon, Math.round(96 * dp)));
-                        else host.openThere(app.pkg, app.label);
+                        host.putOnDesk(app.pkg, app.label, iconPng(app.icon, Math.round(96 * dp)));
                     })
+                    .option(Ui.OPEN, "Abrir ahora en el principal", null, () -> { d.dismiss(); host.openThere(app.pkg, app.label); })
+                    .button("Cerrar", false, null)
                     .show();
         });
         search.addTextChangedListener(new TextWatcher() {

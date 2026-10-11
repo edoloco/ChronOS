@@ -51,7 +51,6 @@
             android:name=".KeyboardActivity"
             android:exported="false"
             android:label="Teclado"
-            android:screenOrientation="fullSensor"
             android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize" />
 

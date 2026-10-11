@@ -42,7 +42,8 @@ public class Hub implements Link.Listener {
     private final List<Link.Listener> listeners = new CopyOnWriteArrayList<>();
     private int state = Link.IDLE, side;
     private String info;
-    private boolean started, imeReady, remoteImeReady, remoteImeSelected;
+    private boolean started, imeReady, remoteImeReady, remoteImeSelected, remotePointer;
+    private float accX, accY;   // touchpad sin puntero (versión liviana): mueve el cursor del texto
     private long lastNotify = 0;
     public int acksOk = 0, acksFail = 0;
     /** Hay una pantalla de Mesa Doble visible en este teléfono (permite abrir apps directo). */
@@ -67,6 +68,8 @@ public class Hub implements Link.Listener {
     public boolean connected() { return state == Link.CONNECTED; }
     public boolean remoteImeReady() { return remoteImeReady; }
     public boolean remoteImeSelected() { return remoteImeSelected; }
+    /** El principal tiene puntero real (versión completa con accesibilidad activa). */
+    public boolean remotePointer() { return remotePointer; }
 
     /** ¿El teclado Mesa Doble está activado en la lista de teclados de ESTE teléfono? */
     public static boolean imeEnabled(Context c) {
@@ -130,7 +133,7 @@ public class Hub implements Link.Listener {
         sendImeState();
     }
 
-    private void sendImeState() { send("kbState", "ready", imeReady, "sel", imeSelected(app)); }
+    private void sendImeState() { send("kbState", "ready", imeReady, "sel", imeSelected(app), "ptr", MesaAccess.instance != null); }
 
     /** Aviso en el teléfono que recibe: un toque y queda elegido el teclado Mesa Doble. */
     private void notifySwitch() {
@@ -186,7 +189,13 @@ public class Hub implements Link.Listener {
             return;
         }
         if ("kbAsk".equals(t)) { sendImeState(); if (!imeSelected(app)) notifySwitch(); return; }
+        if ("mouse".equals(t) || "click".equals(t) || "scroll".equals(t) || "nav".equals(t) || "pad".equals(t)) {
+            if (MesaAccess.instance != null && MesaAccess.instance.handle(m)) return;
+            pointerFallback(m);
+            return;
+        }
         if ("kbState".equals(t)) {
+            remotePointer = m.optBoolean("ptr");
             boolean wasReady = remoteImeReady;
             remoteImeReady = m.optBoolean("ready"); remoteImeSelected = m.optBoolean("sel");
             // el principal tocó un campo de texto: mostrar el teclado aquí, en el extendido
@@ -256,6 +265,42 @@ public class Hub implements Link.Listener {
                 .build();
         try { nm.notify(3, n); } catch (Exception ignored) { }
         return NOTIFIED;
+    }
+
+    /**
+     * Sin accesibilidad (versión liviana) no hay puntero: el touchpad mueve el cursor del texto
+     * y el gamepad manda flechas y teclas al campo donde se escribe.
+     */
+    private void pointerFallback(JSONObject m) {
+        String t = m.optString("t");
+        if ("mouse".equals(t)) {
+            accX += m.optInt("dx"); accY += m.optInt("dy");
+            while (accX > 28) { key(KeyEvent.KEYCODE_DPAD_RIGHT); accX -= 28; }
+            while (accX < -28) { key(KeyEvent.KEYCODE_DPAD_LEFT); accX += 28; }
+            while (accY > 36) { key(KeyEvent.KEYCODE_DPAD_DOWN); accY -= 36; }
+            while (accY < -36) { key(KeyEvent.KEYCODE_DPAD_UP); accY += 36; }
+        } else if ("scroll".equals(t)) {
+            int d = m.optInt("d");
+            for (int i = 0; i < Math.abs(d); i++) key(d > 0 ? KeyEvent.KEYCODE_DPAD_UP : KeyEvent.KEYCODE_DPAD_DOWN);
+        } else if ("pad".equals(t) && "btn".equals(m.optString("a")) && m.optBoolean("down")) {
+            switch (m.optString("id")) {
+                case "dpad_up": key(KeyEvent.KEYCODE_DPAD_UP); break;
+                case "dpad_down": key(KeyEvent.KEYCODE_DPAD_DOWN); break;
+                case "dpad_left": key(KeyEvent.KEYCODE_DPAD_LEFT); break;
+                case "dpad_right": key(KeyEvent.KEYCODE_DPAD_RIGHT); break;
+                case "a": case "start": key(KeyEvent.KEYCODE_ENTER); break;
+                case "b": key(KeyEvent.KEYCODE_DEL); break;
+                case "x": key(KeyEvent.KEYCODE_SPACE); break;
+                case "y": key(KeyEvent.KEYCODE_TAB); break;
+            }
+        }
+    }
+
+    /** Entrega una tecla al teclado Mesa Doble de este teléfono, como si llegara del extendido. */
+    private void key(int code) {
+        JSONObject k = new JSONObject();
+        try { k.put("t", "kb"); k.put("a", "key"); k.put("k", code); k.put("m", 0); } catch (JSONException ignored) { }
+        for (Link.Listener l : listeners) l.onMessage(k);
     }
 
     /** Multimedia y volumen: funcionan aunque el teclado receptor no esté activo. */
