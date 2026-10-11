@@ -1,5 +1,6 @@
 package cl.mesadoble;
 
+import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -24,10 +25,12 @@ import android.view.VelocityTracker;
 import android.view.View;
 import android.view.ViewConfiguration;
 
+import java.text.Collator;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -47,6 +50,8 @@ public class DeskView extends View {
         void onEditNote(Item it);
         void onOpenLink(Item it);
         void onOpenApp(Item it);
+        /** Se cambió de escritorio (deslizando o llevando un elemento al borde). */
+        void onPageChange(int page, int pages);
     }
 
     public final List<Item> items = new ArrayList<>();
@@ -75,7 +80,15 @@ public class DeskView extends View {
     private final int accent, fg, muted, linkBg;
 
     // ---- estado del toque
-    private static final int NONE = 0, DRAG = 1, ROTATE = 2, RESIZE = 3, PINCH = 4;
+    private static final int NONE = 0, DRAG = 1, ROTATE = 2, RESIZE = 3, PINCH = 4, SWIPE = 5;
+
+    // ---- escritorios a los lados (páginas) y apps
+    private int page = 0, pages = 1;
+    private float slide = 0;            // desplazamiento horizontal al cambiar de escritorio
+    private ValueAnimator slideAnim;
+    private boolean lockApps, autoApps;
+    private int edgeDir = 0;
+    private final Runnable edgeFlip = this::onEdgeFlip;
     private int mode = NONE;
     private Item pressed, dragging, editing;
     private String pressedBtn;
@@ -189,6 +202,102 @@ public class DeskView extends View {
         invalidate();
     }
 
+    // ---------------- escritorios ----------------
+
+    public int page() { return page; }
+    public int pages() { return pages; }
+
+    /** Cambia la cantidad de escritorios y el actual. dir: de qué lado entra (1 desde la derecha, -1 desde la izquierda, 0 sin animación). */
+    public void setPages(int n, int cur, int dir) {
+        pages = Math.max(1, Math.min(50, n));
+        cur = Math.max(0, Math.min(pages - 1, cur));
+        if (cur != page && dir != 0) animateSlide(dir * getWidth() * 0.6f);
+        page = cur;
+        if (editing != null && editing.page != page) editing = null;
+        invalidate();
+    }
+
+    private void goTo(int np, float from) {
+        page = np;
+        if (editing != null && editing.page != page) editing = null;
+        animateSlide(from);
+        if (host != null) host.onPageChange(page, pages);
+    }
+
+    private void animateSlide(float from) {
+        if (slideAnim != null) slideAnim.cancel();
+        slide = from;
+        slideAnim = ValueAnimator.ofFloat(from, 0);
+        slideAnim.setDuration(240);
+        slideAnim.setInterpolator(new android.view.animation.DecelerateInterpolator());
+        slideAnim.addUpdateListener(a -> { slide = (float) a.getAnimatedValue(); invalidate(); });
+        slideAnim.start();
+    }
+
+    public void setAppsMode(boolean lock, boolean auto) {
+        lockApps = lock; autoApps = auto;
+        if (editing != null && locked(editing)) editing = null;
+        invalidate();
+    }
+
+    private boolean locked(Item it) { return lockApps && Item.APP.equals(it.kind); }
+    private boolean visible(Item it) { return it.page == page || it == dragging || remoteDrags.containsKey(it.id); }
+    private int screenOf(Item it) { return onFirst(it) ? 0 : 1; }
+
+    /**
+     * Ordena las apps del escritorio actual en cuadrícula, por nombre, cada una en la pantalla donde está.
+     * Deja libre el lado donde va la barra de opciones.
+     */
+    public void arrangeApps() {
+        int W = getWidth(), H = getHeight();
+        if (W == 0 || H == 0) return;
+        final Collator col = Collator.getInstance(new Locale("es"));
+        col.setStrength(Collator.PRIMARY);
+        for (int s = 0; s < 2; s++) {
+            List<Item> apps = new ArrayList<>();
+            for (Item it : items) if (Item.APP.equals(it.kind) && it.page == page && screenOf(it) == s && it != dragging) apps.add(it);
+            if (apps.isEmpty()) continue;
+            Collections.sort(apps, (p, q) -> col.compare(p.title, q.title));
+            float gap = 10 * dp, mx = 14 * dp, top, bottom;
+            // horizontal: la barra está arriba en el principal y abajo en el extendido; vertical: abajo en ambos
+            if (vertical) { top = s == 0 ? 86 * dp : 16 * dp; bottom = s == 0 ? 30 * dp : 86 * dp; }
+            else { top = 16 * dp; bottom = 86 * dp; }
+            double w = vertical ? 0.12 : 0.24;
+            float cellW = 0, cellH = 0;
+            int cols = 1;
+            for (int tries = 0; tries < 8; tries++) {
+                cellW = (float) (w * W);
+                cellH = Math.max(96 * dp, cellW * 0.9f);
+                cols = Math.max(1, (int) ((W - 2 * mx + gap) / (cellW + gap)));
+                int rows = Math.max(1, (int) ((H - top - bottom + gap) / (cellH + gap)));
+                if (cols * rows >= apps.size() || w < 0.09) break;
+                w *= 0.86;
+            }
+            for (int i = 0; i < apps.size(); i++) {
+                Item it = apps.get(i);
+                double ux = (mx + (i % cols) * (cellW + gap)) / W, uy = (top + (i / cols) * (cellH + gap)) / H;
+                double nx = vertical ? ux : s + ux, ny = vertical ? s + uy : uy;
+                if (Math.abs(nx - it.x) < 1e-4 && Math.abs(ny - it.y) < 1e-4 && Math.abs(w - it.w) < 1e-4 && it.rot == 0) continue;
+                it.x = nx; it.y = ny; it.w = w; it.rot = 0;
+                it.touch();
+                if (host != null) host.onItemChanged(it);
+            }
+        }
+        invalidate();
+    }
+
+    /** Un elemento arrastrado contra el borde izquierdo o derecho pasa al escritorio de ese lado (y lo crea si no existe). */
+    private void onEdgeFlip() {
+        if (dragging == null || edgeDir == 0) return;
+        int np = page + edgeDir;
+        if (np < 0 || np >= 50) return;
+        if (np >= pages) pages = np + 1;
+        dragging.page = np;
+        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+        goTo(np, edgeDir * getWidth() * 0.6f);
+        postDelayed(edgeFlip, 900);   // si sigue en el borde, avanza otro escritorio
+    }
+
     public void setConnected(boolean c) { connected = c; invalidate(); }
     public void setGlyphRotation(float r) { glyphRot = r; invalidate(); }
 
@@ -274,8 +383,11 @@ public class DeskView extends View {
             c.drawRect(0, 0, ew, H, edge);
         }
 
-        if (items.isEmpty()) {
-            String t = "Escritorio vacío. Agrega una nota, una imagen o una app.";
+        boolean none = true;
+        for (Item it : items) if (visible(it)) { none = false; break; }
+        if (none) {
+            String t = pages > 1 ? "Escritorio " + (page + 1) + " vacío. Agrega algo o desliza a los lados."
+                                 : "Escritorio vacío. Agrega una nota, una imagen o una app.";
             int lw = (int) (Math.min(W, H) * 0.8f);
             StaticLayout l = StaticLayout.Builder.obtain(t, 0, t.length(), empty, lw)
                     .setAlignment(Layout.Alignment.ALIGN_CENTER).build();
@@ -291,6 +403,9 @@ public class DeskView extends View {
         if (dragging != null) { sorted.remove(dragging); sorted.add(dragging); }
         boolean again = false;
         for (Item it : sorted) {
+            if (!visible(it)) { it.dx = Float.NaN; continue; }
+            // al deslizar en vertical (lado a lado) no se muestran los elementos del otro teléfono
+            if (slide != 0 && !vertical && it != dragging && screenOf(it) != side) continue;
             double tx = it.x, ty = it.y;
             float k = 0.26f;
             double[] rd = remoteDrags.get(it.id);
@@ -301,13 +416,22 @@ public class DeskView extends View {
             it.dy += (float) (ty - it.dy) * k;
             if (Math.abs(tx - it.dx) > 0.0004 || Math.abs(ty - it.dy) > 0.0004) again = true;
             else { it.dx = (float) tx; it.dy = (float) ty; }
-            float left = leftOf(it, W), top = topOf(it, H), width = (float) (it.w * W);
+            float left = leftOf(it, W) + (it == dragging ? 0 : slide), top = topOf(it, H), width = (float) (it.w * W);
             float h = measure(it, width);
             float reach = Math.max(width, h);   // un elemento girado puede asomar más allá de su ancho
             if (left > W + reach || left + width < -reach || top > H + reach || top + h < -reach) continue;
             drawItem(c, it, left, top, width, h, it == dragging || rd != null);
         }
         if (again) postInvalidateOnAnimation();
+
+        // puntos de los escritorios
+        if (pages > 1) {
+            float r = 3.6f * dp, g = 14 * dp, y = H - 14 * dp, x0 = W / 2f - (pages - 1) * g / 2;
+            for (int i = 0; i < pages; i++) {
+                btn.setColor(i == page ? accent : (muted & 0x00FFFFFF) | 0x77000000);
+                c.drawCircle(x0 + i * g, y, i == page ? r * 1.25f : r, btn);
+            }
+        }
     }
 
     private float measure(Item it, float width) {
@@ -395,6 +519,7 @@ public class DeskView extends View {
             c.drawText("Abrir  ↗", it.openBtn.left + 14 * dp, it.openBtn.centerY() + 5 * dp, small);
         }
 
+        if (locked(it)) { it.sendBtn.setEmpty(); it.delBtn.setEmpty(); c.restore(); return; }
         // botones cuadrados: enviar al otro lado y quitar
         float bs = 30 * dp, gap = 3 * dp;
         float by = isImg ? h - bs - 4 * dp : 4 * dp;
@@ -477,6 +602,7 @@ public class DeskView extends View {
         List<Item> sorted = new ArrayList<>(items);
         Collections.sort(sorted, (p, q) -> Long.compare(q.z, p.z));
         for (Item it : sorted) {
+            if (it.page != page) continue;
             float[] l = toLocal(it, px, py);
             if (l[0] >= 0 && l[0] <= l[2] && l[1] >= 0 && l[1] <= l[3]) return it;
         }
@@ -535,21 +661,23 @@ public class DeskView extends View {
                 }
                 pressed = hit(e.getX(), e.getY());
                 if (pressed != editing) finishEditing();
-                if (pressed == null) return true;
-                float[] l = toLocal(pressed, e.getX(), e.getY());
-                pressedBtn = pressed.sendBtn.contains(l[0], l[1]) ? "send" : pressed.delBtn.contains(l[0], l[1]) ? "del"
-                        : Item.LINK.equals(pressed.kind) && pressed.openBtn.contains(l[0], l[1]) ? "open" : null;
-                ox = pressed.x; oy = pressed.y;
                 if (vt != null) vt.recycle();
                 vt = VelocityTracker.obtain();
                 vt.addMovement(e);
-                if (pressedBtn == null && editing == null) postDelayed(longPress, 450);
+                if (slideAnim != null && slideAnim.isRunning()) slideAnim.cancel();
+                slide = 0;
+                if (pressed == null) { mode = SWIPE; return true; }   // espacio vacío: deslizar cambia de escritorio
+                float[] l = toLocal(pressed, e.getX(), e.getY());
+                pressedBtn = locked(pressed) ? null : pressed.sendBtn.contains(l[0], l[1]) ? "send" : pressed.delBtn.contains(l[0], l[1]) ? "del"
+                        : Item.LINK.equals(pressed.kind) && pressed.openBtn.contains(l[0], l[1]) ? "open" : null;
+                ox = pressed.x; oy = pressed.y;
+                if (pressedBtn == null && editing == null && !locked(pressed)) postDelayed(longPress, 450);
                 return true;
             }
             case MotionEvent.ACTION_POINTER_DOWN: {
                 // segundo dedo sobre un elemento: girar y escalar con dos dedos
                 Item target = pressed != null ? pressed : editing;
-                if (target == null || e.getPointerCount() != 2) return true;
+                if (target == null || e.getPointerCount() != 2 || mode == SWIPE || locked(target)) return true;
                 removeCallbacks(longPress);
                 if (mode == DRAG) { target.x = dragX; target.y = dragY; dragging = null; }
                 mode = PINCH;
@@ -560,6 +688,16 @@ public class DeskView extends View {
                 return true;
             }
             case MotionEvent.ACTION_MOVE: {
+                if (mode == SWIPE) {
+                    if (vt != null) vt.addMovement(e);
+                    float sx = e.getX() - downX;
+                    if (!moved && Math.abs(sx) < touchSlop) return true;
+                    moved = true;
+                    boolean can = sx < 0 ? page < pages - 1 : page > 0;
+                    slide = can ? sx : sx * 0.25f;   // en el último escritorio se resiste
+                    invalidate();
+                    return true;
+                }
                 if (pressed == null) return true;
                 if (mode == PINCH && e.getPointerCount() >= 2) {
                     double d = Math.hypot(e.getX(0) - e.getX(1), e.getY(0) - e.getY(1));
@@ -587,10 +725,18 @@ public class DeskView extends View {
                 float ddx = e.getX() - downX, ddy = e.getY() - downY;
                 if (!moved && Math.hypot(ddx, ddy) < touchSlop) return true;
                 removeCallbacks(longPress);
+                if (!moved && locked(pressed)) {   // app bloqueada: no se mueve; el gesto desliza el escritorio
+                    pressed = null; mode = SWIPE; downX = e.getX(); moved = false;
+                    return true;
+                }
                 if (!moved) { moved = true; mode = DRAG; dragging = pressed; dragging.z = System.currentTimeMillis(); }
                 dragX = ox + ddx / W;
                 dragY = oy + ddy / H;
                 if (vertical) dragX = clamp(dragX, -0.5, 0.95); else dragY = clamp(dragY, -0.4, 0.95);
+                // contra el borde izquierdo o derecho (por fuera, no en la unión) → al escritorio de ese lado
+                float ex = e.getX(), edgeW = 26 * dp;
+                int ed = ex < edgeW && (vertical || side == 0) ? -1 : ex > W - edgeW && (vertical || side == 1) ? 1 : 0;
+                if (ed != edgeDir) { edgeDir = ed; removeCallbacks(edgeFlip); if (ed != 0) postDelayed(edgeFlip, 650); }
                 if (host != null) host.onDrag(dragging, dragX, dragY);
                 invalidate();
                 return true;
@@ -602,8 +748,21 @@ public class DeskView extends View {
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL: {
                 removeCallbacks(longPress);
+                removeCallbacks(edgeFlip);
+                edgeDir = 0;
                 Item it = pressed; pressed = null;
                 int m = mode; mode = NONE;
+                if (m == SWIPE) {
+                    float vx = 0;
+                    if (vt != null) { vt.addMovement(e); vt.computeCurrentVelocity(1000); vx = vt.getXVelocity(); vt.recycle(); vt = null; }
+                    if (!moved) return true;
+                    int dir = 0;
+                    if ((slide < -W * 0.22f || vx < -900 * dp / 2.6f) && page < pages - 1) dir = 1;
+                    else if ((slide > W * 0.22f || vx > 900 * dp / 2.6f) && page > 0) dir = -1;
+                    if (dir != 0) goTo(page + dir, slide + dir * W);
+                    else animateSlide(slide);
+                    return true;
+                }
                 if (it == null) return true;
                 if (m == ROTATE || m == RESIZE || m == PINCH) { commit(it); return true; }
                 double vel = 0;   // velocidad hacia el otro teléfono, en pantallas por segundo
@@ -634,6 +793,7 @@ public class DeskView extends View {
                 it.y = vertical ? a : b;
                 commit(it);
                 if (host != null) host.onDragEnd(it);
+                if (autoApps && Item.APP.equals(it.kind)) arrangeApps();
                 return true;
             }
         }

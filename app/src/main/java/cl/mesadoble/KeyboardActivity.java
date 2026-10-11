@@ -43,7 +43,11 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     private GamepadView gamepad;
     private EditText field;
     private LinearLayout content, suggestBar;
-    private TextView status, modeBtn, editBtn, resetBtn, sendBtn;
+    private TextView status, modeBtn, editBtn, resetBtn, sendBtn, outBtn, pairBtn;
+    private BtPad bt;
+    private String btStatus = "";
+    private boolean btOk;
+    private static final String P_CONNECT = "android.permission.BLUETOOTH_CONNECT", P_ADVERTISE = "android.permission.BLUETOOTH_ADVERTISE";
     private int mode;
 
     // sugerencias: palabra que se está escribiendo
@@ -82,7 +86,9 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         resetBtn = chip("Restablecer", v -> { gamepad.resetLayout(); prefs.edit().remove("padLayout").apply(); });
         modeBtn = chip(NAMES[mode], v -> pickMode());
         sendBtn = chip("Enviar ➤", v -> { hub.send("kb", "a", "act", "x", "send"); });
-        top.addView(sendBtn); top.addView(resetBtn); top.addView(editBtn); top.addView(modeBtn);
+        outBtn = chip("", v -> toggleOutput());
+        pairBtn = chip("Vincular", v -> pairBluetooth());
+        top.addView(sendBtn); top.addView(pairBtn); top.addView(outBtn); top.addView(resetBtn); top.addView(editBtn); top.addView(modeBtn);
         top.addView(chip("Cerrar", v -> finish()));
         root.addView(top, new LinearLayout.LayoutParams(-1, dp(44)));
 
@@ -140,9 +146,10 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
 
         touchpad = new TouchpadView(this, night);
         touchpad.setSink(new TouchpadView.Sink() {
-            @Override public void move(int dx, int dy) { hub.send("mouse", "dx", dx, "dy", dy); }
-            @Override public void click() { hub.send("click"); }
-            @Override public void scroll(int steps) { hub.send("scroll", "d", steps); }
+            // Mouse Bluetooth (puntero real en el principal) o por WiFi (necesita la versión completa)
+            @Override public void move(int dx, int dy) { if (useBt()) bt.mouse(dx, dy, 0); else hub.send("mouse", "dx", dx, "dy", dy); }
+            @Override public void click() { if (useBt()) bt.click(1); else hub.send("click"); }
+            @Override public void scroll(int steps) { if (useBt()) bt.mouse(0, 0, steps); else hub.send("scroll", "d", steps); }
             @Override public void nav(String what) { hub.send("nav", "k", what); }
         });
 
@@ -150,10 +157,12 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         gamepad.fromJson(prefs.getString("padLayout", ""));
         gamepad.setSink(new GamepadView.Sink() {
             @Override public void button(String id, boolean down, float x, float y) {
-                hub.send("pad", "a", "btn", "id", id, "down", down, "x", (double) x, "y", (double) y);
+                if (useBt()) bt.button(id, down);   // control de juego real: lo reconocen los emuladores
+                else hub.send("pad", "a", "btn", "id", id, "down", down, "x", (double) x, "y", (double) y);
             }
             @Override public void joy(String id, int phase, float cx, float cy, float r, float nx, float ny) {
-                hub.send("pad", "a", "joy", "id", id, "ph", phase, "x", (double) cx, "y", (double) cy,
+                if (useBt()) bt.joy(id, nx, ny, phase == 2);
+                else hub.send("pad", "a", "joy", "id", id, "ph", phase, "x", (double) cx, "y", (double) cy,
                         "r", (double) r, "nx", (double) nx, "ny", (double) ny);
             }
             @Override public void layoutChanged(String json) { prefs.edit().putString("padLayout", json).apply(); }
@@ -198,6 +207,80 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         hub.send("kbAsk");
     }
 
+    // ---------------- Bluetooth (gamepad y mouse) ----------------
+
+    /** ¿El modo actual usa Bluetooth? Gamepad y touchpad por defecto sí: es lo que reconocen emuladores y Android. */
+    private boolean btMode() {
+        if (mode == GAME) return prefs.getBoolean("padBt", true);
+        if (mode == PAD || mode == KB_PAD) return prefs.getBoolean("mouseBt", true);
+        return false;
+    }
+
+    private boolean useBt() { return btMode() && bt != null && bt.connected(); }
+
+    private String[] btPerms() {
+        return android.os.Build.VERSION.SDK_INT >= 31 ? new String[]{P_CONNECT, P_ADVERTISE} : new String[0];
+    }
+
+    private boolean hasBtPerms() {
+        for (String p : btPerms()) if (checkSelfPermission(p) != android.content.pm.PackageManager.PERMISSION_GRANTED) return false;
+        return true;
+    }
+
+    /** Enciende el Bluetooth solo en los modos que lo necesitan; lo apaga en los demás (no molesta al WiFi). */
+    private void syncBluetooth() {
+        if (btMode()) {
+            if (!hasBtPerms()) { requestPermissions(btPerms(), 21); return; }
+            if (bt == null) bt = BtPad.get(this);
+            bt.setListener((t, c) -> { btStatus = t; btOk = c; updateStatus(); });
+            android.bluetooth.BluetoothAdapter a = android.bluetooth.BluetoothAdapter.getDefaultAdapter();
+            if (a != null && !a.isEnabled()) {
+                try { startActivityForResult(new android.content.Intent(android.bluetooth.BluetoothAdapter.ACTION_REQUEST_ENABLE), 22); } catch (Exception ignored) { }
+                return;
+            }
+            bt.start();
+        } else if (bt != null) {
+            bt.stop();
+            bt.setListener(null);
+        }
+    }
+
+    @Override public void onRequestPermissionsResult(int req, String[] p, int[] r) {
+        if (req == 21 && hasBtPerms()) syncBluetooth();
+        else if (req == 21) { btStatus = "Sin permiso de Bluetooth: usa la salida por WiFi"; updateStatus(); }
+    }
+
+    @Override protected void onActivityResult(int req, int res, android.content.Intent data) {
+        super.onActivityResult(req, res, data);
+        if (req == 22 && res == RESULT_OK) syncBluetooth();
+        if (req == 23 && res != RESULT_CANCELED) {
+            new Ui.Sheet(this)
+                    .title("Vincula desde el principal")
+                    .message("En el PRINCIPAL abre Ajustes → Bluetooth → Vincular nuevo dispositivo y elige este teléfono. "
+                            + "Cuando termine vuelve aquí: el control se conecta solo.\n\n"
+                            + "En el emulador (por ejemplo Nostalgia.NES → Ajustes → Controles) asigna los botones si no los toma solos.")
+                    .button("Entendido", true, null)
+                    .show();
+        }
+    }
+
+    private void pairBluetooth() {
+        android.content.Intent i = new android.content.Intent(android.bluetooth.BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE);
+        i.putExtra(android.bluetooth.BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 120);
+        try { startActivityForResult(i, 23); } catch (Exception e) { android.widget.Toast.makeText(this, "No pude hacer visible este teléfono", android.widget.Toast.LENGTH_SHORT).show(); }
+    }
+
+    private void toggleOutput() {
+        String key = mode == GAME ? "padBt" : "mouseBt";
+        prefs.edit().putBoolean(key, !prefs.getBoolean(key, true)).apply();
+        arrange();
+    }
+
+    @Override protected void onDestroy() {
+        if (bt != null) { bt.stop(); bt.setListener(null); }
+        super.onDestroy();
+    }
+
     @Override protected void onPause() {
         hub.keyboardVisible = false;
         h.removeCallbacks(autoClose);
@@ -237,6 +320,10 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         boolean land = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
         InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
         editBtn.setVisibility(mode == GAME ? View.VISIBLE : View.GONE);
+        boolean btCapable = mode == GAME || mode == PAD || mode == KB_PAD;
+        outBtn.setVisibility(btCapable ? View.VISIBLE : View.GONE);
+        outBtn.setText(btMode() ? "Salida: Bluetooth" : "Salida: WiFi");
+        pairBtn.setVisibility(btCapable && btMode() ? View.VISIBLE : View.GONE);
         sendBtn.setVisibility(mode == DICT ? View.VISIBLE : View.GONE);
         resetBtn.setVisibility(mode == GAME && gamepad.isEditing() ? View.VISIBLE : View.GONE);
         modeBtn.setText(NAMES[mode]);
@@ -289,6 +376,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         }
         updateTouchpadHint();
         refreshSuggestions();
+        syncBluetooth();
     }
 
     private void pickMode() {
@@ -360,6 +448,12 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         String t;
         boolean ok = false;
         boolean typing = mode == KB || mode == KB_PAD || mode == DICT;
+        if (btMode() && !typing) {
+            status.setText(btStatus.isEmpty() ? "Preparando control Bluetooth…" : btStatus);
+            status.setTextColor(btOk ? (night ? 0xFF5CC3CF : 0xFF1F7F8C) : (night ? 0xFFF0A26B : 0xFFB4541A));
+            updateTouchpadHint();
+            return;
+        }
         if (!hub.connected()) {
             t = "Sin conexión. Abre Mesa Doble en ambos teléfonos";
         } else if (!typing) {
@@ -379,7 +473,9 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     }
 
     private void updateTouchpadHint() {
-        if (touchpad != null) touchpad.setHint(hub != null && hub.remotePointer() ? "Touchpad" : "Touchpad · mueve el cursor del texto");
+        if (touchpad == null) return;
+        if (btMode()) touchpad.setHint(btOk ? "Mouse Bluetooth" : "Mouse Bluetooth · toca \"Vincular\" la primera vez");
+        else touchpad.setHint(hub != null && hub.remotePointer() ? "Touchpad" : "Touchpad · mueve el cursor del texto");
     }
 
     @Override public void onState(int state, String info) {

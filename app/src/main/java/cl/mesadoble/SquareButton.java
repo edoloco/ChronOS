@@ -18,7 +18,7 @@ import android.view.View;
 public class SquareButton extends View {
 
     public static final int NOTE = 0, IMAGE = 1, APPS = 2, KEYBOARD = 3, SETTINGS = 4, STATUS = 5,
-            BACK = 6, HOME = 7, RECENTS = 8;
+            BACK = 6, HOME = 7, RECENTS = 8, MENU = 9, DESKS = 10;
 
     private final int kind;
     private final String text;
@@ -59,6 +59,10 @@ public class SquareButton extends View {
     }
 
     public void setStatus(int level) { statusLevel = level; invalidate(); }
+
+    private boolean open;
+    /** Botón de menú: abierto muestra una X; cerrado, tres líneas y un punto con el estado de la conexión. */
+    public void setOpen(boolean o) { open = o; invalidate(); }
 
     /** Gira el contenido por el camino más corto. */
     public void setGlyphRotation(float target) {
@@ -150,6 +154,23 @@ public class SquareButton extends View {
             case RECENTS:
                 c.drawRoundRect(new RectF(cx - u * 0.7f, cy - u * 0.7f, cx + u * 0.7f, cy + u * 0.7f), 2.5f * dp, 2.5f * dp, stroke);
                 break;
+            case MENU:
+                if (open) {
+                    c.drawLine(cx - u * 0.7f, cy - u * 0.7f, cx + u * 0.7f, cy + u * 0.7f, stroke);
+                    c.drawLine(cx + u * 0.7f, cy - u * 0.7f, cx - u * 0.7f, cy + u * 0.7f, stroke);
+                } else {
+                    for (int i = -1; i <= 1; i++) c.drawLine(cx - u * 0.9f, cy + i * u * 0.6f, cx + u * 0.9f, cy + i * u * 0.6f, stroke);
+                    fill.setColor(statusLevel == 2 ? accent : statusLevel == 1 ? warn : 0xFF8798A9);
+                    c.drawCircle(cx + u * 1.35f, cy - u * 1.1f, 3.2f * dp, fill);
+                }
+                break;
+            case DESKS: {
+                float pw = u * 0.7f, ph = u * 1.5f;
+                c.drawRoundRect(new RectF(cx - pw / 2, cy - ph / 2, cx + pw / 2, cy + ph / 2), 2 * dp, 2 * dp, stroke);
+                c.drawRoundRect(new RectF(cx - pw / 2 - u * 0.95f, cy - ph * 0.35f, cx - pw / 2 - u * 0.3f, cy + ph * 0.35f), 2 * dp, 2 * dp, stroke);
+                c.drawRoundRect(new RectF(cx + pw / 2 + u * 0.3f, cy - ph * 0.35f, cx + pw / 2 + u * 0.95f, cy + ph * 0.35f), 2 * dp, 2 * dp, stroke);
+                break;
+            }
             case STATUS:
                 for (int i = 1; i <= 2; i++) {
                     float rr = u * 0.55f * i;

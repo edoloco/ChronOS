@@ -42,6 +42,15 @@ cuando cruzas más de la mitad o los lanzas.
   que controlan el **principal**. Con la versión liviana: Atrás funciona cuando hay un campo de texto activo
   (pasa por el teclado Mesa Doble), Inicio abre el inicio (o deja un aviso de un toque) y Recientes necesita
   la versión completa.
+- **Barra plegable**: el botón *Menú* despliega o esconde los demás botones (recuerda cómo la dejaste).
+  En horizontal se abre como fila; en vertical, como columna hacia arriba.
+- **Escritorios a los lados** (botón *Mesas*): crea más escritorios y desliza a los lados sobre un espacio
+  vacío para cambiar; ambos teléfonos muestran siempre el mismo. Para llevar un elemento a otro escritorio,
+  arrástralo y déjalo un momento contra el borde izquierdo o derecho (si no existe, se crea). Los puntos
+  abajo indican en cuál estás.
+- **Apps ordenadas o fijas** (botón *Mesas*): *Ordenar apps ahora* las pone en cuadrícula por nombre;
+  *Orden automático* las reacomoda al agregarlas o soltarlas; *Apps bloqueadas* las deja fijas (no se mueven
+  ni se borran, pero se abren al tocarlas). Se aplica en ambos teléfonos.
 - **Color de fondo**: *Ajustes → Color de fondo*, se aplica en ambos teléfonos.
 - **Pantalla de inicio**: *Ajustes → Pantalla de inicio* convierte Mesa Doble en el launcher del teléfono
   (no necesita permisos; se desactiva igual).
@@ -60,11 +69,24 @@ Desde *Teclado → Usar este teléfono como teclado*, con cinco modos:
 - **Teclado**: con sugerencias en español (completa palabras, agrega tildes, corrige errores) y tecla
   **Enviar** (en WhatsApp conviene activar *Ajustes → Chats → Enter para enviar*).
 - **Teclado + touchpad**.
-- **Touchpad**: puntero, clic, desplazar con dos dedos, Atrás e Inicio (versión completa).
-  En la versión liviana mueve el cursor del texto.
-- **Gamepad** (los emuladores no lo reconocen todavía: necesitan un control de juego real, ver issue):
-  dos joysticks, cruceta, A/B/X/Y, L1/L2/L3, R1/R2/R3, Select y Start. *Editar* para moverlos y cambiar su tamaño. Cada control
-  toca el principal en el mismo lugar relativo (versión completa).
+- **Touchpad**: por **Bluetooth** es un **mouse real** (aparece el puntero en el principal, clic, desplazar
+  con dos dedos). Con *Salida: WiFi* usa el modo anterior (puntero con la versión completa; cursor del texto
+  con la liviana).
+- **Gamepad**: por **Bluetooth** es un **control de juego real**, reconocido por emuladores como
+  Nostalgia.NES, RetroArch, etc. Dos joysticks, cruceta, A/B/X/Y, L1/L2/L3, R1/R2/R3, Select y Start.
+  *Editar* para moverlos y cambiar su tamaño.
+
+### Control y mouse Bluetooth
+
+El Bluetooth se usa **solo** en los modos Gamepad y Touchpad; el teclado y la mesa siguen por WiFi.
+
+1. En el extendido abre *Teclado → Gamepad* (o Touchpad) y toca **Vincular**.
+2. En el **principal**: *Ajustes → Bluetooth → Vincular nuevo dispositivo* → "Mesa Doble Control".
+3. Desde ahí se reconecta solo. El botón **Salida** cambia entre Bluetooth y WiFi.
+4. En el emulador (Nostalgia.NES → Ajustes → Controles) asigna los botones si no los toma solos.
+
+Requiere que el extendido permita funcionar como dispositivo Bluetooth (perfil HID); si no lo permite,
+la app lo avisa y se puede usar *Salida: WiFi*.
 - **Dictado**: escribe con el teclado del teléfono o dicta por voz.
 
 El principal debe tener elegido el teclado Mesa Doble para recibir texto.

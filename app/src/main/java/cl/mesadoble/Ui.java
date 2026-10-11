@@ -32,7 +32,7 @@ public class Ui {
     public static final int LAYOUT_SIDE_H = 1, LAYOUT_SIDE_V = 2, LAYOUT_STACK = 3, LOCK = 4, UNLOCK = 5,
             KEYBOARD = 6, KB_TOUCHPAD = 7, TOUCHPAD = 8, GAMEPAD = 9, MIC = 10, WIFI = 11, GEAR = 12,
             AUTO = 13, CHECK = 14, CROSS = 15, PIN = 16, OPEN = 17, STORE = 18, RECEIVE = 19, NOTE = 20,
-            PALETTE = 21, HOME = 22, SEND = 23;
+            PALETTE = 21, HOME = 22, SEND = 23, PAGES = 24, PLUS = 25, GRID = 26, TRASH = 27;
 
     public static boolean night(Context c) {
         return (c.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
@@ -377,6 +377,28 @@ public class Ui {
                     c.drawPath(sp, st);
                     break;
                 }
+                case PAGES: {   // tres escritorios lado a lado
+                    float pw = u * 0.5f, ph = u * 1.1f;
+                    rect(c, cx - pw / 2, cy - ph / 2, cx + pw / 2, cy + ph / 2, true, null);
+                    rect(c, cx - pw / 2 - u * 0.75f, cy - ph * 0.35f, cx - pw / 2 - u * 0.2f, cy + ph * 0.35f, false, null);
+                    rect(c, cx + pw / 2 + u * 0.2f, cy - ph * 0.35f, cx + pw / 2 + u * 0.75f, cy + ph * 0.35f, false, null);
+                    break;
+                }
+                case PLUS:
+                    c.drawRoundRect(new RectF(cx - u * 0.8f, cy - u * 0.8f, cx + u * 0.8f, cy + u * 0.8f), 5 * dp, 5 * dp, st);
+                    c.drawLine(cx, cy - u * 0.4f, cx, cy + u * 0.4f, st);
+                    c.drawLine(cx - u * 0.4f, cy, cx + u * 0.4f, cy, st);
+                    break;
+                case GRID:
+                    for (int i = -1; i <= 1; i += 2) for (int j = -1; j <= 1; j += 2)
+                        c.drawRoundRect(new RectF(cx + i * u * 0.45f - u * 0.35f, cy + j * u * 0.45f - u * 0.35f,
+                                cx + i * u * 0.45f + u * 0.35f, cy + j * u * 0.45f + u * 0.35f), 3 * dp, 3 * dp, st);
+                    break;
+                case TRASH:
+                    c.drawLine(cx - u * 0.8f, cy - u * 0.55f, cx + u * 0.8f, cy - u * 0.55f, st);
+                    c.drawLine(cx - u * 0.25f, cy - u * 0.8f, cx + u * 0.25f, cy - u * 0.8f, st);
+                    c.drawRoundRect(new RectF(cx - u * 0.55f, cy - u * 0.55f, cx + u * 0.55f, cy + u * 0.85f), 3 * dp, 3 * dp, st);
+                    break;
                 case NOTE:
                     c.drawRoundRect(new RectF(cx - u * 0.7f, cy - u * 0.8f, cx + u * 0.7f, cy + u * 0.8f), 3 * dp, 3 * dp, st);
                     for (int i = 0; i < 3; i++) c.drawLine(cx - u * 0.4f, cy - u * 0.35f + i * u * 0.35f, cx + u * 0.4f, cy - u * 0.35f + i * u * 0.35f, st);

@@ -61,8 +61,10 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private DeskView desk;
     private Hub hub;
     private LinearLayout bar;
-    private SquareButton statusBtn;
+    private SquareButton statusBtn, menuBtn;
     private final List<SquareButton> squares = new ArrayList<>();
+    private final List<SquareButton> tools = new ArrayList<>();   // los botones que se pliegan dentro del menú
+    private boolean barOpen = true;
     private OrientationEventListener orient;
     private int snapped = -1;
     private String statusText = "";
@@ -94,13 +96,20 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         bar.setPadding(dp(6), dp(6), dp(6), dp(6));
         bar.setBackground(pill(night ? 0xE6182129 : 0xEEFFFFFF));
         bar.setElevation(dp(6));
+        bar.setLayoutTransition(new android.animation.LayoutTransition());
+        barOpen = prefs.getBoolean("barOpen", true);
+        menuBtn = new SquareButton(this, SquareButton.MENU, "Menú", false, night);
+        menuBtn.setOnClickListener(v -> toggleBar());
+        squares.add(menuBtn);
         addSquare(SquareButton.NOTE, "Nota", true, v -> addNote());
         addSquare(SquareButton.IMAGE, "Imagen", false, v -> pickImage());
         addSquare(SquareButton.APPS, "Apps", false, v -> showApps());
+        addSquare(SquareButton.DESKS, "Mesas", false, v -> desksMenu());
         addSquare(SquareButton.KEYBOARD, "Teclado", false, v -> keyboardMenu());
         addSquare(SquareButton.SETTINGS, "Ajustes", false, v -> settingsMenu());
         statusBtn = addSquare(SquareButton.STATUS, "Red", false, v -> showConnection());
         root.addView(bar, new FrameLayout.LayoutParams(-2, -2));
+        rebuildBar();
 
 
 
@@ -125,6 +134,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         desk.setVertical(savedStacked);
         if (savedStacked != stacked()) { desk.convertAll(stacked()); prefs.edit().putBoolean("savedStacked", stacked()).apply(); scheduleSave(); }
         for (Item it : desk.items) desk.normalize(it);
+        desk.setPages(Math.max(prefs.getInt("pages", 1), maxPage() + 1), prefs.getInt("page", 0), 0);
+        desk.setAppsMode(prefs.getBoolean("appsLock", false), prefs.getBoolean("appsAuto", false));
 
         side = hub.side();
         if (side >= 0) applySide();
@@ -207,6 +218,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         boolean h = locked() ? prefs.getBoolean("orientH", true) : landscapeNow();
         hub.send("view", "h", h, "lock", locked());
         hub.send("bg", "c", prefs.getInt("deskColor", 0));
+        hub.send("pages", "n", desk.pages(), "cur", desk.page());
+        hub.send("apps", "lock", prefs.getBoolean("appsLock", false), "auto", prefs.getBoolean("appsAuto", false));
     }
 
     @Override public void onConfigurationChanged(Configuration c) {
@@ -300,11 +313,117 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private SquareButton addSquare(int kind, String label, boolean primary, View.OnClickListener l) {
         SquareButton b = new SquareButton(this, kind, label, primary, night);
         b.setOnClickListener(l);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
-        lp.setMarginEnd(dp(6));
-        bar.addView(b, lp);
+        tools.add(b);
         squares.add(b);
         return b;
+    }
+
+    /**
+     * Barra plegable: el botón Menú despliega o esconde los demás.
+     * En horizontal es una fila que se abre hacia el lado; en vertical, una columna que crece hacia arriba.
+     */
+    private void rebuildBar() {
+        boolean column = !stacked();
+        bar.removeAllViews();
+        bar.setOrientation(column ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
+        List<SquareButton> order = new ArrayList<>();
+        order.add(menuBtn);
+        order.addAll(tools);
+        if (column) java.util.Collections.reverse(order);   // el menú queda abajo, junto al borde
+        for (SquareButton b : order) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+            if (b != menuBtn) { if (column) lp.bottomMargin = dp(6); else lp.setMarginStart(dp(6)); }
+            bar.addView(b, lp);
+        }
+        for (SquareButton b : tools) b.setVisibility(barOpen ? View.VISIBLE : View.GONE);
+        menuBtn.setOpen(barOpen);
+    }
+
+    private void toggleBar() {
+        barOpen = !barOpen;
+        prefs.edit().putBoolean("barOpen", barOpen).apply();
+        for (SquareButton b : tools) b.setVisibility(barOpen ? View.VISIBLE : View.GONE);
+        menuBtn.setOpen(barOpen);
+    }
+
+    // ---------------- escritorios (a los lados) y apps ----------------
+
+    private int maxPage() {
+        int m = 0;
+        for (Item it : desk.items) m = Math.max(m, it.page);
+        return m;
+    }
+
+    private void savePages() { prefs.edit().putInt("pages", desk.pages()).putInt("page", desk.page()).apply(); }
+
+    @Override public void onPageChange(int page, int pages) {
+        savePages();
+        hub.send("pages", "n", pages, "cur", page);
+    }
+
+    private void desksMenu() {
+        int n = desk.pages(), cur = desk.page();
+        boolean lock = prefs.getBoolean("appsLock", false), auto = prefs.getBoolean("appsAuto", false);
+        Ui.Sheet sh = new Ui.Sheet(this)
+                .title("Escritorios")
+                .message("Estás en el " + (cur + 1) + " de " + n + ". Desliza a los lados sobre un espacio vacío para cambiar. "
+                        + "Para llevar un elemento a otro escritorio, arrástralo y déjalo un momento contra el borde izquierdo o derecho.")
+                .option(Ui.PLUS, "Nuevo escritorio", "Se agrega a la derecha", this::newPage);
+        if (n > 1) sh.option(Ui.TRASH, "Quitar este escritorio", "Sus elementos pasan al de al lado", this::removePage);
+        sh.option(Ui.GRID, "Ordenar apps ahora", "En cuadrícula y por nombre, en este escritorio", () -> {
+                    desk.arrangeApps();
+                    Toast.makeText(this, "Apps ordenadas", Toast.LENGTH_SHORT).show();
+                })
+          .option(Ui.AUTO, -1, "Orden automático: " + (auto ? "sí" : "no"), "Las apps se acomodan solas al agregarlas o soltarlas", auto,
+                  () -> setAppsMode(lock, !auto, false))
+          .option(lock ? Ui.LOCK : Ui.UNLOCK, -1, "Apps bloqueadas: " + (lock ? "sí" : "no"),
+                  lock ? "No se mueven ni se borran; al tocarlas se abren" : "Fijar las apps en su lugar", lock,
+                  () -> setAppsMode(!lock, auto, false))
+          .button("Cerrar", false, null)
+          .show();
+    }
+
+    private void newPage() {
+        int n = desk.pages();
+        if (n >= 50) return;
+        desk.setPages(n + 1, n, 1);
+        onPageChange(desk.page(), desk.pages());
+        Toast.makeText(this, "Escritorio " + (n + 1) + " · desliza a los lados para cambiar", Toast.LENGTH_SHORT).show();
+    }
+
+    private void removePage() {
+        final int cur = desk.page(), n = desk.pages();
+        int count = 0;
+        for (Item it : desk.items) if (it.page == cur) count++;
+        Runnable go = () -> {
+            int target = cur == 0 ? 0 : cur - 1;   // índices ya corridos
+            for (Item it : new ArrayList<>(desk.items)) {
+                if (it.page == cur) it.page = target;
+                else if (it.page > cur) it.page--;
+                else continue;
+                it.touch();
+                onItemChanged(it);
+            }
+            desk.setPages(n - 1, target, cur == 0 ? 1 : -1);
+            onPageChange(desk.page(), desk.pages());
+        };
+        if (count == 0) { go.run(); return; }
+        new Ui.Sheet(this)
+                .title("Quitar este escritorio")
+                .message("Sus " + count + (count == 1 ? " elemento pasa" : " elementos pasan") + " al escritorio "
+                        + (cur == 0 ? "de la derecha" : "de la izquierda") + ".")
+                .button("Cancelar", false, null)
+                .button("Quitar", true, go)
+                .show();
+    }
+
+    private void setAppsMode(boolean lock, boolean auto, boolean fromRemote) {
+        prefs.edit().putBoolean("appsLock", lock).putBoolean("appsAuto", auto).apply();
+        desk.setAppsMode(lock, auto);
+        if (fromRemote) return;
+        hub.send("apps", "lock", lock, "auto", auto);
+        if (auto) desk.arrangeApps();
+        Toast.makeText(this, lock ? "Apps bloqueadas en su lugar" : auto ? "Las apps se ordenan solas" : "Apps libres", Toast.LENGTH_SHORT).show();
     }
 
     /** Gira los íconos para que se lean derechos, sin mover nada de lugar. */
@@ -463,6 +582,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 it.x = p[0]; it.y = p[1];
                 addItem(it);
                 sendImage(it);
+                if (prefs.getBoolean("appsAuto", false)) desk.post(desk::arrangeApps);
             }
         });
     }
@@ -589,6 +709,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         int ds = deskSide();
         desk.setVertical(stacked());
         desk.setSide(ds);
+        rebuildBar();
         // la barra va en el borde exterior, lejos de la unión entre teléfonos
         FrameLayout.LayoutParams bp = (FrameLayout.LayoutParams) bar.getLayoutParams();
         if (stacked()) {
@@ -652,6 +773,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             t = "Buscando " + firstPhone() + "…";
         }
         statusText = t;
+        menuBtn.setStatus(linkState == Link.CONNECTED ? (otherSide == side ? 1 : 2) : linkState == Link.WAITING ? 1 : 0);
         statusBtn.setStatus(linkState == Link.CONNECTED ? (otherSide == side ? 1 : 2) : linkState == Link.WAITING ? 1 : 0);
         desk.setConnected(linkState == Link.CONNECTED);
         main.removeCallbacks(statusTick);
@@ -704,6 +826,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     // ---------------- elementos ----------------
 
     private void addItem(Item it) {
+        it.page = desk.page();   // se agrega en el escritorio que se está viendo
         desk.items.add(it);
         desk.invalidate();
         onItemChanged(it);
@@ -909,6 +1032,15 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 otherSide = m.optInt("side", -1);
                 updateStatus();
                 break;
+            case "pages": {   // ambos teléfonos muestran el mismo escritorio
+                int n = Math.max(m.optInt("n", 1), maxPage() + 1), cur = m.optInt("cur", 0);
+                desk.setPages(n, cur, Integer.compare(cur, desk.page()));
+                savePages();
+                break;
+            }
+            case "apps":
+                setAppsMode(m.optBoolean("lock", false), m.optBoolean("auto", false), true);
+                break;
             case "bg":
                 if (m.optInt("c") != prefs.getInt("deskColor", 0)) setDeskColor(m.optInt("c"), true);
                 break;
@@ -992,6 +1124,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private void merge(Item in, boolean live) {
         desk.normalize(in);
         Item cur = desk.find(in.id);
+        if (in.page >= desk.pages()) { desk.setPages(in.page + 1, desk.page(), 0); savePages(); }
         if (cur == null) { desk.items.add(in); requestImageIfMissing(in); return; }
         if (live && dragging(cur)) return;
         if (live || in.rev > cur.rev || (in.rev == cur.rev && in.u > cur.u)) cur.copyFrom(in);
