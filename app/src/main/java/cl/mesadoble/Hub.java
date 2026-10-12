@@ -413,12 +413,12 @@ public class Hub implements Link.Listener {
     /** Alarmas del reloj de ESTE teléfono (aunque otra app esté al frente). */
     public void openAlarms() {
         Intent i = ClockWidget.alarmsIntent(app).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        String pkg = "";
-        try {
-            android.content.pm.ResolveInfo ri = app.getPackageManager().resolveActivity(i, 0);
-            if (ri != null && ri.activityInfo != null) pkg = ri.activityInfo.packageName;
-        } catch (Exception ignored) { }
-        if (i.getPackage() != null) pkg = i.getPackage();
+        String pkg = i.getPackage() != null ? i.getPackage() : i.getComponent() != null ? i.getComponent().getPackageName() : "";
+        if (i.resolveActivity(app.getPackageManager()) == null) {
+            main.post(() -> android.widget.Toast.makeText(app, "No encontré la app de alarmas", android.widget.Toast.LENGTH_SHORT).show());
+            if (connected()) send("alarmsAck", "ok", false);
+            return;
+        }
         startExternal(i, pkg, "Alarmas", false);
     }
 

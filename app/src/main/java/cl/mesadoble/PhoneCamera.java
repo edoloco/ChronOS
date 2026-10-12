@@ -93,6 +93,8 @@ final class PhoneCamera {
             case "zoomout": if (acc != null) acc.cameraZoom(false); break;
             case "flash": if (acc != null) acc.cameraClick("flash"); break;
         }
+        // el control aparece en el extendido (si no estaba a la vista)
+        if (!"state".equals(a) && hub.connected()) hub.send("camApp", "pkg", pkg);
         JSONObject st = new JSONObject();
         try { st.put("t", "phoneCamState"); st.put("front", front); st.put("app", lbl); st.put("access", acc != null); } catch (Exception ignored) { }
         if (hub.connected()) hub.send(st);

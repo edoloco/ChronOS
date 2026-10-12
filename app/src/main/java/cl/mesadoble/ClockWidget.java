@@ -21,7 +21,10 @@ public class ClockWidget extends AppWidgetProvider {
         for (int id : ids) m.updateAppWidget(id, views(c));
     }
 
+    static final String OPEN = "cl.mesadoble.ABRIR_ALARMAS";
+
     @Override public void onReceive(Context c, Intent i) {
+        if (OPEN.equals(i.getAction())) { Hub.get(c).openAlarms(); return; }   // se resuelve al tocar, aunque haya otra app al frente
         super.onReceive(c, i);
         if (AlarmManager.ACTION_NEXT_ALARM_CLOCK_CHANGED.equals(i.getAction())) refresh(c);
     }
@@ -34,10 +37,23 @@ public class ClockWidget extends AppWidgetProvider {
 
     /** "Ver alarmas"; si el teléfono no lo tiene, la app de reloj que haya. */
     static Intent alarmsIntent(Context c) {
+        android.content.pm.PackageManager pm = c.getPackageManager();
         Intent alarms = new Intent(AlarmClock.ACTION_SHOW_ALARMS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        if (alarms.resolveActivity(c.getPackageManager()) == null) {
-            for (String pkg : new String[]{"com.android.deskclock", "com.google.android.deskclock", "com.sec.android.app.clockpackage"}) {
-                Intent l = c.getPackageManager().getLaunchIntentForPackage(pkg);
+        android.content.pm.ResolveInfo ri = pm.resolveActivity(alarms, 0);
+        if (ri != null && ri.activityInfo != null && !"android".equals(ri.activityInfo.packageName)) {
+            alarms.setPackage(ri.activityInfo.packageName);
+            return alarms;
+        }
+        // sin "ver alarmas": la app de reloj (Xiaomi, Google, Samsung, Oppo, OnePlus, Huawei...)
+        for (String pkg : new String[]{"com.android.deskclock", "com.google.android.deskclock", "com.sec.android.app.clockpackage",
+                "com.coloros.alarmclock", "com.oneplus.deskclock", "com.huawei.deskclock", "com.miui.clock"}) {
+            Intent l = pm.getLaunchIntentForPackage(pkg);
+            if (l != null) return l.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        }
+        for (android.content.pm.ResolveInfo r : pm.queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)) {
+            String p = r.activityInfo.packageName.toLowerCase(Locale.ROOT);
+            if (p.contains("clock") || p.contains("alarm")) {
+                Intent l = pm.getLaunchIntentForPackage(r.activityInfo.packageName);
                 if (l != null) return l.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             }
         }
@@ -57,8 +73,8 @@ public class ClockWidget extends AppWidgetProvider {
 
     private static RemoteViews views(Context c) {
         RemoteViews v = new RemoteViews(c.getPackageName(), R.layout.widget_reloj);
-        Intent alarms = alarmsIntent(c);
-        PendingIntent pi = PendingIntent.getActivity(c, 11, alarms, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        Intent open = new Intent(c, ClockWidget.class).setAction(OPEN);
+        PendingIntent pi = PendingIntent.getBroadcast(c, 11, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         v.setOnClickPendingIntent(R.id.reloj_raiz, pi);
         v.setTextViewText(R.id.reloj_alarma, nextAlarm(c));
         return v;

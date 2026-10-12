@@ -1724,6 +1724,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
         switch (t) {
+            case "alarmsAck":
+                main.post(() -> Toast.makeText(this, "El principal no encontró la app de alarmas", Toast.LENGTH_SHORT).show());
+                break;
             case "recList":
                 main.post(() -> desk.setRecents(m));
                 break;
