@@ -79,11 +79,12 @@ final class RecentApps {
         return skip;
     }
 
-    /** App que está al frente en el principal ("" = la mesa o la pantalla de inicio). */
+    /** App que está al frente en el principal ("" = la mesa de Mesa Doble, "@inicio" = la pantalla de inicio). */
     static synchronized String active(Context c) {
         refresh(c);
         String p = lastResumed;
-        if (p.isEmpty() || p.equals(c.getPackageName()) || homes(c).contains(p) || "com.android.systemui".equals(p)) return "";
+        if (p.isEmpty() || p.equals(c.getPackageName())) return "";      // la mesa de Mesa Doble
+        if (homes(c).contains(p) || "com.android.systemui".equals(p)) return "@inicio";   // pantalla de inicio del teléfono: no es "Desktop"
         return p;
     }
 

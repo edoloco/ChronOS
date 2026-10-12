@@ -344,7 +344,25 @@ public class Hub implements Link.Listener {
      * desde segundo plano (salvo con el permiso "mostrar sobre otras apps"); en ese caso deja un aviso
      * que se abre con un toque.
      */
+    /**
+     * "Desktop" del widget de apps recientes: la MESA de Mesa Doble en este teléfono (no la pantalla de inicio).
+     * Igual que con las apps: inicio sin animación y enseguida la mesa; se reintenta hasta que la mesa esté al frente.
+     */
+    public void goDesk() {
+        Intent desk = new Intent(app, MainActivity.class)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_NO_ANIMATION);
+        if (foreground) return;
+        if (Settings.canDrawOverlays(app)) { try { app.startActivity(desk); return; } catch (Exception ignored) { } }
+        Intent home = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION);
+        try { app.startActivity(home); } catch (Exception ignored) { }
+        for (int ms : new int[]{60, 250, 600, 1100})
+            main.postDelayed(() -> { if (!foreground) try { app.startActivity(desk); } catch (Exception ignored) { } }, ms);
+        main.postDelayed(() -> { if (!foreground) startOrNotify(desk, 46, "Volver a la mesa", "Toca para ver la mesa de Mesa Doble"); }, 1700);
+    }
+
     public int launchHere(String pkg, String label) {
+        if (pkg.equals(app.getPackageName())) { goDesk(); return LAUNCHED; }
         Intent i = app.getPackageManager().getLaunchIntentForPackage(pkg);
         if (i == null) return NOT_INSTALLED;
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
