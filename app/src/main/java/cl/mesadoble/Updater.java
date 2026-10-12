@@ -209,6 +209,30 @@ public class Updater {
         return new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + c.getPackageName())).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
     }
 
+    // ---------------- aviso de versión nueva ----------------
+
+    /** ¿Ya se sabe que hay una versión publicada más nueva que la instalada? */
+    static boolean updateAvailable(Context c) {
+        String t = c.getSharedPreferences("mesa", Context.MODE_PRIVATE).getString("latestTag", "");
+        return !t.isEmpty() && newer(t, installedVersion(c));
+    }
+
+    static String latestKnown(Context c) { return clean(c.getSharedPreferences("mesa", Context.MODE_PRIVATE).getString("latestTag", "")); }
+
+    /** Revisa en silencio (como mucho cada 2 horas, o ya si force) y avisa en el hilo principal. */
+    static void checkQuiet(Context c, boolean force, Runnable done) {
+        android.content.SharedPreferences p = c.getSharedPreferences("mesa", Context.MODE_PRIVATE);
+        if (!force && System.currentTimeMillis() - p.getLong("latestAt", 0) < 2 * 3600_000L) { main.post(done); return; }
+        Context app = c.getApplicationContext();
+        new Thread(() -> {
+            try {
+                Release r = latest(app);
+                p.edit().putString("latestTag", r.tag).putLong("latestAt", System.currentTimeMillis()).apply();
+            } catch (Exception ignored) { }
+            main.post(done);
+        }, "buscar-version").start();
+    }
+
     // ---------------- en pantalla ----------------
 
     /** Herramientas → Actualizar: revisa, muestra la versión y ofrece actualizar este teléfono o ambos. */
@@ -227,6 +251,7 @@ public class Updater {
                     sh.message("Instalada: " + cur + "\n\n" + fe);
                 } else {
                     boolean nw = newer(fr.tag, cur);
+                    a.getSharedPreferences("mesa", Context.MODE_PRIVATE).edit().putString("latestTag", fr.tag).putLong("latestAt", System.currentTimeMillis()).apply();
                     sh.message("Instalada: " + cur + "\nÚltima: " + clean(fr.tag) + " (" + fr.name + ")\n\n"
                             + (nw ? "Hay una versión nueva." : "Ya tienes la última versión. Puedes reinstalarla igual."));
                     sh.option(Ui.RECEIVE, -1, nw ? "Actualizar este teléfono" : "Reinstalar en este teléfono", null, nw, () -> install(a, fr));

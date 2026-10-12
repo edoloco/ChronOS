@@ -242,6 +242,21 @@ public class Hub implements Link.Listener {
             return;
         }
         if ("alarms".equals(t)) { openAlarms(); return; }
+        // widget de apps recientes: la lista es del principal
+        if ("recReq".equals(t)) {
+            if (!isPrincipal()) return;
+            final String have = m.optString("sig", "\u0000");
+            RecentApps.worker.execute(() -> {
+                JSONObject r = RecentApps.message(app);
+                if (!r.optString("sig").equals(have)) send(r);
+            });
+            return;
+        }
+        if ("recAccess".equals(t)) {
+            if (isPrincipal()) startOrNotify(RecentApps.accessIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), 44,
+                    "Apps recientes", "Toca y activa Mesa Doble en \"Acceso a datos de uso\"");
+            return;
+        }
         if ("update".equals(t)) { Updater.updateFromRemote(app, this); return; }
         if ("fmOpen".equals(t)) {
             startOrNotify(new Intent(app, FilesActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP)

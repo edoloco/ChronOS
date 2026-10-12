@@ -66,6 +66,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private final List<SquareButton> tools = new ArrayList<>();   // los botones que se pliegan dentro del menú
     private boolean barOpen = true;
     private String otherVersion = "";
+    private SquareButton settingsBtn;
     private LinearLayout dock, navPill;   // dock = barra de opciones + botones de navegación del principal
     // widgets de Android
     private static final int REQ_BIND = 31, REQ_CONF = 32;
@@ -117,7 +118,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         addSquare(SquareButton.APPS, "Apps", false, v -> showApps());
         addSquare(SquareButton.DESKS, "Mesas", false, v -> desksMenu());
         addSquare(SquareButton.KEYBOARD, "Teclado", false, v -> keyboardMenu());
-        addSquare(SquareButton.SETTINGS, "Ajustes", false, v -> settingsMenu());
+        settingsBtn = addSquare(SquareButton.SETTINGS, "Ajustes", false, v -> settingsMenu());
         statusBtn = addSquare(SquareButton.STATUS, "Red", false, v -> showConnection());
         // Atrás, Inicio y Recientes del PRINCIPAL, al lado de la barra (solo en el extendido)
         navPill = new LinearLayout(this);
@@ -130,6 +131,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         for (int i = 0; i < navCount; i++) {
             final String k = nkeys[i];
             SquareButton nb = new SquareButton(this, nk[i], nl[i], false, night);
+            nb.setCompact(true);   // pequeños y centrados en el borde de la pantalla
             nb.setOnClickListener(v -> {
                 if (!hub.connected()) { Toast.makeText(this, "El principal no está conectado", Toast.LENGTH_SHORT).show(); return; }
                 hub.send("nav", "k", k);
@@ -139,8 +141,12 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         }
         dock = new LinearLayout(this);
         dock.addView(bar);
-        dock.addView(navPill);
         root.addView(dock, new FrameLayout.LayoutParams(-2, -2));
+        root.addView(navPill, new FrameLayout.LayoutParams(-2, -2));
+        // la navegación va al centro; si la barra abierta llega hasta ahí, se corre lo justo para no taparla
+        View.OnLayoutChangeListener avoid = (v1, l1, t1, r1, b1, l2, t2, r2, b2) -> main.post(this::avoidBar);
+        dock.addOnLayoutChangeListener(avoid);
+        navPill.addOnLayoutChangeListener(avoid);
         rebuildBar();
 
 
@@ -195,12 +201,17 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     @Override protected void onResume() {
         super.onResume();
         hub.foreground = true;
+        resumed = true;
+        Updater.checkQuiet(this, false, this::showUpdateBadge);
+        main.postDelayed(pollRecents, 300);
         if (orient.canDetectOrientation()) orient.enable();
         if (hub.isPrincipal() && hub.connected() && MesaAccess.instance != null) MesaAccess.instance.switchToMesa();
     }
 
     @Override protected void onPause() {
         hub.foreground = false;
+        resumed = false;
+        main.removeCallbacks(pollRecents);
         orient.disable();
         super.onPause();
     }
@@ -528,19 +539,30 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         }
         for (SquareButton b : tools) b.setVisibility(barOpen ? View.VISIBLE : View.GONE);
         menuBtn.setOpen(barOpen);
-        // navegación: misma dirección que la barra, separada por un espacio
-        navPill.setOrientation(column ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
+        // navegación: una fila pequeña, centrada en el borde exterior
+        navPill.setOrientation(LinearLayout.HORIZONTAL);
+        navPill.setPadding(dp(5), dp(5), dp(5), dp(5));
         for (int i = 0; i < navPill.getChildCount(); i++) {
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
-            if (i > 0) { if (column) lp.topMargin = dp(6); else lp.setMarginStart(dp(6)); }
+            if (i > 0) lp.setMarginStart(dp(8));
             navPill.getChildAt(i).setLayoutParams(lp);
         }
         dock.setOrientation(LinearLayout.HORIZONTAL);
         dock.setGravity(column ? Gravity.BOTTOM : Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams np = new LinearLayout.LayoutParams(-2, -2);
-        np.setMarginStart(dp(8));
-        navPill.setLayoutParams(np);
         navPill.setVisibility(side == 0 ? View.VISIBLE : View.GONE);   // solo el extendido controla al principal
+    }
+
+    /** Si la barra abierta toca la navegación centrada, la navegación se corre al lado de la barra. */
+    private void avoidBar() {
+        if (navPill.getVisibility() != View.VISIBLE || navPill.getWidth() == 0) return;
+        float gap = dp(10), shift = 0;
+        float nl = navPill.getLeft(), nr = navPill.getRight();
+        boolean sameRow = dock.getTop() < navPill.getBottom() && navPill.getTop() < dock.getBottom();
+        if (sameRow) {
+            if (dock.getLeft() < nl && dock.getRight() + gap > nl) shift = dock.getRight() + gap - nl;
+            else if (dock.getRight() > nr && dock.getLeft() - gap < nr) shift = dock.getLeft() - gap - nr;
+        }
+        if (Math.abs(navPill.getTranslationX() - shift) > 1) navPill.animate().translationX(shift).setDuration(180).start();
     }
 
     private void toggleBar() {
@@ -548,6 +570,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         prefs.edit().putBoolean("barOpen", barOpen).apply();
         for (SquareButton b : tools) b.setVisibility(barOpen ? View.VISIBLE : View.GONE);
         menuBtn.setOpen(barOpen);
+        showUpdateBadge();
     }
 
     // ---------------- escritorios (a los lados) y apps ----------------
@@ -704,9 +727,17 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                         isLauncher() ? "Mesa Doble es tu launcher (tocar para dejar de usarla)" : "Usar Mesa Doble como launcher de este teléfono", this::toggleLauncher)
                 .option(Ui.GEAR, "Revisar configuración", principal ? "Permisos del principal" : "Permisos del extendido", () -> checkSetup(true))
                 .option(Ui.WIFI, "Conexión", statusText, this::showConnection)
-                .option(Ui.NOTE, "Acerca de la app", "Versión " + Updater.clean(Updater.installedVersion(this)), this::about)
+                .option(Ui.NOTE, "Acerca de la app", Updater.updateAvailable(this)
+                        ? "Hay una versión nueva: " + Updater.latestKnown(this) : "Versión " + Updater.clean(Updater.installedVersion(this)), this::about)
+                .badgeIf(Updater.updateAvailable(this), "1")
                 .button("Cerrar", false, null)
                 .show();
+    }
+
+    /** Círculo rojo en Ajustes cuando hay una versión nueva publicada. */
+    private void showUpdateBadge() {
+        if (settingsBtn != null) settingsBtn.setBadge(Updater.updateAvailable(this));
+        if (menuBtn != null) menuBtn.setBadge(Updater.updateAvailable(this) && !barOpen);
     }
 
     /** Acerca de: versión de este teléfono y del otro, para saber si los dos están al día. */
@@ -735,7 +766,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         new Ui.Sheet(this)
                 .title("Acerca de Mesa Doble")
                 .message(sb.toString())
-                .option(Ui.RECEIVE, "Buscar actualización", null, () -> Updater.check(this, hub))
+                .option(Ui.RECEIVE, Updater.updateAvailable(this) ? "Actualizar a la versión " + Updater.latestKnown(this) : "Buscar actualización",
+                        null, () -> Updater.check(this, hub))
+                .badgeIf(Updater.updateAvailable(this), "1")
                 .button("Cerrar", false, null)
                 .show();
     }
@@ -880,6 +913,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .option(Ui.IMAGE, "Imagen", "Una foto de la galería", this::pickImage)
                 .option(Ui.BATTERY, "Batería", "Nivel de batería del principal y del extendido", this::addBattery)
                 .option(Ui.CLOCK, "Reloj", "Hora, fecha y próxima alarma; al tocarlo abre las alarmas", this::addClock)
+                .option(Ui.GRID, "Apps recientes", "Barra con las apps abiertas del principal: toca una para cambiar a ella", this::addRecents)
                 .option(Ui.WIDGETS, "Widget", "Widgets de tus apps (clima, calendario, música...)", this::addWidget)
                 .option(Ui.FOLDER, "Archivos", "Pasar archivos entre los dos teléfonos", this::openFiles)
                 .option(Ui.SEND, "Control de video", "Play/pausa, adelantar y volumen de lo que se ve en el principal",
@@ -914,6 +948,61 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         it.x = p[0]; it.y = p[1];
         addItem(it);
     }
+
+    private void addRecents() {
+        Item it = new Item();
+        it.kind = Item.RECENTS;
+        it.w = sized(0.7);
+        double[] p = desk.spot(it.w);
+        it.x = p[0]; it.y = p[1];
+        addItem(it);
+        pollRecents.run();
+        if (hub.isPrincipal() && !RecentApps.hasAccess(this)) askRecentsAccess();
+    }
+
+    /** Las apps recientes se leen con el "Acceso a datos de uso" del principal. */
+    private void askRecentsAccess() {
+        new Ui.Sheet(this)
+                .title("Apps recientes")
+                .message("Para saber qué apps están abiertas, Android pide activar Mesa Doble en \"Acceso a datos de uso\" "
+                        + "(en el PRINCIPAL). Se abre esa pantalla: busca Mesa Doble, actívalo y vuelve.")
+                .button("Ahora no", false, null)
+                .button("Abrir ajustes", true, () -> {
+                    try { startActivity(RecentApps.accessIntent()); }
+                    catch (Exception e) { Toast.makeText(this, "No pude abrir los ajustes", Toast.LENGTH_SHORT).show(); }
+                })
+                .show();
+    }
+
+    @Override public void onRecent(String pkg, String label) {
+        if (pkg == null) {
+            if (hub.isPrincipal()) askRecentsAccess();
+            else if (hub.connected()) {
+                hub.send("recAccess");
+                Toast.makeText(this, "Activa el acceso en el principal", Toast.LENGTH_SHORT).show();
+            }
+            return;
+        }
+        openOnPrincipal(pkg, label);
+        main.postDelayed(pollRecents, 1500);
+    }
+
+    /** Mientras se ve el widget, la lista se refresca cada 4 segundos (solo viaja si cambió). */
+    private final Runnable pollRecents = new Runnable() {
+        @Override public void run() {
+            main.removeCallbacks(this);
+            if (!resumed) return;
+            if (!desk.hasRecentsWidget()) { /* nada que mostrar */ }
+            else if (hub.isPrincipal()) {
+                RecentApps.worker.execute(() -> {
+                    org.json.JSONObject m = RecentApps.message(getApplicationContext());
+                    main.post(() -> desk.setRecents(m));
+                });
+            } else if (hub.connected()) hub.send("recReq", "sig", desk.recentsSig());
+            main.postDelayed(this, 4000);
+        }
+    };
+    private boolean resumed;
 
     /** El gestor de archivos se abre en los dos teléfonos: cada uno maneja su ventana. */
     private void openFiles() {
@@ -1089,6 +1178,10 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             bp.setMargins(dp(12), 0, dp(12), dp(14));
         }
         dock.setLayoutParams(bp);
+        FrameLayout.LayoutParams np = (FrameLayout.LayoutParams) navPill.getLayoutParams();
+        np.gravity = (stacked() && ds == 0 ? Gravity.TOP : Gravity.BOTTOM) | Gravity.CENTER_HORIZONTAL;
+        np.setMargins(0, dp(12), 0, dp(stacked() ? 12 : 14));
+        navPill.setLayoutParams(np);
 
         otherSide = -1;
         hub.setSide(side);
@@ -1573,6 +1666,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
         switch (t) {
+            case "recList":
+                main.post(() -> desk.setRecents(m));
+                break;
             case "hello":
                 otherSide = m.optInt("side", -1);
                 otherVersion = m.optString("ver", "");

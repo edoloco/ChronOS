@@ -78,6 +78,12 @@ public class SquareButton extends View {
 
     private boolean compact;
     /** Versión chica, solo ícono (para la barra superior del teclado). */
+    private boolean badge;
+    private final android.graphics.Paint badgePaint = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+
+    /** Círculo rojo de aviso en la esquina (por ejemplo: hay una actualización). */
+    public void setBadge(boolean b) { if (badge != b) { badge = b; invalidate(); } }
+
     public void setCompact(boolean c) { compact = c; requestLayout(); invalidate(); }
 
     private boolean open;
@@ -95,7 +101,7 @@ public class SquareButton extends View {
     }
 
     @Override protected void onMeasure(int w, int h) {
-        int s = Math.round((compact ? 38 : 52) * dp);
+        int s = Math.round((compact ? 32 : 52) * dp);
         setMeasuredDimension(s, s);
     }
 
@@ -138,7 +144,7 @@ public class SquareButton extends View {
         if (CardTheme.isGlass() && !CardTheme.isAero() && !primary) c.drawRoundRect(new RectF(dp / 2, dp / 2, w - dp / 2, h - dp / 2), r, r, border);
         c.save();
         c.rotate(rot, w / 2, h / 2);
-        float cx = w / 2, cy = compact ? h / 2 : h * 0.42f, u = (compact ? 6 : 7) * dp;   // u: unidad del ícono
+        float cx = w / 2, cy = compact ? h / 2 : h * 0.42f, u = (compact ? 5 : 7) * dp;   // u: unidad del ícono
         int ink = fgColor;
         if (kind == STATUS) ink = statusLevel == 2 ? accent : statusLevel == 1 ? warn : 0xFF8798A9;
         stroke.setColor(ink);
@@ -242,6 +248,16 @@ public class SquareButton extends View {
                 }
                 c.drawCircle(cx, cy + u * 0.5f, 2 * dp, fill);
                 break;
+        }
+        if (badge) {
+            c.restore();
+            c.save();
+            float br = 6 * dp, bx = w - br - 2 * dp, by = br + 2 * dp;
+            badgePaint.setColor(0xFFFFFFFF);
+            c.drawCircle(bx, by, br + 1.5f * dp, badgePaint);
+            badgePaint.setColor(0xFFE53935);
+            c.drawCircle(bx, by, br, badgePaint);
+            c.rotate(rot, w / 2, h / 2);
         }
         label.setColor(kind == STATUS ? ink : fgColor);
         if (!compact) {

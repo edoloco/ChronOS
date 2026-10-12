@@ -84,16 +84,20 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(night ? 0xFF121920 : 0xFFCDD5DC);
 
-        LinearLayout top = new LinearLayout(this);
+        // barra superior: estado a la izquierda, botones de navegación SIEMPRE al centro, opciones a la derecha
+        LinearLayout left = new LinearLayout(this), navRow = new LinearLayout(this), top = new LinearLayout(this);
+        left.setGravity(Gravity.CENTER_VERTICAL);
+        navRow.setGravity(Gravity.CENTER);
         top.setOrientation(LinearLayout.HORIZONTAL);
-        top.setGravity(Gravity.CENTER_VERTICAL);
-        top.setPadding(dp(12), dp(6), dp(6), dp(2));
+        top.setGravity(Gravity.CENTER_VERTICAL | Gravity.END);
+        CenterBar bar3 = new CenterBar(this, left, navRow, top);
+        bar3.setPadding(dp(12), dp(4), dp(6), dp(4));
         status = new TextView(this);
         status.setTextSize(13);
         status.setSingleLine(true);
         status.setEllipsize(TextUtils.TruncateAt.END);
         status.setOnClickListener(v -> help());
-        top.addView(status, new LinearLayout.LayoutParams(0, -2, 1));
+        left.addView(status, new LinearLayout.LayoutParams(-1, -2));
         // Atrás, Inicio y Recientes del PRINCIPAL, junto al indicador "Escribiendo en el principal"
         int[] kinds = {SquareButton.BACK, SquareButton.HOME, SquareButton.RECENTS};
         String[] labels = {"Atrás", "Inicio", "Recientes"}, keys = {"back", "home", "recents"};
@@ -104,11 +108,9 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
             sb.setCompact(true);
             sb.setOnClickListener(v -> hub.send("nav", "k", k));
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
-            lp.setMarginEnd(dp(6));
-            top.addView(sb, lp);
+            lp.setMargins(dp(4), 0, dp(4), 0);
+            navRow.addView(sb, lp);
         }
-        View gap = new View(this);
-        top.addView(gap, new LinearLayout.LayoutParams(dp(6), 1));
         editBtn = chip("Editar", v -> toggleEdit());
         resetBtn = chip("Restablecer", v -> { gamepad.resetLayout(); prefs.edit().remove("padLayout").apply(); });
         modeBtn = chip(NAMES[mode], v -> pickMode());
@@ -117,7 +119,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         pairBtn = chip("Vincular", v -> pairBluetooth());
         top.addView(sendBtn); top.addView(pairBtn); top.addView(outBtn); top.addView(resetBtn); top.addView(editBtn); top.addView(modeBtn);
         top.addView(chip("Cerrar", v -> close()));
-        root.addView(top, new LinearLayout.LayoutParams(-1, dp(44)));
+        root.addView(bar3, new LinearLayout.LayoutParams(-1, dp(44)));
 
         content = new LinearLayout(this);
         root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -448,6 +450,45 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     }
 
     private int dp(float v) { return Math.round(v * getResources().getDisplayMetrics().density); }
+
+    /**
+     * Tres zonas: izquierda, centro y derecha. El centro queda en el medio exacto de la pantalla; solo si la
+     * derecha no deja espacio se corre lo justo a la izquierda. La izquierda usa lo que sobra.
+     */
+    static class CenterBar extends android.view.ViewGroup {
+        private final View l, c, r;
+        CenterBar(Context ctx, View left, View center, View right) {
+            super(ctx);
+            l = left; c = center; r = right;
+            addView(l); addView(c); addView(r);
+        }
+        @Override protected void onMeasure(int ws, int hs) {
+            int W = MeasureSpec.getSize(ws), H = MeasureSpec.getSize(hs);
+            int ih = Math.max(0, H - getPaddingTop() - getPaddingBottom()), iw = Math.max(0, W - getPaddingLeft() - getPaddingRight());
+            int hSpec = MeasureSpec.makeMeasureSpec(ih, MeasureSpec.AT_MOST);
+            c.measure(MeasureSpec.makeMeasureSpec(iw, MeasureSpec.AT_MOST), hSpec);
+            r.measure(MeasureSpec.makeMeasureSpec(Math.max(0, iw - c.getMeasuredWidth()), MeasureSpec.AT_MOST), hSpec);
+            int[] x = place(W);
+            l.measure(MeasureSpec.makeMeasureSpec(Math.max(0, x[0] - getPaddingLeft() - (int) (8 * getResources().getDisplayMetrics().density)),
+                    MeasureSpec.EXACTLY), hSpec);
+            setMeasuredDimension(W, H);
+        }
+        /** {x del centro, x de la derecha} */
+        private int[] place(int W) {
+            int cw = c.getMeasuredWidth(), rx = W - getPaddingRight() - r.getMeasuredWidth();
+            int cx = Math.min((W - cw) / 2, rx - cw);
+            return new int[]{Math.max(getPaddingLeft(), cx), rx};
+        }
+        @Override protected void onLayout(boolean ch, int a, int b, int cc, int d) {
+            int W = getWidth(), H = getHeight();
+            int[] x = place(W);
+            lay(l, getPaddingLeft(), H); lay(c, x[0], H); lay(r, x[1], H);
+        }
+        private static void lay(View v, int x, int H) {
+            int y = (H - v.getMeasuredHeight()) / 2;
+            v.layout(x, y, x + v.getMeasuredWidth(), y + v.getMeasuredHeight());
+        }
+    }
 
     private TextView chip(String t, View.OnClickListener l) {
         TextView b = new TextView(this);

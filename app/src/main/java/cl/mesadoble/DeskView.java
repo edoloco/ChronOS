@@ -63,6 +63,124 @@ public class DeskView extends View {
         void onOpenAlarms();
         /** {nivel principal, cargando principal, nivel extendido, cargando extendido}; -1 = sin dato. */
         int[] battery();
+        /** Widget de apps recientes: abrir esa app en el principal (pkg null = pedir el permiso de uso). */
+        void onRecent(String pkg, String label);
+    }
+
+    // ---------------- apps recientes del principal ----------------
+
+    static final class Recent { String pkg, label; Bitmap icon; float ax = Float.NaN, appear; }
+    private final List<Recent> recents = new ArrayList<>();
+    private boolean recentsAccess = true, recentsLoaded;
+    private String recentsSig = "", recPressed = "";
+    private long recPressAt;
+    private final Paint recHi = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+    public String recentsSig() { return recentsLoaded ? recentsSig : "?"; }
+
+    public boolean hasRecentsWidget() {
+        for (Item it : items) if (Item.RECENTS.equals(it.kind) && it.page == page) return true;
+        return false;
+    }
+
+    /** Lista recibida del principal (o calculada aquí si este es el principal). */
+    public void setRecents(org.json.JSONObject m) {
+        recentsLoaded = true;
+        recentsAccess = m.optBoolean("access", true);
+        String sig = m.optString("sig");
+        if (sig.equals(recentsSig)) { invalidate(); return; }
+        recentsSig = sig;
+        Map<String, Recent> old = new HashMap<>();
+        for (Recent x : recents) old.put(x.pkg, x);
+        List<Recent> n = new ArrayList<>();
+        org.json.JSONArray a = m.optJSONArray("apps");
+        for (int i = 0; a != null && i < a.length(); i++) {
+            org.json.JSONObject o = a.optJSONObject(i);
+            if (o == null) continue;
+            Recent x = old.get(o.optString("p"));
+            if (x == null) {
+                x = new Recent();
+                x.pkg = o.optString("p");
+                try {
+                    byte[] b = Base64.decode(o.optString("i"), Base64.DEFAULT);
+                    x.icon = BitmapFactory.decodeByteArray(b, 0, b.length);
+                } catch (Exception ignored) { }
+            }
+            x.label = o.optString("l");
+            n.add(x);
+        }
+        recents.clear();
+        recents.addAll(n);
+        invalidate();
+    }
+
+    /** {inicio x, ancho de cada botón, cuántos caben/se muestran, arriba, abajo} */
+    private float[] recentsLayout(float width, float h) {
+        float top = 26 * dp, bottom = h - 8 * dp, pad = 10 * dp;
+        float slot = Math.min(62 * dp, bottom - top + 4 * dp);
+        int fit = Math.max(1, (int) ((width - 2 * pad) / slot));
+        int n = Math.min(fit, recents.size());
+        return new float[]{pad + ((width - 2 * pad) - n * slot) / 2, slot, n, top, bottom};
+    }
+
+    /** Botonera animada: los íconos se deslizan a su nuevo lugar y aparecen creciendo; la app actual va resaltada. */
+    private void drawRecents(Canvas c, float width, float h) {
+        if (!recentsAccess || !recentsLoaded || recents.isEmpty()) {
+            small.setColor(muted);
+            small.setTextSize(13 * dp);
+            String t = !recentsLoaded ? "Buscando apps recientes del principal…" : !recentsAccess
+                    ? "Toca para permitir \"Acceso a datos de uso\" en el principal" : "Aún no hay apps recientes";
+            t = ellipsize(t, small, width - 20 * dp);
+            c.drawText(t, width / 2 - small.measureText(t) / 2, (26 * dp + h) / 2 + 4 * dp, small);
+            return;
+        }
+        float[] L = recentsLayout(width, h);
+        float startX = L[0], slot = L[1], top = L[3], bottom = L[4];
+        int n = (int) L[2];
+        float icon = Math.min(slot - 16 * dp, bottom - top - 14 * dp);
+        long now = android.os.SystemClock.uptimeMillis();
+        boolean again = false;
+        for (int i = n; i < recents.size(); i++) { recents.get(i).ax = Float.NaN; recents.get(i).appear = 0; }
+        // resaltado de la app actual (la primera): una pastilla que se desliza
+        Recent cur = recents.get(0);
+        if (Float.isNaN(cur.ax)) { cur.ax = 0.8f; cur.appear = 0; }
+        float hx = startX + (cur.ax + 0.5f) * slot;
+        recHi.setColor((accent & 0x00FFFFFF) | 0x38000000);
+        c.drawRoundRect(new RectF(hx - slot / 2 + 3 * dp, top, hx + slot / 2 - 3 * dp, bottom), 14 * dp, 14 * dp, recHi);
+        recHi.setColor(accent);
+        c.drawCircle(hx, bottom - 5 * dp, 2.6f * dp, recHi);
+        for (int i = 0; i < n; i++) {
+            Recent x = recents.get(i);
+            if (Float.isNaN(x.ax)) { x.ax = i + 0.8f; x.appear = 0; }
+            x.ax += (i - x.ax) * 0.2f;
+            if (Math.abs(i - x.ax) > 0.01f) again = true; else x.ax = i;
+            x.appear += (1 - x.appear) * 0.16f;
+            if (1 - x.appear > 0.01f) again = true; else x.appear = 1;
+            float cx = startX + (x.ax + 0.5f) * slot, cy = (top + bottom) / 2 - 3 * dp;
+            float s = icon * (0.35f + 0.65f * x.appear);
+            if (x.pkg.equals(recPressed)) {
+                float t = (now - recPressAt) / 380f;
+                if (t < 1) { s *= 1 - 0.22f * (float) Math.sin(Math.PI * t); again = true; }
+            }
+            if (x.icon == null) continue;
+            bmpPaint.setAlpha(Math.round(255 * x.appear));
+            c.drawBitmap(x.icon, null, new RectF(cx - s / 2, cy - s / 2, cx + s / 2, cy + s / 2), bmpPaint);
+        }
+        bmpPaint.setAlpha(255);
+        if (again) postInvalidateOnAnimation();
+    }
+
+    private void tapRecents(float lx, float ly, float width, float h) {
+        if (host == null) return;
+        if (!recentsAccess) { host.onRecent(null, null); return; }
+        float[] L = recentsLayout(width, h);
+        int i = (int) Math.floor((lx - L[0]) / L[1]);
+        if (i < 0 || i >= (int) L[2] || ly < L[3] - 8 * dp) return;
+        Recent x = recents.get(i);
+        recPressed = x.pkg;
+        recPressAt = android.os.SystemClock.uptimeMillis();
+        invalidate();
+        host.onRecent(x.pkg, x.label);
     }
 
     /** Alto de la franja superior de un widget (nombre y botones); el widget va debajo. */
@@ -639,6 +757,8 @@ public class DeskView extends View {
             it.hPx = Math.max(118 * dp, width * 0.52f);
         } else if (Item.BATTERY.equals(it.kind)) {
             it.hPx = Math.max(128 * dp, width * 0.42f);
+        } else if (Item.RECENTS.equals(it.kind)) {
+            it.hPx = 96 * dp;
         } else {
             it.hPx = 132 * dp;
         }
@@ -654,7 +774,7 @@ public class DeskView extends View {
         RectF box = new RectF(0, 0, width, h);
 
         boolean isNote = Item.NOTE.equals(it.kind), isImg = Item.IMG.equals(it.kind), isApp = Item.APP.equals(it.kind),
-                isWidget = Item.WIDGET.equals(it.kind), isClock = Item.CLOCK.equals(it.kind), isBatt = Item.BATTERY.equals(it.kind);
+                isWidget = Item.WIDGET.equals(it.kind), isClock = Item.CLOCK.equals(it.kind), isBatt = Item.BATTERY.equals(it.kind), isRec = Item.RECENTS.equals(it.kind);
         boolean glassCard = CardTheme.isGlass() && !isNote && !isImg;
         boolean aeroCard = glassCard && CardTheme.isAero();
         boolean intense = glassCard && CardTheme.isIntense();
@@ -690,8 +810,11 @@ public class DeskView extends View {
 
         int ink = isNote || isImg ? 0xFF2B2A22 : fg;
         label.setColor((ink & 0x00FFFFFF) | 0x77000000);
-        String tag = isNote ? "NOTA" : isImg ? "IMAGEN" : isApp ? "APP" : isWidget ? "WIDGET" : isClock ? "RELOJ" : isBatt ? "BATERÍA" : "ENLACE";
-        if (isBatt) {
+        String tag = isNote ? "NOTA" : isImg ? "IMAGEN" : isApp ? "APP" : isWidget ? "WIDGET" : isClock ? "RELOJ" : isBatt ? "BATERÍA" : isRec ? "APPS RECIENTES" : "ENLACE";
+        if (isRec) {
+            c.drawText(tag, 10 * dp, 18 * dp, label);
+            drawRecents(c, width, h);
+        } else if (isBatt) {
             c.drawText(tag, 10 * dp, 18 * dp, label);
             int[] b = host != null ? host.battery() : new int[]{-1, 0, -1, 0};
             drawBattery(c, "Principal", b[0], b[1] == 1, width, h * 0.40f);
@@ -1114,6 +1237,7 @@ public class DeskView extends View {
             else host.onWidgetTap(it);
         }
         else if (Item.CLOCK.equals(it.kind)) { if (host != null) host.onOpenAlarms(); }
+        else if (Item.RECENTS.equals(it.kind)) { if (downLocal != null) tapRecents(downLocal[0], downLocal[1], downLocal[2], downLocal[3]); }
         else { it.z = System.currentTimeMillis(); invalidate(); }
     }
 }

@@ -1,0 +1,107 @@
+package cl.mesadoble;
+
+import android.app.AppOpsManager;
+import android.app.usage.UsageEvents;
+import android.app.usage.UsageStatsManager;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import android.os.Process;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+/**
+ * Apps recientes del PRINCIPAL (las que están abiertas o se usaron hace poco), para el widget "Apps recientes".
+ * Android solo lo permite con el "Acceso a datos de uso", que se activa a mano en Ajustes del principal.
+ *   recReq  (extendido → principal) {sig}: pide la lista; si no cambió no se responde
+ *   recList (principal → extendido) {sig, access, apps:[{p, l, i}]}
+ */
+final class RecentApps {
+
+    static final int MAX = 10;
+    private static final Map<String, String> icons = new HashMap<>(), labels = new HashMap<>();
+    static final ExecutorService worker = Executors.newSingleThreadExecutor();
+
+    private RecentApps() { }
+
+    static boolean hasAccess(Context c) {
+        try {
+            AppOpsManager ao = (AppOpsManager) c.getSystemService(Context.APP_OPS_SERVICE);
+            return ao != null && ao.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), c.getPackageName())
+                    == AppOpsManager.MODE_ALLOWED;
+        } catch (Exception e) { return false; }
+    }
+
+    static Intent accessIntent() { return new Intent("android.settings.USAGE_ACCESS_SETTINGS"); }
+
+    /** Paquetes recientes, el más reciente primero. */
+    static List<String> packages(Context c) {
+        List<String> out = new ArrayList<>();
+        UsageStatsManager um = (UsageStatsManager) c.getSystemService(Context.USAGE_STATS_SERVICE);
+        if (um == null) return out;
+        long now = System.currentTimeMillis();
+        final Map<String, Long> last = new HashMap<>();
+        try {
+            UsageEvents ev = um.queryEvents(now - 2L * 24 * 3600 * 1000, now);
+            UsageEvents.Event e = new UsageEvents.Event();
+            while (ev.hasNextEvent()) {
+                ev.getNextEvent(e);
+                if (e.getEventType() == 1 /* ACTIVITY_RESUMED / MOVE_TO_FOREGROUND */) last.put(e.getPackageName(), e.getTimeStamp());
+            }
+        } catch (Exception ignored) { }
+        PackageManager pm = c.getPackageManager();
+        Set<String> skip = new HashSet<>();
+        skip.add(c.getPackageName());
+        skip.add("com.android.systemui");
+        skip.add("android");
+        for (ResolveInfo ri : pm.queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0))
+            skip.add(ri.activityInfo.packageName);   // pantallas de inicio
+        List<String> pk = new ArrayList<>(last.keySet());
+        Collections.sort(pk, (a, b) -> Long.compare(last.get(b), last.get(a)));
+        for (String p : pk) {
+            if (skip.contains(p) || pm.getLaunchIntentForPackage(p) == null) continue;
+            out.add(p);
+            if (out.size() >= MAX) break;
+        }
+        return out;
+    }
+
+    static String sig(List<String> pk) { return android.text.TextUtils.join(",", pk); }
+
+    /** Mensaje con la lista (íconos incluidos). */
+    static JSONObject message(Context c) {
+        boolean access = hasAccess(c);
+        List<String> pk = access ? packages(c) : new ArrayList<>();
+        JSONObject m = new JSONObject();
+        JSONArray arr = new JSONArray();
+        PackageManager pm = c.getPackageManager();
+        int size = Math.round(64 * c.getResources().getDisplayMetrics().density);
+        for (String p : pk) {
+            try {
+                if (!icons.containsKey(p)) {
+                    android.content.pm.ApplicationInfo ai = pm.getApplicationInfo(p, 0);
+                    icons.put(p, AppsDialog.iconPng(pm.getApplicationIcon(ai), Math.min(144, size)));
+                    labels.put(p, String.valueOf(pm.getApplicationLabel(ai)));
+                }
+                JSONObject o = new JSONObject();
+                o.put("p", p); o.put("l", labels.get(p)); o.put("i", icons.get(p));
+                arr.put(o);
+            } catch (Exception ignored) { }
+        }
+        try { m.put("t", "recList"); m.put("sig", (access ? "" : "-") + sig(pk)); m.put("access", access); m.put("apps", arr); } catch (JSONException ignored) { }
+        return m;
+    }
+}

@@ -168,7 +168,32 @@ public class Ui {
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
             lp.topMargin = px(hasOptions ? 8 : 14);
             options.addView(rowV, lp);
+            lastRow = rowV;
             hasOptions = true;
+            return this;
+        }
+
+        private LinearLayout lastRow;
+
+        /** Círculo rojo de aviso en la última opción agregada (con un texto corto opcional, como "1"). */
+        public Sheet badgeIf(boolean on, String text) { return on ? badge(text) : this; }
+
+        public Sheet badge(String text) {
+            if (lastRow == null) return this;
+            TextView b = new TextView(a);
+            b.setText(text == null ? "" : text);
+            b.setTextSize(12);
+            b.setTypeface(Typeface.DEFAULT_BOLD);
+            b.setTextColor(0xFFFFFFFF);
+            b.setGravity(Gravity.CENTER);
+            GradientDrawable g = new GradientDrawable();
+            g.setShape(GradientDrawable.OVAL);
+            g.setColor(0xFFE53935);
+            g.setStroke(px(2), 0xFFFFFFFF);
+            b.setBackground(g);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(px(22), px(22));
+            lp.setMarginStart(px(8));
+            lastRow.addView(b, lp);
             return this;
         }
 
