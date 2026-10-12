@@ -189,12 +189,13 @@ public class DeskView extends View {
         fg = CardTheme.fg(night);
         muted = CardTheme.muted(night);
         glassEdge.setColor(CardTheme.stroke());
+        blurDirty = true;
         invalidate();
     }
 
     public boolean isDragging(Item it) { return dragging == it || (editing == it && mode != NONE); }
-    public void setSide(int s) { side = s; invalidate(); }
-    public void setVertical(boolean v) { vertical = v; invalidate(); }
+    public void setSide(int s) { side = s; blurDirty = true; invalidate(); }
+    public void setVertical(boolean v) { vertical = v; blurDirty = true; invalidate(); }
     public boolean isVertical() { return vertical; }
 
     // ---- geometría según cómo están unidos los teléfonos
@@ -475,18 +476,58 @@ public class DeskView extends View {
 
     // ---------------- dibujo ----------------
 
-    @Override protected void onDraw(Canvas c) {
-        int W = getWidth(), H = getHeight();
-        clockTick = false;
+    private boolean blurDirty = true;
+    private final Paint blob = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+    @Override protected void onSizeChanged(int w, int h, int ow, int oh) { super.onSizeChanged(w, h, ow, oh); blurDirty = true; }
+
+    /** Fondo de la mesa: color, brillo en la unión, manchas de luz (cristal intenso) y puntos. */
+    private void drawDesk(Canvas c, int W, int H) {
         c.drawRect(0, 0, W, H, bg);
         // brillo centrado en la unión de los teléfonos: se ve continuo entre ambos
         float gx = vertical ? W / 2f : (1 - side) * W, gy = vertical ? (1 - side) * H : H * 0.45f;
         glow.setShader(new RadialGradient(gx, gy, Math.max(W, H) * 0.95f, deskColor2, deskColor, Shader.TileMode.CLAMP));
         c.drawRect(0, 0, W, H, glow);
+        if (Glass.on()) {
+            // manchas de luz de colores, continuas entre los dos teléfonos: el vidrio las desenfoca
+            float ox = vertical ? 0 : side * W, oy = vertical ? side * H : 0;
+            float GW = vertical ? W : 2f * W, GH = vertical ? 2f * H : H;
+            float[][] spots = {{0.18f, 0.28f, 40}, {0.78f, 0.72f, -50}, {0.52f, 0.12f, 160}, {0.35f, 0.85f, 95}, {0.92f, 0.2f, -120}};
+            float[] hsv = new float[3];
+            Color.colorToHSV(deskColor, hsv);
+            boolean darkD = CardTheme.dark(deskColor);
+            for (float[] sp : spots) {
+                float[] h2 = {(hsv[0] + sp[2] + 360) % 360, Math.max(0.45f, Math.min(0.8f, hsv[1] + 0.35f)), darkD ? 0.75f : 0.98f};
+                int col = Color.HSVToColor(darkD ? 0x8C : 0x99, h2);
+                float cx = sp[0] * GW - ox, cy = sp[1] * GH - oy, rad = Math.max(W, H) * 0.42f;
+                blob.setShader(new RadialGradient(cx, cy, rad, col, col & 0x00FFFFFF, Shader.TileMode.CLAMP));
+                c.drawCircle(cx, cy, rad, blob);
+            }
+        }
         float step = 22 * dp;
         float offX = vertical ? 0 : (side * W) % step, offY = vertical ? (side * H) % step : 0;
         for (float x = step / 2 - offX; x < W; x += step)
             for (float y = step / 2 - offY; y < H; y += step) c.drawCircle(x, y, 1.2f * dp, dot);
+    }
+
+    /** Copia desenfocada del fondo: es lo que se ve a través del cristal intenso. */
+    private void rebuildBlur(int W, int H) {
+        blurDirty = false;
+        int bw = Math.max(1, W / 4), bh = Math.max(1, H / 4);
+        Bitmap b = Glass.blur != null && Glass.blur.getWidth() == bw && Glass.blur.getHeight() == bh && Glass.desk.get() == this
+                ? Glass.blur : Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888);
+        Canvas bc = new Canvas(b);
+        bc.scale(bw / (float) W, bh / (float) H);
+        drawDesk(bc, W, H);
+        Glass.boxBlur(b, Math.max(2, Math.round(7 * dp)));
+        Glass.setBlur(b, this);
+    }
+
+    @Override protected void onDraw(Canvas c) {
+        int W = getWidth(), H = getHeight();
+        clockTick = false;
+        drawDesk(c, W, H);
+        if (Glass.on() && (blurDirty || Glass.blur == null || Glass.desk.get() != this) && W > 0 && H > 0) rebuildBlur(W, H);
 
         boolean hot = !remoteDrags.isEmpty();
         if (dragging != null) {
@@ -616,17 +657,30 @@ public class DeskView extends View {
                 isWidget = Item.WIDGET.equals(it.kind), isClock = Item.CLOCK.equals(it.kind), isBatt = Item.BATTERY.equals(it.kind);
         boolean glassCard = CardTheme.isGlass() && !isNote && !isImg;
         boolean aeroCard = glassCard && CardTheme.isAero();
+        boolean intense = glassCard && CardTheme.isIntense();
         // Aero: texto oscuro con halo blanco (como los títulos de Windows 7)
         for (Paint tp : new Paint[]{small, label, clockPaint}) {
-            if (aeroCard) Aero.glowText(tp, dp); else tp.clearShadowLayer();
+            if (aeroCard) Aero.glowText(tp, dp); else if (intense) Glass.text(tp, dp); else tp.clearShadowLayer();
         }
         float rr = isApp ? 18 * dp : glassCard ? 14 * dp : r;
         card.setColor(isNote ? it.color : isImg ? 0xFFFFFFFF : linkBg);
         if (glassCard) card.clearShadowLayer();   // una sombra se vería como mancha detrás del vidrio
         else card.setShadowLayer((lifted ? 18 : 10) * dp, 0, (lifted ? 10 : 5) * dp, 0x55000000);
-        if (aeroCard) Aero.draw(c, box, rr, CardTheme.aeroTint(), dp);
+        if (intense) {
+            // cristal intenso: sombra profunda y, dentro, el fondo desenfocado que queda justo detrás
+            Glass.shadow(c, box, rr, dp, lifted);
+            final float W = getWidth(), H = getHeight(), cx = width / 2, cy = h / 2, rot = it.rot;
+            Glass.body(c, box, rr, dp, Glass.blur == null ? null : () -> {
+                c.save();
+                if (lifted) c.scale(1 / 1.03f, 1 / 1.03f, cx, cy);
+                c.rotate(-rot, cx, cy);
+                c.translate(-left, -top);
+                Glass.drawBlur(c, W, H);
+                c.restore();
+            });
+        } else if (aeroCard) Aero.draw(c, box, rr, CardTheme.aeroTint(), dp);
         else c.drawRoundRect(box, rr, rr, card);
-        if (glassCard && !aeroCard) {
+        if (glassCard && !aeroCard && !intense) {
             // cristal: brillo arriba y un borde fino claro
             glassShine.setShader(new LinearGradient(0, 0, 0, h * 0.55f,
                     CardTheme.glass == CardTheme.GLASS_LIGHT ? 0x40FFFFFF : 0x22FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));

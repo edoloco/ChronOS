@@ -116,6 +116,8 @@ public class SquareButton extends View {
 
     @Override public boolean performClick() { return super.performClick(); }
 
+    private final android.graphics.Paint sheen = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+
     @Override protected void onDraw(Canvas c) {
         float w = getWidth(), h = getHeight(), r = 12 * dp;
         bg.setColor(pressed && !primary ? bgPressed : bgColor);
@@ -125,6 +127,13 @@ public class SquareButton extends View {
         } else {
             c.drawRoundRect(new RectF(0, 0, w, h), r, r, bg);
             label.clearShadowLayer();
+        }
+        if (CardTheme.isIntense() && !primary) {
+            // cristal intenso: brillo de arriba hacia abajo y sombra interior abajo
+            sheen.setShader(new android.graphics.LinearGradient(0, 0, 0, h, new int[]{0x4DFFFFFF, 0x0DFFFFFF, 0x26000000},
+                    new float[]{0, 0.5f, 1}, android.graphics.Shader.TileMode.CLAMP));
+            c.drawRoundRect(new RectF(0, 0, w, h), r, r, sheen);
+            if (!Glass.darkDesk()) label.setShadowLayer(3 * dp, 0, 0, 0x99FFFFFF); else label.setShadowLayer(3 * dp, 0, dp, 0x99000000);
         }
         if (CardTheme.isGlass() && !CardTheme.isAero() && !primary) c.drawRoundRect(new RectF(dp / 2, dp / 2, w - dp / 2, h - dp / 2), r, r, border);
         c.save();

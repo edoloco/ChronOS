@@ -29,12 +29,14 @@ import java.util.List;
 
 /**
  * Pantalla del teléfono que controla al principal, por la misma conexión WiFi de la mesa.
- * Modos: teclado, teclado + touchpad, touchpad, gamepad y dictado.
+ * Modos: teclado, teclado + touchpad, touchpad, gamepad, dictado y control de video.
  */
 public class KeyboardActivity extends Activity implements Link.Listener, KeyboardView.Sink {
 
-    static final int KB = 0, KB_PAD = 1, PAD = 2, GAME = 3, DICT = 4;
-    private static final String[] NAMES = {"Teclado", "Teclado + touchpad", "Touchpad", "Gamepad", "Dictado"};
+    static final int KB = 0, KB_PAD = 1, PAD = 2, GAME = 3, DICT = 4, MEDIA = 5;
+    private static final String[] NAMES = {"Teclado", "Teclado + touchpad", "Touchpad", "Gamepad", "Dictado", "Control de video"};
+    /** ¿Está a la vista el control de video? (para no abrirlo de nuevo) */
+    static boolean showingMedia;
 
     private boolean night;
     private SharedPreferences prefs;
@@ -42,6 +44,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     private KeyboardView keyboard;
     private TouchpadView touchpad;
     private GamepadView gamepad;
+    private MediaControlView mediaView;
     private EditText field;
     private LinearLayout content, suggestBar;
     private TextView status, modeBtn, editBtn, resetBtn, sendBtn, outBtn, pairBtn;
@@ -73,7 +76,8 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         MainActivity.applyOrientation(this);   // misma orientación que la mesa
         prefs = getSharedPreferences("mesa", MODE_PRIVATE);
-        mode = Math.min(DICT, Math.max(KB, prefs.getInt("kbMode3", KB)));
+        mode = Math.min(MEDIA, Math.max(KB, prefs.getInt("kbMode3", KB)));
+        mode = startMode(getIntent(), mode);
         dict = Dict.get(this);
 
         LinearLayout root = new LinearLayout(this);
@@ -176,6 +180,8 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
             @Override public void layoutChanged(String json) { prefs.edit().putString("padLayout", json).apply(); }
         });
 
+        mediaView = new MediaControlView(this, Hub.get(this));
+
         field = new EditText(this);
         field.setHint("Escribe o dicta aquí: aparece en el principal");
         field.setTextSize(20);
@@ -198,7 +204,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
 
     // ---------------- ciclo de vida ----------------
 
-    private boolean auto;
+    private boolean auto, resumed;
     private final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable autoClose = () -> { if (auto && !hub.remoteImeReady()) close(); };
 
@@ -210,13 +216,26 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
 
     @Override protected void onNewIntent(android.content.Intent i) {
         super.onNewIntent(i);
+        setIntent(i);
         auto = i.getBooleanExtra("auto", false);
+        int m = startMode(i, mode);
+        if (m != mode) { mode = m; arrange(); }
+    }
+
+    /** Modo pedido al abrir: el control de video (al empezar un video) o, si se abrió para escribir, un modo de teclado. */
+    private static int startMode(Intent i, int current) {
+        int m = i.getIntExtra("mode", -1);
+        if (m >= KB && m <= MEDIA) return m;
+        if (i.getBooleanExtra("auto", false) && current == MEDIA) return KB;
+        return current;
     }
 
     @Override protected void onResume() {
         super.onResume();
         auto = auto || getIntent().getBooleanExtra("auto", false);
-        hub.keyboardVisible = true;
+        resumed = true;
+        hub.keyboardVisible = mode != MEDIA;
+        showingMedia = mode == MEDIA;
         hub.add(this);
         hub.send("kbAsk");
     }
@@ -296,7 +315,9 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     }
 
     @Override protected void onPause() {
+        resumed = false;
         hub.keyboardVisible = false;
+        showingMedia = false;
         h.removeCallbacks(autoClose);
         hub.remove(this);
         super.onPause();
@@ -329,7 +350,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     /** Arma la pantalla según el modo y la orientación. */
     @SuppressWarnings("deprecation")
     private void arrange() {
-        for (View v : new View[]{keyboard, suggestBar, touchpad, gamepad, field}) detach(v);
+        for (View v : new View[]{keyboard, suggestBar, touchpad, gamepad, field, mediaView}) detach(v);
         content.removeAllViews();
         boolean land = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
         InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
@@ -377,6 +398,10 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
                 content.setOrientation(LinearLayout.VERTICAL);
                 content.addView(gamepad, new LinearLayout.LayoutParams(-1, -1));
                 break;
+            case MEDIA:
+                content.setOrientation(LinearLayout.VERTICAL);
+                content.addView(mediaView, new LinearLayout.LayoutParams(-1, -1));
+                break;
             default: {
                 getWindow().getDecorView().setSystemUiVisibility(0);
                 getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE | WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
@@ -388,19 +413,21 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
                 field.post(() -> { if (imm != null) imm.showSoftInput(field, InputMethodManager.SHOW_IMPLICIT); });
             }
         }
+        if (hub != null && resumed) { hub.keyboardVisible = mode != MEDIA; showingMedia = mode == MEDIA; }
         updateTouchpadHint();
         refreshSuggestions();
         syncBluetooth();
     }
 
     private void pickMode() {
-        int[] icons = {Ui.KEYBOARD, Ui.KB_TOUCHPAD, Ui.TOUCHPAD, Ui.GAMEPAD, Ui.MIC};
+        int[] icons = {Ui.KEYBOARD, Ui.KB_TOUCHPAD, Ui.TOUCHPAD, Ui.GAMEPAD, Ui.MIC, Ui.SEND};
         String[] subs = {
                 "Teclado completo con sugerencias",
                 "Teclado y touchpad juntos",
                 "Mover el puntero, clic, desplazar, atrás e inicio",
                 "Joystick, cruceta y botones que se pueden mover",
-                "Escribir con el teclado del teléfono o dictar por voz"};
+                "Escribir con el teclado del teléfono o dictar por voz",
+                "Play/pausa, adelantar 10 s y volumen del video del principal"};
         Ui.Sheet sh = new Ui.Sheet(this).title("¿Cómo quieres controlar el principal?");
         for (int i = 0; i < NAMES.length; i++) {
             final int m = i;
@@ -502,6 +529,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         if ("navAck".equals(t) && !m.optBoolean("ok"))
             android.widget.Toast.makeText(this, "Recientes necesita la versión completa en el principal", android.widget.Toast.LENGTH_SHORT).show();
         if ("kbState".equals(t) || "kbAck".equals(t)) updateStatus();
+        if (mediaView != null && t.startsWith("m")) mediaView.onMessage(m);
         // abierto solo (al tocar un campo en el principal): se cierra solo cuando ya no hay dónde escribir
         if ("kbState".equals(t) && auto && (mode == KB || mode == KB_PAD || mode == DICT)) {
             h.removeCallbacks(autoClose);

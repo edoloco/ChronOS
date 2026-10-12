@@ -71,13 +71,22 @@ public class Ui {
             bg.setColor(CardTheme.sheetFill(night(a)));
             if (CardTheme.isGlass()) bg.setStroke(px(1), CardTheme.stroke());
             bg.setCornerRadius(px(26));
-            if (CardTheme.isAero()) {
+            if (CardTheme.isIntense()) {
+                // cristal intenso: velo esmerilado con brillo arriba y sombra abajo (lo de atrás se ve borroso)
+                GradientDrawable sh = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{0x59FFFFFF, 0x0AFFFFFF, 0x2E000000});
+                sh.setCornerRadius(px(26));
+                GradientDrawable rim = new GradientDrawable();
+                rim.setColor(0x00000000);
+                rim.setCornerRadius(px(26));
+                rim.setStroke(px(1.5f), 0xD9FFFFFF);
+                card.setBackground(new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[]{bg, sh, rim}));
+            } else if (CardTheme.isAero()) {
                 // Aero: el vidrio de color con brillo, sobre un fondo claro para que se lea
                 android.graphics.drawable.LayerDrawable ld = new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[]{
                         bg, new Aero.Bg(CardTheme.aeroTint(), px(26), dp)});
                 card.setBackground(ld);
             } else card.setBackground(bg);
-            card.setElevation(px(12));
+            card.setElevation(px(CardTheme.isIntense() ? 28 : 12));
 
             title = new TextView(a);
             title.setTextSize(20);
@@ -212,7 +221,7 @@ public class Ui {
                     try {
                         w.addFlags(0x00000004 /* FLAG_BLUR_BEHIND */);
                         WindowManager.LayoutParams lp = w.getAttributes();
-                        WindowManager.LayoutParams.class.getMethod("setBlurBehindRadius", int.class).invoke(lp, px(28));
+                        WindowManager.LayoutParams.class.getMethod("setBlurBehindRadius", int.class).invoke(lp, px(CardTheme.isIntense() ? 70 : 28));
                         w.setAttributes(lp);
                     } catch (Exception ignored) { }
                 }

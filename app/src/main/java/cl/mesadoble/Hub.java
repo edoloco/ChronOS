@@ -70,8 +70,8 @@ public class Hub implements Link.Listener {
                 myBatt = pct; myChg = chg;
                 sendBattery();
             main.removeCallbacks(musicPoll);
-            musicChangedAt = 0;
             musicActive = false;
+            videoActive = false;
             main.postDelayed(musicPoll, 2000);
             }
         }, new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED));
@@ -253,8 +253,10 @@ public class Hub implements Link.Listener {
         // fotos, música y video: se ven en el principal; los controles, en el extendido
         if ("mPlay".equals(t)) { if (isPrincipal()) MediaHub.open(app, m.optString("kind"), MediaHub.paths(m), m.optInt("idx")); return; }
         if ("mCmd".equals(t)) { if (isPrincipal()) MediaHub.command(app, m); return; }
-        if ("mActive".equals(t) && !isPrincipal() && m.optBoolean("on") && m.optBoolean("fresh") && !RemoteActivity.extOpen)
-            MediaHub.openControls(app, "ext");
+        // un video empezó en el principal: el control de video se abre UNA vez (si se cierra, no vuelve hasta otro video)
+        if ("mActive".equals(t) && !isPrincipal() && m.optBoolean("on") && m.optBoolean("video") && m.optBoolean("fresh")
+                && !KeyboardActivity.showingMedia)
+            MediaHub.openControls(app, MediaHub.VIDEO);
         if ("mOpen".equals(t)) { if (!isPrincipal()) MediaHub.openControls(app, m.optString("kind")); return; }
         // widgets: todos viven en el principal
         if ("wList".equals(t)) { if (isPrincipal()) WidgetHub.get(app).sendProviders(this); return; }
@@ -427,7 +429,7 @@ public class Hub implements Link.Listener {
     }
 
     /** Multimedia y volumen: funcionan aunque el teclado receptor no esté activo. */
-    private void media(String k) {
+    void media(String k) {
         AudioManager am = (AudioManager) app.getSystemService(Context.AUDIO_SERVICE);
         if (am == null) return;
         switch (k) {
@@ -442,27 +444,44 @@ public class Hub implements Link.Listener {
         }
     }
 
-    // ---------------- video o música en otras apps del principal ----------------
-    // Sin permisos especiales, Android solo deja saber si algo está sonando: con eso el extendido
-    // muestra los controles (play/pausa, adelantar, siguiente, volumen) cuando empieza un video.
+    // ---------------- video en otras apps del principal ----------------
+    // Sin permisos especiales Android no dice si un video está en pantalla completa; sí dice qué TIPO de sonido
+    // se reproduce. Las apps de video (YouTube, Netflix, reproductores) lo marcan como "película": con eso el
+    // extendido abre el control de video una sola vez por video (vuelve a ofrecerse tras 1 minuto sin video).
 
-    private boolean musicActive;
-    private long musicChangedAt;
+    private boolean musicActive, videoActive, videoSession;
+    private long lastVideoAt;
     private final Runnable musicPoll = new Runnable() {
         @Override public void run() {
             if (!isPrincipal() || !connected()) return;
             AudioManager am = (AudioManager) app.getSystemService(Context.AUDIO_SERVICE);
             boolean on = am != null && am.isMusicActive() && MediaHub.current == null;   // los visores propios ya tienen sus controles
+            boolean video = on && moviePlaying(am);
             long now = SystemClock.uptimeMillis();
-            if (on != musicActive) {
-                boolean fresh = on && now - musicChangedAt > 8000;   // empezó algo nuevo (no una pausa corta)
+            boolean fresh = false;
+            if (video) {
+                lastVideoAt = now;
+                if (!videoSession) { videoSession = true; fresh = true; }
+            } else if (videoSession && now - lastVideoAt > 60000) videoSession = false;
+            if (on != musicActive || video != videoActive || fresh) {
                 musicActive = on;
-                musicChangedAt = now;
-                send("mActive", "on", on, "fresh", fresh);
+                videoActive = video;
+                send("mActive", "on", on, "video", video, "fresh", fresh);
             }
             main.postDelayed(this, 1500);
         }
     };
+
+    /** ¿Algo suena como película (video)? */
+    private static boolean moviePlaying(AudioManager am) {
+        try {
+            for (android.media.AudioPlaybackConfiguration pc : am.getActivePlaybackConfigurations()) {
+                android.media.AudioAttributes a = pc.getAudioAttributes();
+                if (a != null && a.getContentType() == android.media.AudioAttributes.CONTENT_TYPE_MOVIE) return true;
+            }
+        } catch (Exception ignored) { }
+        return false;
+    }
 
     private void mediaKey(AudioManager am, int code) {
         long t = SystemClock.uptimeMillis();

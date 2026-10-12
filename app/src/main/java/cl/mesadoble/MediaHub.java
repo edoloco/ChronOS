@@ -68,10 +68,13 @@ public class MediaHub {
     /** Abre la ventana de controles en ESTE teléfono. */
     static void openControls(Context c, String kind) {
         Hub hub = Hub.get(c);
-        Intent i = AUDIO.equals(kind) ? new Intent(c, PlayerActivity.class) : new Intent(c, RemoteActivity.class).putExtra("kind", kind);
+        Intent i;
+        if (AUDIO.equals(kind)) i = new Intent(c, PlayerActivity.class);
+        else if (IMAGE.equals(kind)) i = new Intent(c, RemoteActivity.class).putExtra("kind", kind);
+        else i = new Intent(c, KeyboardActivity.class).putExtra("mode", KeyboardActivity.MEDIA).putExtra("manual", true);   // video: modo del teclado
         if ("ext".equals(kind)) i.addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION);
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        hub.startOrNotify(i, 43, AUDIO.equals(kind) ? "Reproductor" : "Controles", "Toca para abrir los controles");
+        hub.startOrNotify(i, 43, AUDIO.equals(kind) ? "Reproductor" : IMAGE.equals(kind) ? "Controles" : "Control de video", "Toca para abrir los controles");
     }
 
     /** Desde los controles (aquí o en el otro teléfono). */

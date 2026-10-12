@@ -107,7 +107,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setPadding(dp(6), dp(6), dp(6), dp(6));
         bar.setBackground(barBg());
-        bar.setElevation(dp(6));
+        bar.setElevation(dp(CardTheme.isIntense() ? 16 : 6));
         bar.setLayoutTransition(new android.animation.LayoutTransition());
         barOpen = prefs.getBoolean("barOpen", true);
         menuBtn = new SquareButton(this, SquareButton.MENU, "Menú", false, night);
@@ -123,7 +123,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         navPill = new LinearLayout(this);
         navPill.setPadding(dp(6), dp(6), dp(6), dp(6));
         navPill.setBackground(barBg());
-        navPill.setElevation(dp(6));
+        navPill.setElevation(dp(CardTheme.isIntense() ? 16 : 6));
         int[] nk = {SquareButton.BACK, SquareButton.HOME, SquareButton.RECENTS};
         String[] nl = {"Atrás", "Inicio", "Recientes"}, nkeys = {"back", "home", "recents"};
         int navCount = Updater.isLiviana(this) ? 2 : 3;   // Recientes solo funciona con la versión completa
@@ -409,6 +409,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     private android.graphics.drawable.Drawable barBg() {
         if (CardTheme.isAero()) return new Aero.Bg(CardTheme.aeroTint(), dp(16), getResources().getDisplayMetrics().density);
+        if (CardTheme.isIntense()) return new Glass.Bg(dp(16), getResources().getDisplayMetrics().density);
         GradientDrawable g = pill(CardTheme.barFill(night));
         if (CardTheme.isGlass()) g.setStroke(dp(1), CardTheme.stroke());
         return g;
@@ -432,6 +433,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         dlg[0] = new Ui.Sheet(this)
                 .title("Tarjetas y menús")
                 .message("Color de las tarjetas de apps y elementos, de la barra de opciones y de estos menús. Se aplica en ambos teléfonos.")
+                .option(Ui.PALETTE, -1, "Cristal intenso", "Vidrio esmerilado realista: fondo borroso, sombras profundas y brillo",
+                        CardTheme.isIntense(), () -> setCardTheme(0, CardTheme.GLASS_INTENSE, false))
                 .option(Ui.PALETTE, -1, "Cristal Aero (Windows 7)", "Vidrio de color con brillo y vetas de luz",
                         CardTheme.isAero(), this::chooseAeroTint)
                 .option(Ui.PALETTE, -1, "Cristal claro", "Translúcido, como vidrio esmerilado", CardTheme.glass == CardTheme.GLASS_LIGHT,
@@ -487,6 +490,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         for (SquareButton b : squares) b.applyTheme();
         bar.setBackground(barBg());
         navPill.setBackground(barBg());
+        bar.setElevation(dp(CardTheme.isIntense() ? 16 : 6));
+        navPill.setElevation(dp(CardTheme.isIntense() ? 16 : 6));
         if (!fromRemote) hub.send("cardTheme", "c", color, "g", glass);
     }
 
@@ -693,7 +698,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                         })
                 .option(Ui.PALETTE, "Color de fondo", "Elegir el color de la mesa", this::chooseColor)
                 .option(Ui.PALETTE, "Color de tarjetas y menús", CardTheme.glass == CardTheme.GLASS_LIGHT ? "Cristal claro"
-                        : CardTheme.glass == CardTheme.GLASS_DARK ? "Cristal oscuro" : CardTheme.color == 0 ? "Automático" : "Color propio", this::chooseCardColor)
+                        : CardTheme.glass == CardTheme.GLASS_DARK ? "Cristal oscuro" : CardTheme.isIntense() ? "Cristal intenso"
+                        : CardTheme.isAero() ? "Cristal Aero" : CardTheme.color == 0 ? "Automático" : "Color propio", this::chooseCardColor)
                 .option(Ui.HOME, isLauncher() ? "Pantalla de inicio: sí" : "Pantalla de inicio: no",
                         isLauncher() ? "Mesa Doble es tu launcher (tocar para dejar de usarla)" : "Usar Mesa Doble como launcher de este teléfono", this::toggleLauncher)
                 .option(Ui.GEAR, "Revisar configuración", principal ? "Permisos del principal" : "Permisos del extendido", () -> checkSetup(true))
@@ -876,8 +882,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .option(Ui.CLOCK, "Reloj", "Hora, fecha y próxima alarma; al tocarlo abre las alarmas", this::addClock)
                 .option(Ui.WIDGETS, "Widget", "Widgets de tus apps (clima, calendario, música...)", this::addWidget)
                 .option(Ui.FOLDER, "Archivos", "Pasar archivos entre los dos teléfonos", this::openFiles)
-                .option(Ui.SEND, "Controles de video y música", "Play/pausa, adelantar y volumen de lo que suena en el principal",
-                        () -> MediaHub.openControls(this, "ext"))
+                .option(Ui.SEND, "Control de video", "Play/pausa, adelantar y volumen de lo que se ve en el principal",
+                        () -> MediaHub.openControls(this, MediaHub.VIDEO))
                 .option(Ui.RECEIVE, "Actualizar app", "Versión instalada: " + Updater.clean(Updater.installedVersion(this)), () -> Updater.check(this, hub))
                 .button("Cerrar", false, null)
                 .show();
