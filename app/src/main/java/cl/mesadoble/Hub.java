@@ -244,8 +244,10 @@ public class Hub implements Link.Listener {
         if ("alarms".equals(t)) { openAlarms(); return; }
         // cámara del principal, controlada desde el extendido
         if ("camCmd".equals(t)) { if (isPrincipal()) CameraActivity.command(app, m); return; }
+        if ("phoneCam".equals(t)) { if (isPrincipal()) PhoneCamera.command(app, this, m); return; }
         if (("camOpen".equals(t) || "camApp".equals(t)) && !isPrincipal() && !KeyboardActivity.showingCamera) {
-            Intent k = new Intent(app, KeyboardActivity.class).putExtra("mode", KeyboardActivity.CAMERA).putExtra("manual", true)
+            Intent k = new Intent(app, KeyboardActivity.class)
+                    .putExtra("mode", "camOpen".equals(t) ? KeyboardActivity.MDCAM : KeyboardActivity.CAMERA).putExtra("manual", true)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
             startOrNotify(k, 48, "Controles de cámara", "Toca para controlar la cámara del principal");
         }
@@ -382,6 +384,12 @@ public class Hub implements Link.Listener {
         Intent i = app.getPackageManager().getLaunchIntentForPackage(pkg);
         if (i == null) return NOT_INSTALLED;
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+        return startExternal(i, pkg, label);
+    }
+
+    /** Abre una pantalla de OTRA app aunque haya otra al frente (truco del inicio; aviso si no resulta). */
+    public int startExternal(Intent i, String pkg, String label) {
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         if (foreground || Settings.canDrawOverlays(app)) return startOrNotify(i, pkg.hashCode(), "Abrir " + label, "Toca para abrirla");
         // Con otra app al frente Android no deja abrir apps desde el fondo, pero sí ir al inicio; justo después
         // de eso da unos segundos de gracia: se va al inicio (sin animación) y enseguida se abre la app.

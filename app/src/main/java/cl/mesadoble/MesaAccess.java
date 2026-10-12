@@ -168,6 +168,63 @@ public class MesaAccess extends AccessibilityService {
         catch (Exception ignored) { }
     }
 
+    // ---- cámara del teléfono: se buscan sus botones por nombre (obturador, cambiar cámara, flash) y se tocan
+
+    private static final String[] SHOT = {"shutter", "obturador", "disparador", "capturar", "tomar foto", "take photo", "capture", "camera_btn", "快门", "拍照"};
+    private static final String[] SWITCH = {"switch", "cambiar cámara", "cambiar camara", "girar", "frontal", "flip", "lens", "切换"};
+    private static final String[] FLASH = {"flash", "linterna", "闪光"};
+
+    /** Toca un botón de la cámara que está al frente. Devuelve false si no lo encontró. */
+    public boolean cameraClick(String what) {
+        String[] keys = "shot".equals(what) ? SHOT : "switch".equals(what) ? SWITCH : FLASH;
+        android.view.accessibility.AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) return false;
+        android.view.accessibility.AccessibilityNodeInfo n = find(root, keys, 0);
+        if (n != null) {
+            android.view.accessibility.AccessibilityNodeInfo c = n;
+            while (c != null && !c.isClickable()) c = c.getParent();
+            if (c != null && c.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)) return true;
+            android.graphics.Rect r = new android.graphics.Rect();
+            n.getBoundsInScreen(r);
+            tap(r.exactCenterX(), r.exactCenterY(), 40);
+            return true;
+        }
+        if ("shot".equals(what)) {   // sin nombre: el obturador suele estar al centro del borde inferior (o derecho en horizontal)
+            Point sc = screen();
+            if (sc.x > sc.y) tap(sc.x * 0.92f, sc.y * 0.5f, 40); else tap(sc.x * 0.5f, sc.y * 0.88f, 40);
+            return true;
+        }
+        return false;
+    }
+
+    private android.view.accessibility.AccessibilityNodeInfo find(android.view.accessibility.AccessibilityNodeInfo n, String[] keys, int depth) {
+        if (n == null || depth > 30) return null;
+        String d = ((n.getContentDescription() == null ? "" : n.getContentDescription()) + " "
+                + (n.getViewIdResourceName() == null ? "" : n.getViewIdResourceName()) + " "
+                + (n.getText() == null ? "" : n.getText())).toLowerCase(java.util.Locale.ROOT);
+        for (String k : keys) if (d.contains(k)) return n;
+        for (int i = 0; i < n.getChildCount(); i++) {
+            android.view.accessibility.AccessibilityNodeInfo f = find(n.getChild(i), keys, depth + 1);
+            if (f != null) return f;
+        }
+        return null;
+    }
+
+    /** Zoom de la cámara: pellizco con dos dedos al centro de la pantalla. */
+    public void cameraZoom(boolean in) {
+        Point sc = screen();
+        float cx = sc.x / 2f, cy = sc.y / 2f, near = Math.min(sc.x, sc.y) * 0.08f, far = Math.min(sc.x, sc.y) * 0.3f;
+        float a = in ? near : far, b = in ? far : near;
+        Path p1 = new Path(), p2 = new Path();
+        p1.moveTo(cx - a, cy); p1.lineTo(cx - b, cy);
+        p2.moveTo(cx + a, cy); p2.lineTo(cx + b, cy);
+        try {
+            dispatchGesture(new GestureDescription.Builder()
+                    .addStroke(new GestureDescription.StrokeDescription(p1, 0, 260))
+                    .addStroke(new GestureDescription.StrokeDescription(p2, 0, 260)).build(), null, null);
+        } catch (Exception ignored) { }
+    }
+
     // ---- gamepad: cada control toca el principal en el mismo lugar relativo
     private GestureDescription.StrokeDescription joyStroke;
     private String joyOwner = "";
