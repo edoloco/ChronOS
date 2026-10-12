@@ -51,6 +51,8 @@ final class RecentApps {
     private static final Map<String, Long> last = new HashMap<>();
     private static long queriedTo;
     private static String lastResumed = "";
+    // última notificación que sonó/vibró/apareció de cada app (evento 12 de Android: NOTIFICATION_INTERRUPTION)
+    private static final Map<String, Long> notifAt = new HashMap<>();
 
     private static synchronized void refresh(Context c) {
         UsageStatsManager um = (UsageStatsManager) c.getSystemService(Context.USAGE_STATS_SERVICE);
@@ -63,6 +65,7 @@ final class RecentApps {
             UsageEvents.Event e = new UsageEvents.Event();
             while (ev.hasNextEvent()) {
                 ev.getNextEvent(e);
+                if (e.getEventType() == 12) notifAt.put(e.getPackageName(), e.getTimeStamp());
                 if (e.getEventType() == 1 /* ACTIVITY_RESUMED / MOVE_TO_FOREGROUND */) {
                     last.put(e.getPackageName(), e.getTimeStamp());
                     if (e.getTimeStamp() >= newest) { newest = e.getTimeStamp(); lastResumed = e.getPackageName(); }
@@ -70,6 +73,21 @@ final class RecentApps {
             }
             queriedTo = now;
         } catch (Exception ignored) { }
+    }
+
+    /** Apps con notificaciones nuevas: avisaron después de la última vez que se abrieron (hasta 1 día). */
+    static synchronized List<String> unseen(Context c) {
+        refresh(c);
+        List<String> out = new ArrayList<>();
+        long now = System.currentTimeMillis();
+        for (Map.Entry<String, Long> e : notifAt.entrySet()) {
+            String p = e.getKey();
+            if (p.equals(c.getPackageName()) || "android".equals(p) || "com.android.systemui".equals(p)) continue;
+            Long opened = last.get(p);
+            if (now - e.getValue() < 24L * 3600 * 1000 && (opened == null || e.getValue() > opened + 1500)) out.add(p);
+        }
+        Collections.sort(out);
+        return out;
     }
 
     private static Set<String> homes(Context c) {

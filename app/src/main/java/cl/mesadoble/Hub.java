@@ -16,6 +16,7 @@ import android.os.Looper;
 import android.os.SystemClock;
 import android.view.KeyEvent;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -532,6 +533,7 @@ public class Hub implements Link.Listener {
         @Override public void run() {
             if (!isPrincipal() || !connected()) return;
             RecentApps.worker.execute(() -> GameBg.poll(app, Hub.this));   // ¿empezó un juego? → fondo en el extendido
+            RecentApps.worker.execute(Hub.this::pollNotifs);                // apps con notificaciones nuevas → punto rojo
             AudioManager am = (AudioManager) app.getSystemService(Context.AUDIO_SERVICE);
             boolean on = am != null && am.isMusicActive() && MediaHub.current == null;   // los visores propios ya tienen sus controles
             boolean video = on && moviePlaying(am);
@@ -559,6 +561,24 @@ public class Hub implements Link.Listener {
             }
         } catch (Exception ignored) { }
         return false;
+    }
+
+    // ---------------- apps con notificaciones (punto rojo en la mesa) ----------------
+    private String notifSig = "";
+    private long notifSentAt;
+
+    private void pollNotifs() {
+        if (!RecentApps.hasAccess(app)) return;
+        java.util.List<String> l = RecentApps.unseen(app);
+        String sig = android.text.TextUtils.join(",", l);
+        long now = SystemClock.uptimeMillis();
+        if (sig.equals(notifSig) && now - notifSentAt < 30000) return;
+        notifSig = sig;
+        notifSentAt = now;
+        JSONObject m = new JSONObject();
+        try { m.put("t", "notifs"); m.put("p", new JSONArray(l)); } catch (JSONException ignored) { }
+        send(m);
+        main.post(() -> local(m));
     }
 
     private void mediaKey(AudioManager am, int code) {

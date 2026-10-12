@@ -255,6 +255,12 @@ public class DeskView extends View {
             RectF dst = new RectF(x - s / 2, cy - s / 2, x + s / 2, cy + s / 2);
             if (r.pkg.isEmpty()) drawDesktopTile(c, dst, alpha);
             else if (r.icon != null) { bmpPaint.setAlpha(alpha); c.drawBitmap(r.icon, null, dst, bmpPaint); }
+            if (notified.contains(r.pkg)) {
+                badge.setColor((alpha << 24) | 0x00FFFFFF);
+                c.drawCircle(dst.right - s * 0.05f, dst.top + s * 0.05f, 6.5f * dp, badge);
+                badge.setColor((alpha << 24) | 0x00E53935);
+                c.drawCircle(dst.right - s * 0.05f, dst.top + s * 0.05f, 5 * dp, badge);
+            }
         }
         bmpPaint.setAlpha(255);
         c.restore();
@@ -947,11 +953,50 @@ public class DeskView extends View {
         return it.hPx;
     }
 
+    // ---------------- apps con notificaciones: punto rojo y un temblorcito cada tanto ----------------
+
+    private final java.util.Set<String> notified = new java.util.HashSet<>();
+    private final Paint badge = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private long wiggleAt;
+    private final Runnable wiggleTick = new Runnable() {
+        @Override public void run() {
+            if (notified.isEmpty()) return;
+            wiggleAt = android.os.SystemClock.uptimeMillis();
+            invalidate();
+            postDelayed(this, 6000);
+        }
+    };
+
+    public void setNotified(org.json.JSONArray a) {
+        java.util.Set<String> n = new java.util.HashSet<>();
+        for (int i = 0; a != null && i < a.length(); i++) n.add(a.optString(i));
+        if (n.equals(notified)) return;
+        boolean fresh = false;
+        for (String p : n) if (!notified.contains(p)) fresh = true;
+        notified.clear();
+        notified.addAll(n);
+        removeCallbacks(wiggleTick);
+        if (!notified.isEmpty()) postDelayed(wiggleTick, fresh ? 300 : 6000);   // una notificación nueva: tiembla ya
+        invalidate();
+    }
+
+    /** Ángulo del temblor (grados): unas vibraciones de lado a lado que se apagan en ~0,7 s; cada app un poco desfasada. */
+    private float wiggle(Item it) {
+        if (!Item.APP.equals(it.kind) || !notified.contains(it.pkg) || wiggleAt == 0) return 0;
+        long t = android.os.SystemClock.uptimeMillis() - wiggleAt - (Math.abs(it.id.hashCode()) % 4) * 90L;
+        if (t < 0) { postInvalidateOnAnimation(); return 0; }
+        if (t > 720) return 0;
+        postInvalidateOnAnimation();
+        float k = t / 720f;
+        return (float) (5.5 * Math.sin(k * Math.PI * 7) * (1 - k));
+    }
+
     private void drawItem(Canvas c, Item it, float left, float top, float width, float h, boolean lifted) {
         float pad = 14 * dp, r = 6 * dp;
+        float wig = wiggle(it);
         c.save();
         c.translate(left, top);
-        c.rotate(it.rot, width / 2, h / 2);
+        c.rotate(it.rot + wig, width / 2, h / 2);
         if (lifted) c.scale(1.03f, 1.03f, width / 2, h / 2);
         RectF box = new RectF(0, 0, width, h);
 
@@ -971,7 +1016,7 @@ public class DeskView extends View {
         if (intense) {
             // cristal intenso: sombra profunda y, dentro, el fondo desenfocado que queda justo detrás
             Glass.shadow(c, box, rr, dp, lifted);
-            final float W = getWidth(), H = getHeight(), cx = width / 2, cy = h / 2, rot = it.rot;
+            final float W = getWidth(), H = getHeight(), cx = width / 2, cy = h / 2, rot = it.rot + wig;
             Glass.body(c, box, rr, dp, Glass.blur == null ? null : () -> {
                 c.save();
                 if (lifted) c.scale(1 / 1.03f, 1 / 1.03f, cx, cy);
@@ -1070,6 +1115,14 @@ public class DeskView extends View {
             small.setTextSize(Math.max(12 * dp, Math.min(16 * dp, width * 0.07f)));
             String t = ellipsize(it.title, small, width - 16 * dp);
             c.drawText(t, width / 2 - small.measureText(t) / 2, h - 16 * dp, small);
+            if (notified.contains(it.pkg)) {
+                // punto rojo con borde blanco, en la esquina del ícono
+                float bx = dst.right - is * 0.06f, by = dst.top + is * 0.06f, br = Math.max(7 * dp, is * 0.13f);
+                badge.setColor(0xFFFFFFFF);
+                c.drawCircle(bx, by, br + 2 * dp, badge);
+                badge.setColor(0xFFE53935);
+                c.drawCircle(bx, by, br, badge);
+            }
         } else if (!isWidget && !isClock && !isBatt) {
             small.setColor(muted);
             small.setTextSize(12 * dp);

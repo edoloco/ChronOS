@@ -1746,6 +1746,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
         switch (t) {
+            case "notifs":
+                main.post(() -> desk.setNotified(m.optJSONArray("p")));
+                break;
             case "gameBg":
                 main.post(() -> desk.setBgImage(GameBg.current));
                 break;
