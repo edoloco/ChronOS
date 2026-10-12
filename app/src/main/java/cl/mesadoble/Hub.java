@@ -69,6 +69,10 @@ public class Hub implements Link.Listener {
                 if (pct == myBatt && chg == myChg) return;
                 myBatt = pct; myChg = chg;
                 sendBattery();
+            main.removeCallbacks(musicPoll);
+            musicChangedAt = 0;
+            musicActive = false;
+            main.postDelayed(musicPoll, 2000);
             }
         }, new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED));
         // al desinstalar una app, la lista de apps del otro teléfono se actualiza
@@ -249,6 +253,8 @@ public class Hub implements Link.Listener {
         // fotos, música y video: se ven en el principal; los controles, en el extendido
         if ("mPlay".equals(t)) { if (isPrincipal()) MediaHub.open(app, m.optString("kind"), MediaHub.paths(m), m.optInt("idx")); return; }
         if ("mCmd".equals(t)) { if (isPrincipal()) MediaHub.command(app, m); return; }
+        if ("mActive".equals(t) && !isPrincipal() && m.optBoolean("on") && m.optBoolean("fresh") && !RemoteActivity.extOpen)
+            MediaHub.openControls(app, "ext");
         if ("mOpen".equals(t)) { if (!isPrincipal()) MediaHub.openControls(app, m.optString("kind")); return; }
         // widgets: todos viven en el principal
         if ("wList".equals(t)) { if (isPrincipal()) WidgetHub.get(app).sendProviders(this); return; }
@@ -431,8 +437,32 @@ public class Hub implements Link.Listener {
             case "play": mediaKey(am, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE); break;
             case "next": mediaKey(am, KeyEvent.KEYCODE_MEDIA_NEXT); break;
             case "prev": mediaKey(am, KeyEvent.KEYCODE_MEDIA_PREVIOUS); break;
+            case "ff": mediaKey(am, KeyEvent.KEYCODE_MEDIA_FAST_FORWARD); break;
+            case "rw": mediaKey(am, KeyEvent.KEYCODE_MEDIA_REWIND); break;
         }
     }
+
+    // ---------------- video o música en otras apps del principal ----------------
+    // Sin permisos especiales, Android solo deja saber si algo está sonando: con eso el extendido
+    // muestra los controles (play/pausa, adelantar, siguiente, volumen) cuando empieza un video.
+
+    private boolean musicActive;
+    private long musicChangedAt;
+    private final Runnable musicPoll = new Runnable() {
+        @Override public void run() {
+            if (!isPrincipal() || !connected()) return;
+            AudioManager am = (AudioManager) app.getSystemService(Context.AUDIO_SERVICE);
+            boolean on = am != null && am.isMusicActive() && MediaHub.current == null;   // los visores propios ya tienen sus controles
+            long now = SystemClock.uptimeMillis();
+            if (on != musicActive) {
+                boolean fresh = on && now - musicChangedAt > 8000;   // empezó algo nuevo (no una pausa corta)
+                musicActive = on;
+                musicChangedAt = now;
+                send("mActive", "on", on, "fresh", fresh);
+            }
+            main.postDelayed(this, 1500);
+        }
+    };
 
     private void mediaKey(AudioManager am, int code) {
         long t = SystemClock.uptimeMillis();

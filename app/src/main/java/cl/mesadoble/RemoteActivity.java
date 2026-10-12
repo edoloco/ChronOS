@@ -25,6 +25,9 @@ import org.json.JSONObject;
  */
 public class RemoteActivity extends Activity implements Link.Listener {
 
+    /** Hay un panel de controles para apps externas (YouTube, Netflix...) abierto. */
+    static boolean extOpen;
+
     private static final int RED = 0xFFFF0033, BG = 0xFF0F0F0F, CARD = 0xFF212121;
     private final Handler h = new Handler(Looper.getMainLooper());
     private Hub hub;
@@ -62,6 +65,7 @@ public class RemoteActivity extends Activity implements Link.Listener {
         hub = Hub.get(this);
         kind = getIntent().getStringExtra("kind");
         if (kind == null) kind = MediaHub.VIDEO;
+        if ("ext".equals(kind)) { buildExternal(); return; }
         boolean video = MediaHub.VIDEO.equals(kind);
 
         LinearLayout root = new LinearLayout(this);
@@ -180,12 +184,94 @@ public class RemoteActivity extends Activity implements Link.Listener {
         hub.add(this);
     }
 
-    @Override protected void onDestroy() { hub.remove(this); super.onDestroy(); }
+    @Override protected void onDestroy() { if ("ext".equals(kind)) extOpen = false; hub.remove(this); super.onDestroy(); }
+
+    private void key(String k) { if (hub.connected()) hub.send("media", "k", k); }
+
+    /**
+     * Controles para un video o música en OTRA app del principal (YouTube, Netflix, Spotify...).
+     * Van como teclas multimedia: play/pausa, retroceder/adelantar, anterior/siguiente y volumen.
+     */
+    private void buildExternal() {
+        extOpen = true;
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(BG);
+        root.setGravity(Gravity.CENTER);
+        root.setPadding(dp(20), dp(16), dp(20), dp(16));
+        TextView label = new TextView(this);
+        label.setText("▶  VIDEO EN EL PRINCIPAL");
+        label.setTextColor(RED);
+        label.setTextSize(11);
+        label.setLetterSpacing(0.15f);
+        label.setTypeface(Typeface.DEFAULT_BOLD);
+        label.setGravity(Gravity.CENTER);
+        root.addView(label);
+        title = new TextView(this);
+        title.setText("Reproduciendo");
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(20);
+        title.setGravity(Gravity.CENTER);
+        title.setPadding(0, dp(6), 0, 0);
+        root.addView(title);
+
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER);
+        row.setPadding(0, dp(20), 0, dp(12));
+        MediaIcon prev = new MediaIcon(this, MediaIcon.PREV, 52, CARD, Color.WHITE);
+        MediaIcon back = new MediaIcon(this, MediaIcon.BACK10, 56, CARD, Color.WHITE);
+        playBtn = new MediaIcon(this, MediaIcon.PAUSE, 80, RED, Color.WHITE);
+        MediaIcon fwd = new MediaIcon(this, MediaIcon.FWD10, 56, CARD, Color.WHITE);
+        MediaIcon next = new MediaIcon(this, MediaIcon.NEXT, 52, CARD, Color.WHITE);
+        prev.setOnClickListener(v -> key("prev"));
+        back.setOnClickListener(v -> key("rw"));
+        playBtn.setOnClickListener(v -> key("play"));
+        fwd.setOnClickListener(v -> key("ff"));
+        next.setOnClickListener(v -> key("next"));
+        for (View v : new View[]{prev, back, playBtn, fwd, next}) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+            lp.setMargins(dp(8), 0, dp(8), 0);
+            row.addView(v, lp);
+        }
+        root.addView(row);
+        LinearLayout row2 = new LinearLayout(this);
+        row2.setGravity(Gravity.CENTER);
+        MediaIcon vd = new MediaIcon(this, MediaIcon.VOL_DOWN, 48, CARD, Color.WHITE);
+        MediaIcon vu = new MediaIcon(this, MediaIcon.VOL_UP, 48, CARD, Color.WHITE);
+        vd.setOnClickListener(v -> key("vdown"));
+        vu.setOnClickListener(v -> key("vup"));
+        row2.addView(vd);
+        View sp = new View(this);
+        row2.addView(sp, new LinearLayout.LayoutParams(dp(16), 1));
+        row2.addView(vu);
+        View sp2 = new View(this);
+        row2.addView(sp2, new LinearLayout.LayoutParams(dp(28), 1));
+        row2.addView(pill("Cerrar", v -> finish()), new LinearLayout.LayoutParams(-2, dp(46)));
+        root.addView(row2);
+        TextView note = new TextView(this);
+        note.setText("La barra de avance aparece con los videos que abres desde Archivos (reproductor de Mesa Doble). "
+                + "En otras apps, Android solo deja enviar las teclas de reproducción.");
+        note.setTextColor(0xFF888888);
+        note.setTextSize(12);
+        note.setGravity(Gravity.CENTER);
+        note.setPadding(dp(10), dp(18), dp(10), 0);
+        root.addView(note);
+        setContentView(root);
+        hub.add(this);
+    }
 
     @Override public void onState(int state, String info) { }
 
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
+        if ("ext".equals(kind)) {
+            if ("mActive".equals(t)) h.post(() -> {
+                boolean on = m.optBoolean("on");
+                title.setText(on ? "Reproduciendo" : "En pausa");
+                playBtn.setKind(on ? MediaIcon.PAUSE : MediaIcon.PLAY);
+            });
+            return;
+        }
         if ("mEnd".equals(t) && kind.equals(m.optString("kind"))) { h.post(this::finish); return; }
         if (!"mState".equals(t) || !kind.equals(m.optString("kind"))) return;
         h.post(() -> {

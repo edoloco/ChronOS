@@ -69,6 +69,7 @@ public class MediaHub {
     static void openControls(Context c, String kind) {
         Hub hub = Hub.get(c);
         Intent i = AUDIO.equals(kind) ? new Intent(c, PlayerActivity.class) : new Intent(c, RemoteActivity.class).putExtra("kind", kind);
+        if ("ext".equals(kind)) i.addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION);
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         hub.startOrNotify(i, 43, AUDIO.equals(kind) ? "Reproductor" : "Controles", "Toca para abrir los controles");
     }
