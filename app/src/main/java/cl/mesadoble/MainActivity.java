@@ -956,6 +956,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .option(Ui.GRID, "Apps recientes", "Barra deslizante: lo que queda en la mira es la app al frente en el principal", this::addRecents)
                 .option(Ui.WIDGETS, "Widget", "Widgets de tus apps (clima, calendario, música...)", this::addWidget)
                 .option(Ui.FOLDER, "Archivos", "Pasar archivos entre los dos teléfonos", this::openFiles)
+                .option(Ui.IMAGE, "Cámara", "Cámara del principal: ver, cambiar trasera/delantera y sacar fotos desde el extendido", this::openCamera)
                 .option(Ui.SEND, "Control de video", "Play/pausa, adelantar y volumen de lo que se ve en el principal",
                         () -> MediaHub.openControls(this, MediaHub.VIDEO))
                 .option(Ui.RECEIVE, "Actualizar app", Updater.updateAvailable(this) ? "Hay una versión nueva: " + Updater.latestKnown(this)
@@ -989,6 +990,14 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         double[] p = desk.spot(it.w);
         it.x = p[0]; it.y = p[1];
         addItem(it);
+    }
+
+    /** Cámara: corre en el principal; los controles, en el extendido. */
+    private void openCamera() {
+        if (hub.isPrincipal()) { startActivity(new Intent(this, CameraActivity.class)); return; }
+        startActivity(new Intent(this, KeyboardActivity.class).putExtra("mode", KeyboardActivity.CAMERA).putExtra("manual", true));
+        if (hub.connected()) hub.send("camCmd", "a", "open");
+        else Toast.makeText(this, "El principal no está conectado", Toast.LENGTH_SHORT).show();
     }
 
     private void addRecents() {
