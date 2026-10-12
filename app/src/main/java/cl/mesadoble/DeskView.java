@@ -57,6 +57,8 @@ public class DeskView extends View {
         boolean widgetBound(Item it);
         void onWidgetTap(Item it);
         void onOpenAlarms();
+        /** {nivel principal, cargando principal, nivel extendido, cargando extendido}; -1 = sin dato. */
+        int[] battery();
     }
 
     /** Alto de la franja superior de un widget (nombre y botones); el widget va debajo. */
@@ -96,6 +98,10 @@ public class DeskView extends View {
     private ValueAnimator slideAnim;
     private boolean lockApps, autoApps;
     private int edgeDir = 0;
+    private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
+    { ring.setStyle(Paint.Style.STROKE); ring.setStrokeWidth(1.6f * getResources().getDisplayMetrics().density); }
+    private boolean snapGrid;
+    private final Paint battBody = new Paint(Paint.ANTI_ALIAS_FLAG), battFill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private boolean clockTick;
     private String alarmText = "";
     private long alarmAt = 0;
@@ -300,6 +306,90 @@ public class DeskView extends View {
         invalidate();
     }
 
+    // ---------------- ordenar y alinear ----------------
+
+    public void setSnap(boolean s) { snapGrid = s; }
+
+    private float gridStep() { return 22 * dp; }   // la misma separación que los puntos de la mesa
+
+    /** Ajusta la esquina del elemento al punto más cercano de la cuadrícula, en su pantalla. */
+    private void snapItem(Item it) {
+        int W = getWidth(), H = getHeight();
+        if (W == 0 || H == 0) return;
+        int s = screenOf(it);
+        float step = gridStep();
+        double lx = (vertical ? it.x : it.x - s) * W, ly = (vertical ? it.y - s : it.y) * H;
+        lx = Math.round(lx / step) * step;
+        ly = Math.round(ly / step) * step;
+        it.x = vertical ? lx / W : s + lx / W;
+        it.y = vertical ? s + ly / H : ly / H;
+    }
+
+    private List<Item> onThisPage() {
+        List<Item> l = new ArrayList<>();
+        for (Item it : items) if (it.page == page && it != dragging && !locked(it)) l.add(it);
+        return l;
+    }
+
+    /** Alinea todos los elementos del escritorio a los puntos. */
+    public void alignAll() {
+        for (Item it : onThisPage()) {
+            double ox = it.x, oy = it.y;
+            snapItem(it);
+            if (ox != it.x || oy != it.y) { it.touch(); if (host != null) host.onItemChanged(it); }
+        }
+        invalidate();
+    }
+
+    /** Deja todos los elementos derechos (sin giro). */
+    public void straightenAll() {
+        for (Item it : onThisPage()) if (it.rot != 0) { it.rot = 0; it.touch(); if (host != null) host.onItemChanged(it); }
+        invalidate();
+    }
+
+    private static int kindOrder(String k) {
+        switch (k) { case Item.APP: return 0; case Item.CLOCK: return 1; case Item.BATTERY: return 2; case Item.WIDGET: return 3;
+            case Item.NOTE: return 4; case Item.LINK: return 5; default: return 6; }
+    }
+
+    /**
+     * Ordena TODO el escritorio en filas, cada elemento en su pantalla: primero apps (por nombre),
+     * luego reloj, batería, widgets, notas, enlaces e imágenes. Deja libre el lado de la barra.
+     */
+    public void arrangeAll() {
+        int W = getWidth(), H = getHeight();
+        if (W == 0 || H == 0) return;
+        final Collator col = Collator.getInstance(new Locale("es"));
+        col.setStrength(Collator.PRIMARY);
+        for (int s = 0; s < 2; s++) {
+            List<Item> list = new ArrayList<>();
+            for (Item it : onThisPage()) if (screenOf(it) == s) list.add(it);
+            if (list.isEmpty()) continue;
+            Collections.sort(list, (p, q) -> {
+                int k = Integer.compare(kindOrder(p.kind), kindOrder(q.kind));
+                if (k != 0) return k;
+                String a = p.title.isEmpty() ? p.text : p.title, b = q.title.isEmpty() ? q.text : q.title;
+                return col.compare(a, b);
+            });
+            float gap = 12 * dp, mx = 14 * dp, top;
+            if (vertical) top = s == 0 ? 86 * dp : 16 * dp; else top = 16 * dp;
+            float x = mx, y = top, rowH = 0;
+            for (Item it : list) {
+                if (it.w * W > W - 2 * mx) it.w = (W - 2 * mx) / W;
+                float wpx = (float) (it.w * W), hpx = measure(it, wpx);
+                if (x > mx && x + wpx > W - mx) { x = mx; y += rowH + gap; rowH = 0; }
+                it.x = vertical ? x / W : s + x / W;
+                it.y = vertical ? s + y / H : y / H;
+                it.rot = 0;
+                x += wpx + gap;
+                rowH = Math.max(rowH, hpx);
+                it.touch();
+                if (host != null) host.onItemChanged(it);
+            }
+        }
+        invalidate();
+    }
+
     /** Un elemento arrastrado contra el borde izquierdo o derecho pasa al escritorio de ese lado (y lo crea si no existe). */
     private void onEdgeFlip() {
         if (dragging == null || edgeDir == 0) return;
@@ -472,7 +562,7 @@ public class DeskView extends View {
                         .setLineSpacing(0, 1.1f).build();
                 it.layoutKey = key;
             }
-            it.hPx = Math.max(96 * dp, 34 * dp + it.layout.getHeight() + pad);
+            it.hPx = Math.max(96 * dp, 34 * dp + it.layout.getHeight() + pad + 26 * dp);   // abajo va el círculo de enviar
         } else if (Item.IMG.equals(it.kind)) {
             Bitmap b = bitmapOf(it);
             float inner = width - 16 * dp;
@@ -484,6 +574,8 @@ public class DeskView extends View {
             it.hPx = widgetBar() + (float) (width * it.ar);
         } else if (Item.CLOCK.equals(it.kind)) {
             it.hPx = Math.max(118 * dp, width * 0.52f);
+        } else if (Item.BATTERY.equals(it.kind)) {
+            it.hPx = Math.max(128 * dp, width * 0.42f);
         } else {
             it.hPx = 132 * dp;
         }
@@ -499,15 +591,20 @@ public class DeskView extends View {
         RectF box = new RectF(0, 0, width, h);
 
         boolean isNote = Item.NOTE.equals(it.kind), isImg = Item.IMG.equals(it.kind), isApp = Item.APP.equals(it.kind),
-                isWidget = Item.WIDGET.equals(it.kind), isClock = Item.CLOCK.equals(it.kind);
+                isWidget = Item.WIDGET.equals(it.kind), isClock = Item.CLOCK.equals(it.kind), isBatt = Item.BATTERY.equals(it.kind);
         card.setColor(isNote ? it.color : isImg ? 0xFFFFFFFF : linkBg);
         card.setShadowLayer((lifted ? 18 : 10) * dp, 0, (lifted ? 10 : 5) * dp, 0x55000000);
         c.drawRoundRect(box, isApp ? 18 * dp : r, isApp ? 18 * dp : r, card);
 
         int ink = isNote || isImg ? 0xFF2B2A22 : fg;
         label.setColor((ink & 0x00FFFFFF) | 0x77000000);
-        String tag = isNote ? "NOTA" : isImg ? "IMAGEN" : isApp ? "APP" : isWidget ? "WIDGET" : isClock ? "RELOJ" : "ENLACE";
-        if (isClock) {
+        String tag = isNote ? "NOTA" : isImg ? "IMAGEN" : isApp ? "APP" : isWidget ? "WIDGET" : isClock ? "RELOJ" : isBatt ? "BATERÍA" : "ENLACE";
+        if (isBatt) {
+            c.drawText(tag, 10 * dp, 18 * dp, label);
+            int[] b = host != null ? host.battery() : new int[]{-1, 0, -1, 0};
+            drawBattery(c, "Principal", b[0], b[1] == 1, width, h * 0.40f);
+            drawBattery(c, "Extendido", b[2], b[3] == 1, width, h * 0.70f);
+        } else if (isClock) {
             java.util.Date now = new java.util.Date();
             boolean is24 = android.text.format.DateFormat.is24HourFormat(getContext());
             String time = new java.text.SimpleDateFormat(is24 ? "HH:mm" : "h:mm", Locale.getDefault()).format(now);
@@ -543,7 +640,7 @@ public class DeskView extends View {
                 c.drawText(ellipsize(t, small, width - 16 * dp), width / 2 - Math.min(small.measureText(t), width - 16 * dp) / 2,
                         bar + (h - bar) / 2, small);
             }
-        } else if (isImg) c.drawText(tag, 10 * dp, h - 12 * dp, label);
+        } else if (isImg) c.drawText(tag, 44 * dp, h - 15 * dp, label);
         else c.drawText(tag, 10 * dp, 18 * dp, label);
 
         if (isNote) {
@@ -568,9 +665,9 @@ public class DeskView extends View {
             if (b != null) c.drawBitmap(b, new Rect(0, 0, b.getWidth(), b.getHeight()), dst, bmpPaint);
             small.setColor(fg);
             small.setTextSize(Math.max(12 * dp, Math.min(16 * dp, width * 0.07f)));
-            String t = ellipsize(it.title, small, width - 16 * dp);
+            String t = ellipsize(it.title, small, width - 84 * dp);
             c.drawText(t, width / 2 - small.measureText(t) / 2, h - 16 * dp, small);
-        } else if (!isWidget && !isClock) {
+        } else if (!isWidget && !isClock && !isBatt) {
             small.setColor(muted);
             small.setTextSize(12 * dp);
             String dom = host(it.url);
@@ -579,7 +676,7 @@ public class DeskView extends View {
             small.setTextSize(16 * dp);
             String t = it.title.isEmpty() ? dom : it.title;
             c.drawText(ellipsize(t, small, width - 2 * pad), pad, 72 * dp, small);
-            it.openBtn.set(pad, 88 * dp, pad + 92 * dp, 120 * dp);
+            it.openBtn.set(width - pad - 92 * dp, 88 * dp, width - pad, 120 * dp);
             btn.setColor((accent & 0x00FFFFFF) | 0x38000000);
             c.drawRoundRect(it.openBtn, 16 * dp, 16 * dp, btn);
             small.setColor(accent);
@@ -590,12 +687,16 @@ public class DeskView extends View {
         if (locked(it)) { it.sendBtn.setEmpty(); it.delBtn.setEmpty(); c.restore(); return; }
         // botones cuadrados: enviar al otro lado y quitar
         float bs = 30 * dp, gap = 3 * dp;
-        float by = isImg ? h - bs - 4 * dp : 4 * dp;
-        it.delBtn.set(width - 4 * dp - bs, by, width - 4 * dp, by + bs);
-        it.sendBtn.set(it.delBtn.left - gap - bs, by, it.delBtn.left - gap, by + bs);
+        it.delBtn.set(width - 4 * dp - bs, 4 * dp, width - 4 * dp, 4 * dp + bs);
+        if (isWidget) it.sendBtn.set(it.delBtn.left - gap - bs, 4 * dp, it.delBtn.left - gap, 4 * dp + bs);   // abajo está el widget
+        else it.sendBtn.set(6 * dp, h - 6 * dp - bs, 6 * dp + bs, h - 6 * dp);   // abajo a la izquierda
         btn.setColor(isNote || isImg ? 0x14000000 : (accent & 0x00FFFFFF) | 0x38000000);
-        c.drawRoundRect(it.sendBtn, 6 * dp, 6 * dp, btn);
         c.drawRoundRect(it.delBtn, 6 * dp, 6 * dp, btn);
+        // enviar al otro teléfono: flecha dentro de un círculo
+        btn.setColor(isNote || isImg ? 0x26000000 : (accent & 0x00FFFFFF) | 0x55000000);
+        c.drawCircle(it.sendBtn.centerX(), it.sendBtn.centerY(), bs / 2, btn);
+        ring.setColor(isNote || isImg ? 0x552B2A22 : (accent & 0x00FFFFFF) | 0xAA000000);
+        c.drawCircle(it.sendBtn.centerX(), it.sendBtn.centerY(), bs / 2 - 0.8f * dp, ring);
         icon.setColor(isNote || isImg ? 0xFF2B2A22 : fg);
         float cx = it.sendBtn.centerX(), cy = it.sendBtn.centerY(), s = 6 * dp;
         float sign = onFirst(it) ? 1 : -1;
@@ -632,6 +733,32 @@ public class DeskView extends View {
             c.drawLine(hx + q, hy + q, hx + q, hy + q - 4 * dp, icon);
         }
         c.restore();
+    }
+
+    /** Una fila del widget de batería: nombre, pila con su nivel y porcentaje (⚡ si está cargando). */
+    private void drawBattery(Canvas c, String who, int lvl, boolean charging, float width, float cy) {
+        small.setColor(fg);
+        small.setTextSize(Math.max(12 * dp, Math.min(15 * dp, width * 0.055f)));
+        c.drawText(who, 14 * dp, cy + small.getTextSize() * 0.35f, small);
+        float x0 = 14 * dp + Math.max(small.measureText("Extendido"), 70 * dp) + 10 * dp;
+        float x1 = width - 64 * dp, bh = 20 * dp;
+        if (x1 - x0 < 30 * dp) x1 = x0 + 30 * dp;
+        RectF body = new RectF(x0, cy - bh / 2, x1, cy + bh / 2);
+        battBody.setStyle(Paint.Style.STROKE);
+        battBody.setStrokeWidth(2 * dp);
+        battBody.setColor(muted);
+        c.drawRoundRect(body, 5 * dp, 5 * dp, battBody);
+        battBody.setStyle(Paint.Style.FILL);
+        c.drawRoundRect(new RectF(x1 + 1.5f * dp, cy - 4 * dp, x1 + 5 * dp, cy + 4 * dp), 1.5f * dp, 1.5f * dp, battBody);
+        String txt;
+        if (lvl >= 0) {
+            battFill.setColor(charging ? accent : lvl <= 15 ? 0xFFD9534F : lvl <= 35 ? 0xFFE8A33D : 0xFF4CAF6A);
+            float w = (body.width() - 6 * dp) * Math.min(100, lvl) / 100f;
+            c.drawRoundRect(new RectF(body.left + 3 * dp, body.top + 3 * dp, body.left + 3 * dp + w, body.bottom - 3 * dp), 3 * dp, 3 * dp, battFill);
+            txt = lvl + "%" + (charging ? " ⚡" : "");
+        } else txt = "—";
+        small.setColor(fg);
+        c.drawText(txt, x1 + 10 * dp, cy + small.getTextSize() * 0.35f, small);
     }
 
     private static String ellipsize(String t, Paint p, float max) {
@@ -868,6 +995,7 @@ public class DeskView extends View {
                 b = clamp(b, -0.6 * szB, 1 - 0.4 * szB);
                 it.x = vertical ? b : a;
                 it.y = vertical ? a : b;
+                if (snapGrid) snapItem(it);
                 commit(it);
                 if (host != null) host.onDragEnd(it);
                 if (autoApps && Item.APP.equals(it.kind)) arrangeApps();

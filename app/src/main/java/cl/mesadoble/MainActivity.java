@@ -171,6 +171,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         for (Item it : desk.items) desk.normalize(it);
         desk.setPages(Math.max(prefs.getInt("pages", 1), maxPage() + 1), prefs.getInt("page", 0), 0);
         desk.setAppsMode(prefs.getBoolean("appsLock", false), prefs.getBoolean("appsAuto", false));
+        desk.setSnap(prefs.getBoolean("snapGrid", false));
         cleanWidgets();
 
         side = hub.side();
@@ -266,6 +267,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         hub.send("bg", "c", prefs.getInt("deskColor", 0));
         hub.send("pages", "n", desk.pages(), "cur", desk.page());
         hub.send("apps", "lock", prefs.getBoolean("appsLock", false), "auto", prefs.getBoolean("appsAuto", false));
+        hub.send("snap", "on", prefs.getBoolean("snapGrid", false));
     }
 
     @Override public void onConfigurationChanged(Configuration c) {
@@ -429,17 +431,36 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                         + "Para llevar un elemento a otro escritorio, arrástralo y déjalo un momento contra el borde izquierdo o derecho.")
                 .option(Ui.PLUS, "Nuevo escritorio", "Se agrega a la derecha", this::newPage);
         if (n > 1) sh.option(Ui.TRASH, "Quitar este escritorio", "Sus elementos pasan al de al lado", this::removePage);
-        sh.option(Ui.GRID, "Ordenar apps ahora", "En cuadrícula y por nombre, en este escritorio", () -> {
-                    desk.arrangeApps();
-                    Toast.makeText(this, "Apps ordenadas", Toast.LENGTH_SHORT).show();
-                })
-          .option(Ui.AUTO, -1, "Orden automático: " + (auto ? "sí" : "no"), "Las apps se acomodan solas al agregarlas o soltarlas", auto,
-                  () -> setAppsMode(lock, !auto, false))
-          .option(lock ? Ui.LOCK : Ui.UNLOCK, -1, "Apps bloqueadas: " + (lock ? "sí" : "no"),
-                  lock ? "No se mueven ni se borran; al tocarlas se abren" : "Fijar las apps en su lugar", lock,
-                  () -> setAppsMode(!lock, auto, false))
+        sh.option(Ui.ALIGN, "Ordenar y alinear", "Apps y elementos de este escritorio", this::arrangeMenu)
           .button("Cerrar", false, null)
           .show();
+    }
+
+    /** Ordenar y alinear apps y elementos del escritorio actual (se ve igual en los dos teléfonos). */
+    private void arrangeMenu() {
+        boolean lock = prefs.getBoolean("appsLock", false), auto = prefs.getBoolean("appsAuto", false), snap = prefs.getBoolean("snapGrid", false);
+        new Ui.Sheet(this)
+                .title("Ordenar y alinear")
+                .option(Ui.GRID, "Ordenar todo", "En filas: apps por nombre, después reloj, batería, widgets, notas e imágenes", () -> {
+                    desk.arrangeAll(); Toast.makeText(this, "Escritorio ordenado", Toast.LENGTH_SHORT).show(); })
+                .option(Ui.GRID, "Ordenar solo las apps", "En cuadrícula, por nombre y del mismo tamaño", () -> {
+                    desk.arrangeApps(); Toast.makeText(this, "Apps ordenadas", Toast.LENGTH_SHORT).show(); })
+                .option(Ui.ALIGN, "Alinear a los puntos", "Cada elemento se ajusta a la cuadrícula, sin cambiar el orden", () -> {
+                    desk.alignAll(); Toast.makeText(this, "Elementos alineados", Toast.LENGTH_SHORT).show(); })
+                .option(Ui.CHECK, "Enderezar todo", "Quita el giro de todos los elementos", () -> {
+                    desk.straightenAll(); Toast.makeText(this, "Todo derecho", Toast.LENGTH_SHORT).show(); })
+                .option(Ui.PIN, -1, "Imán: " + (snap ? "sí" : "no"), "Al soltar un elemento, se ajusta solo a los puntos", snap, () -> {
+                    prefs.edit().putBoolean("snapGrid", !snap).apply();
+                    desk.setSnap(!snap);
+                    hub.send("snap", "on", !snap);
+                })
+                .option(Ui.AUTO, -1, "Orden automático de apps: " + (auto ? "sí" : "no"), "Las apps se acomodan solas al agregarlas o soltarlas", auto,
+                        () -> setAppsMode(lock, !auto, false))
+                .option(lock ? Ui.LOCK : Ui.UNLOCK, -1, "Apps bloqueadas: " + (lock ? "sí" : "no"),
+                        lock ? "No se mueven ni se borran; al tocarlas se abren" : "Fijar las apps en su lugar", lock,
+                        () -> setAppsMode(!lock, auto, false))
+                .button("Cerrar", false, null)
+                .show();
     }
 
     private void newPage() {
@@ -711,12 +732,30 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .title("Herramientas")
                 .option(Ui.NOTE, "Nota", "Una nota para escribir", this::addNote)
                 .option(Ui.IMAGE, "Imagen", "Una foto de la galería", this::pickImage)
+                .option(Ui.BATTERY, "Batería", "Nivel de batería del principal y del extendido", this::addBattery)
                 .option(Ui.CLOCK, "Reloj", "Hora, fecha y próxima alarma; al tocarlo abre las alarmas", this::addClock)
                 .option(Ui.WIDGETS, "Widget", "Widgets de tus apps (clima, calendario, música...)", this::addWidget)
                 .option(Ui.FOLDER, "Archivos", "Pasar archivos entre los dos teléfonos", this::openFiles)
                 .option(Ui.RECEIVE, "Actualizar app", "Versión instalada: " + Updater.clean(Updater.installedVersion(this)), () -> Updater.check(this, hub))
                 .button("Cerrar", false, null)
                 .show();
+    }
+
+    private void addBattery() {
+        Item it = new Item();
+        it.kind = Item.BATTERY;
+        it.w = sized(0.62);
+        double[] p = desk.spot(it.w);
+        it.x = p[0]; it.y = p[1];
+        addItem(it);
+    }
+
+    @Override public int[] battery() {
+        boolean pr = hub.isPrincipal();
+        int pl = pr ? hub.myBatt : hub.otherBatt, el = pr ? hub.otherBatt : hub.myBatt;
+        boolean pc = pr ? hub.myChg : hub.otherChg, ec = pr ? hub.otherChg : hub.myChg;
+        if (!hub.connected()) { if (pr) el = -1; else pl = -1; }
+        return new int[]{pl, pc ? 1 : 0, el, ec ? 1 : 0};
     }
 
     private void addClock() {
@@ -1449,6 +1488,13 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                         : label + " ya no está instalada en el principal", Toast.LENGTH_LONG).show();
                 break;
             }
+            case "batt":
+                desk.invalidate();
+                break;
+            case "snap":
+                prefs.edit().putBoolean("snapGrid", m.optBoolean("on")).apply();
+                desk.setSnap(m.optBoolean("on"));
+                break;
             case "navAck":
                 if (!m.optBoolean("ok")) Toast.makeText(this, "Recientes necesita la versión completa en el principal", Toast.LENGTH_SHORT).show();
                 break;

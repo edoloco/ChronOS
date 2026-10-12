@@ -32,7 +32,7 @@ public class Ui {
     public static final int LAYOUT_SIDE_H = 1, LAYOUT_SIDE_V = 2, LAYOUT_STACK = 3, LOCK = 4, UNLOCK = 5,
             KEYBOARD = 6, KB_TOUCHPAD = 7, TOUCHPAD = 8, GAMEPAD = 9, MIC = 10, WIFI = 11, GEAR = 12,
             AUTO = 13, CHECK = 14, CROSS = 15, PIN = 16, OPEN = 17, STORE = 18, RECEIVE = 19, NOTE = 20,
-            PALETTE = 21, HOME = 22, SEND = 23, PAGES = 24, PLUS = 25, GRID = 26, TRASH = 27, IMAGE = 28, CLOCK = 29, FOLDER = 30, WIDGETS = 31;
+            PALETTE = 21, HOME = 22, SEND = 23, PAGES = 24, PLUS = 25, GRID = 26, TRASH = 27, IMAGE = 28, CLOCK = 29, FOLDER = 30, WIDGETS = 31, BATTERY = 32, ALIGN = 33;
 
     public static boolean night(Context c) {
         return (c.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
@@ -419,6 +419,16 @@ public class Ui {
                     c.drawRoundRect(new RectF(cx - u * 0.9f, cy - u * 0.8f, cx - u * 0.1f, cy - u * 0.05f), 3 * dp, 3 * dp, st);
                     c.drawRoundRect(new RectF(cx + u * 0.1f, cy - u * 0.8f, cx + u * 0.9f, cy + u * 0.8f), 3 * dp, 3 * dp, st);
                     c.drawRoundRect(new RectF(cx - u * 0.9f, cy + u * 0.1f, cx - u * 0.1f, cy + u * 0.8f), 3 * dp, 3 * dp, st);
+                    break;
+                case BATTERY:
+                    c.drawRoundRect(new RectF(cx - u * 0.9f, cy - u * 0.45f, cx + u * 0.7f, cy + u * 0.45f), 3 * dp, 3 * dp, st);
+                    c.drawLine(cx + u * 0.9f, cy - u * 0.18f, cx + u * 0.9f, cy + u * 0.18f, st);
+                    c.drawRect(new RectF(cx - u * 0.7f, cy - u * 0.25f, cx + u * 0.15f, cy + u * 0.25f), fl);
+                    break;
+                case ALIGN:
+                    c.drawLine(cx - u * 0.9f, cy - u * 0.9f, cx - u * 0.9f, cy + u * 0.9f, st);
+                    c.drawRoundRect(new RectF(cx - u * 0.6f, cy - u * 0.65f, cx + u * 0.8f, cy - u * 0.15f), 2 * dp, 2 * dp, st);
+                    c.drawRoundRect(new RectF(cx - u * 0.6f, cy + u * 0.15f, cx + u * 0.3f, cy + u * 0.65f), 2 * dp, 2 * dp, st);
                     break;
                 case TRASH:
                     c.drawLine(cx - u * 0.8f, cy - u * 0.55f, cx + u * 0.8f, cy - u * 0.55f, st);

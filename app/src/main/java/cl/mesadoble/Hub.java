@@ -59,6 +59,18 @@ public class Hub implements Link.Listener {
         side = prefs.getInt("side", -1);
         link = new Link(c, this);
         ScreenSync.listen(c, this);
+        // batería: la de este teléfono se comparte con el otro para el widget de baterías
+        c.registerReceiver(new android.content.BroadcastReceiver() {
+            @Override public void onReceive(Context cx, Intent i) {
+                int lvl = i.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1), scale = i.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100);
+                int st = i.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1);
+                int pct = lvl >= 0 && scale > 0 ? Math.round(lvl * 100f / scale) : -1;
+                boolean chg = st == android.os.BatteryManager.BATTERY_STATUS_CHARGING || st == android.os.BatteryManager.BATTERY_STATUS_FULL;
+                if (pct == myBatt && chg == myChg) return;
+                myBatt = pct; myChg = chg;
+                sendBattery();
+            }
+        }, new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED));
         // al desinstalar una app, la lista de apps del otro teléfono se actualiza
         android.content.IntentFilter pf = new android.content.IntentFilter(Intent.ACTION_PACKAGE_REMOVED);
         pf.addDataScheme("package");
@@ -125,6 +137,16 @@ public class Hub implements Link.Listener {
 
     public void remove(Link.Listener l) { listeners.remove(l); }
 
+    public volatile int myBatt = -1, otherBatt = -1;
+    public volatile boolean myChg, otherChg;
+
+    private void sendBattery() {
+        JSONObject m = new JSONObject();
+        try { m.put("t", "batt"); m.put("l", myBatt); m.put("c", myChg); } catch (JSONException ignored) { }
+        if (connected()) send(m);
+        local(m);
+    }
+
     /** Entrega un mensaje a las pantallas de ESTE teléfono, como si hubiera llegado del otro. */
     public void local(JSONObject m) { for (Link.Listener l : listeners) l.onMessage(m); }
 
@@ -185,6 +207,7 @@ public class Hub implements Link.Listener {
         info = inf;
         if (st == Link.CONNECTED) {
             sendImeState();
+            sendBattery();
             FileServer fs = FileServer.get(app);
             fs.start();
             send("fsTok", "k", fs.token, "port", FileServer.PORT);
@@ -222,6 +245,7 @@ public class Hub implements Link.Listener {
             return;
         }
         if ("fmPath".equals(t)) FileServer.remoteDir = m.optString("path");
+        if ("batt".equals(t)) { otherBatt = m.optInt("l", -1); otherChg = m.optBoolean("c"); }
         if ("fmJob".equals(t)) { if (isPrincipal()) FileServer.get(app).runJob(m, this); return; }
         if ("fmOpenFile".equals(t)) { if (isPrincipal()) FileServer.openHere(app, this, m.optString("path")); return; }
         if ("fmCancel".equals(t)) { FileServer.get(app).cancelJob(); return; }

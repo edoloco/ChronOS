@@ -40,6 +40,10 @@ cuando cruzas más de la mitad o los lanzas.
 - **Actualizar app** (*Herramientas*): busca la última versión en *Releases* de este repositorio, descarga
   el APK de la misma versión instalada (liviana o completa) y abre el instalador. Puede actualizar también el
   otro teléfono. La primera vez Android pide permitir que Mesa Doble instale apps. El repositorio debe ser público.
+- **Batería** (*Herramientas*): muestra el nivel de batería del principal y del extendido (⚡ si está cargando).
+- **Ordenar y alinear** (*Mesas → Ordenar y alinear*): ordenar todo en filas, ordenar solo las apps, alinear a
+  los puntos, enderezar todo, *Imán* (al soltar se ajusta a los puntos), orden automático y apps bloqueadas.
+- **Enviar al otro teléfono**: la flecha dentro de un círculo, abajo a la izquierda de cada elemento.
 - **Reloj**: hora, fecha y próxima alarma en la mesa; al tocarlo abre las alarmas del principal.
 - **Archivos**: administra los archivos del **principal**, como Total Commander con dos ventanas: una en cada
   pantalla (en horizontal, arriba y abajo), las dos mostrando carpetas del principal. Al abrirlo en un teléfono
