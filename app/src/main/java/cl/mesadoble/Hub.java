@@ -388,8 +388,12 @@ public class Hub implements Link.Listener {
     }
 
     /** Abre una pantalla de OTRA app aunque haya otra al frente (truco del inicio; aviso si no resulta). */
-    public int startExternal(Intent i, String pkg, String label) {
+    public int startExternal(Intent i, String pkg, String label) { return startExternal(i, pkg, label, true); }
+
+    /** notify=false: si no resulta, no deja aviso (para órdenes repetidas como las de la cámara). */
+    public int startExternal(Intent i, String pkg, String label, boolean notify) {
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        if (foreground || Settings.canDrawOverlays(app)) { try { app.startActivity(i); } catch (Exception ignored) { } return LAUNCHED; }
         if (foreground || Settings.canDrawOverlays(app)) return startOrNotify(i, pkg.hashCode(), "Abrir " + label, "Toca para abrirla");
         // Con otra app al frente Android no deja abrir apps desde el fondo, pero sí ir al inicio; justo después
         // de eso da unos segundos de gracia: se va al inicio (sin animación) y enseguida se abre la app.
@@ -398,7 +402,7 @@ public class Hub implements Link.Listener {
         try { app.startActivity(home); } catch (Exception ignored) { }
         main.postDelayed(() -> { try { app.startActivity(i); } catch (Exception ignored) { } }, 70);
         // si igual no se abrió (se puede comprobar con el acceso a datos de uso), queda el aviso de un toque
-        if (RecentApps.hasAccess(app) && !pkg.equals(app.getPackageName()))
+        if (notify && !pkg.isEmpty() && RecentApps.hasAccess(app) && !pkg.equals(app.getPackageName()))
             main.postDelayed(() -> RecentApps.worker.execute(() -> {
                 if (!pkg.equals(RecentApps.active(app)))
                     main.post(() -> startOrNotify(i, pkg.hashCode(), "Abrir " + (label.isEmpty() ? "la app" : label), "Toca para abrirla en este teléfono"));
@@ -406,8 +410,16 @@ public class Hub implements Link.Listener {
         return LAUNCHED;
     }
 
+    /** Alarmas del reloj de ESTE teléfono (aunque otra app esté al frente). */
     public void openAlarms() {
-        startOrNotify(ClockWidget.alarmsIntent(app).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), 23, "Alarmas", "Toca para ver las alarmas");
+        Intent i = ClockWidget.alarmsIntent(app).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        String pkg = "";
+        try {
+            android.content.pm.ResolveInfo ri = app.getPackageManager().resolveActivity(i, 0);
+            if (ri != null && ri.activityInfo != null) pkg = ri.activityInfo.packageName;
+        } catch (Exception ignored) { }
+        if (i.getPackage() != null) pkg = i.getPackage();
+        startExternal(i, pkg, "Alarmas", false);
     }
 
     /** Desinstalar una app de ESTE teléfono (Android siempre pide confirmación). */

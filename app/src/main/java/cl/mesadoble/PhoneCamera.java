@@ -63,10 +63,10 @@ final class PhoneCamera {
         String lbl = label(c, pkg);
         switch (a) {
             case "photo":
-                hub.startExternal(intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA, pkg, front), pkg, lbl);
+                hub.startExternal(intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA, pkg, front), pkg, lbl, false);
                 break;
             case "video":
-                hub.startExternal(intent(MediaStore.INTENT_ACTION_VIDEO_CAMERA, pkg, front), pkg, lbl);
+                hub.startExternal(intent(MediaStore.INTENT_ACTION_VIDEO_CAMERA, pkg, front), pkg, lbl, false);
                 break;
             case "toggle": {
                 front = !front;
@@ -75,7 +75,7 @@ final class PhoneCamera {
                 if (acc != null && acc.cameraClick("switch")) break;
                 Intent i = intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA, pkg, front);
                 i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
-                hub.startExternal(i, pkg, lbl);
+                hub.startExternal(i, pkg, lbl, false);
                 break;
             }
             case "shot": {
@@ -86,7 +86,7 @@ final class PhoneCamera {
                 i.putExtra("com.google.assistant.extra.TIMER_DURATION_SECONDS", m.optInt("v", 3));
                 i.putExtra("android.intent.extra.CAMERA_OPEN_ONLY", false);
                 i.putExtra("com.google.assistant.extra.CAMERA_OPEN_ONLY", false);
-                hub.startExternal(i, pkg, lbl);
+                hub.startExternal(i, pkg, lbl, false);
                 break;
             }
             case "zoomin": if (acc != null) acc.cameraZoom(true); break;
