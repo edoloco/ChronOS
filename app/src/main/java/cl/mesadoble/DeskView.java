@@ -69,18 +69,25 @@ public class DeskView extends View {
 
     // ---------------- apps recientes del principal ----------------
 
-    static final class Recent { String pkg, label; Bitmap icon; float ax = Float.NaN, appear; }
-    private final List<Recent> recents = new ArrayList<>();
-    private boolean recentsAccess = true, recentsLoaded;
-    private String recentsSig = "", recPressed = "";
-    private long recPressAt;
-    private final Paint recHi = new Paint(Paint.ANTI_ALIAS_FLAG);
+    static final class Recent { String pkg, label; Bitmap icon; }
+    private final List<Recent> strip = new ArrayList<>();   // [0] = la mesa ("Desktop"); luego las apps, en orden estable
+    private boolean recentsAccess = true, recentsLoaded, scrubbing;
+    private String recentsSig = "", recActive = "";
+    private float recScroll, recTarget, scrubStart, recSlot = 1;
+    private long userUntil, recPressAt;
+    private final Paint recHi = new Paint(Paint.ANTI_ALIAS_FLAG), scope = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private Item scrubItem;
 
     public String recentsSig() { return recentsLoaded ? recentsSig : "?"; }
 
     public boolean hasRecentsWidget() {
-        for (Item it : items) if (Item.RECENTS.equals(it.kind) && it.page == page) return true;
+        for (Item it : items) if (Item.RECENTS.equals(it.kind) && onPage(it)) return true;
         return false;
+    }
+
+    private int indexOf(String pkg) {
+        for (int i = 0; i < strip.size(); i++) if (strip.get(i).pkg.equals(pkg)) return i;
+        return -1;
     }
 
     /** Lista recibida del principal (o calculada aquí si este es el principal). */
@@ -88,44 +95,52 @@ public class DeskView extends View {
         recentsLoaded = true;
         recentsAccess = m.optBoolean("access", true);
         String sig = m.optString("sig");
-        if (sig.equals(recentsSig)) { invalidate(); return; }
-        recentsSig = sig;
-        Map<String, Recent> old = new HashMap<>();
-        for (Recent x : recents) old.put(x.pkg, x);
-        List<Recent> n = new ArrayList<>();
-        org.json.JSONArray a = m.optJSONArray("apps");
-        for (int i = 0; a != null && i < a.length(); i++) {
-            org.json.JSONObject o = a.optJSONObject(i);
-            if (o == null) continue;
-            Recent x = old.get(o.optString("p"));
-            if (x == null) {
-                x = new Recent();
-                x.pkg = o.optString("p");
-                try {
-                    byte[] b = Base64.decode(o.optString("i"), Base64.DEFAULT);
-                    x.icon = BitmapFactory.decodeByteArray(b, 0, b.length);
-                } catch (Exception ignored) { }
+        if (!sig.equals(recentsSig)) {
+            recentsSig = sig;
+            if (strip.isEmpty()) { Recent d = new Recent(); d.pkg = ""; d.label = "Desktop"; strip.add(d); }
+            // orden estable: las que siguen quedan donde estaban, las nuevas van al final
+            java.util.Set<String> now = new java.util.HashSet<>();
+            org.json.JSONArray a = m.optJSONArray("apps");
+            for (int i = 0; a != null && i < a.length(); i++) {
+                org.json.JSONObject o = a.optJSONObject(i);
+                if (o == null) continue;
+                String p = o.optString("p");
+                now.add(p);
+                int k = indexOf(p);
+                Recent x = k >= 0 ? strip.get(k) : new Recent();
+                x.label = o.optString("l");
+                if (k < 0) {
+                    x.pkg = p;
+                    try {
+                        byte[] b = Base64.decode(o.optString("i"), Base64.DEFAULT);
+                        x.icon = BitmapFactory.decodeByteArray(b, 0, b.length);
+                    } catch (Exception ignored) { }
+                    strip.add(x);
+                }
             }
-            x.label = o.optString("l");
-            n.add(x);
+            String cur = strip.size() > (int) (recScroll + 0.5f) && recScroll >= 0 ? strip.get(Math.round(recScroll)).pkg : "";
+            for (int i = strip.size() - 1; i > 0; i--) if (!now.contains(strip.get(i).pkg)) strip.remove(i);
+            int ci = indexOf(cur);   // que lo que estaba bajo la mira no salte
+            if (ci >= 0 && !scrubbing) { recScroll += ci - Math.round(recScroll); recTarget = ci; }
         }
-        recents.clear();
-        recents.addAll(n);
+        recActive = m.optString("active");
+        if (!scrubbing && android.os.SystemClock.uptimeMillis() > userUntil) {
+            int k = indexOf(recActive);
+            if (k >= 0) recTarget = k;
+        }
         invalidate();
     }
 
-    /** {inicio x, ancho de cada botón, cuántos caben/se muestran, arriba, abajo} */
-    private float[] recentsLayout(float width, float h) {
-        float top = 26 * dp, bottom = h - 8 * dp, pad = 10 * dp;
-        float slot = Math.min(62 * dp, bottom - top + 4 * dp);
-        int fit = Math.max(1, (int) ((width - 2 * pad) / slot));
-        int n = Math.min(fit, recents.size());
-        return new float[]{pad + ((width - 2 * pad) - n * slot) / 2, slot, n, top, bottom};
-    }
+    private float recTop() { return 26 * dp; }
 
-    /** Botonera animada: los íconos se deslizan a su nuevo lugar y aparecen creciendo; la app actual va resaltada. */
-    private void drawRecents(Canvas c, float width, float h) {
-        if (!recentsAccess || !recentsLoaded || recents.isEmpty()) {
+    /**
+     * Barra deslizante: los íconos pasan bajo una mira fija al centro. Lo que queda en la mira es la app que está
+     * al frente en el principal ("Desktop" = la mesa). Se desliza con el dedo y al soltar se abre esa app.
+     */
+    private void drawRecents(Canvas c, Item it, float width, float h) {
+        // alfiler: fijar o soltar el widget
+        drawPin(c, width - 22 * dp, 15 * dp, it.pin);
+        if (!recentsAccess || !recentsLoaded || strip.size() <= 1) {
             small.setColor(muted);
             small.setTextSize(13 * dp);
             String t = !recentsLoaded ? "Buscando apps recientes del principal…" : !recentsAccess
@@ -134,53 +149,101 @@ public class DeskView extends View {
             c.drawText(t, width / 2 - small.measureText(t) / 2, (26 * dp + h) / 2 + 4 * dp, small);
             return;
         }
-        float[] L = recentsLayout(width, h);
-        float startX = L[0], slot = L[1], top = L[3], bottom = L[4];
-        int n = (int) L[2];
-        float icon = Math.min(slot - 16 * dp, bottom - top - 14 * dp);
-        long now = android.os.SystemClock.uptimeMillis();
+        float top = recTop(), labelY = h - 9 * dp, bottom = h - 22 * dp;
+        float icon = Math.min(44 * dp, bottom - top - 10 * dp);
+        float slot = icon + 22 * dp;
+        recSlot = slot;
+        float cy = (top + bottom) / 2, cx0 = width / 2;
         boolean again = false;
-        for (int i = n; i < recents.size(); i++) { recents.get(i).ax = Float.NaN; recents.get(i).appear = 0; }
-        // resaltado de la app actual (la primera): una pastilla que se desliza
-        Recent cur = recents.get(0);
-        if (Float.isNaN(cur.ax)) { cur.ax = 0.8f; cur.appear = 0; }
-        float hx = startX + (cur.ax + 0.5f) * slot;
-        recHi.setColor((accent & 0x00FFFFFF) | 0x38000000);
-        c.drawRoundRect(new RectF(hx - slot / 2 + 3 * dp, top, hx + slot / 2 - 3 * dp, bottom), 14 * dp, 14 * dp, recHi);
-        recHi.setColor(accent);
-        c.drawCircle(hx, bottom - 5 * dp, 2.6f * dp, recHi);
-        for (int i = 0; i < n; i++) {
-            Recent x = recents.get(i);
-            if (Float.isNaN(x.ax)) { x.ax = i + 0.8f; x.appear = 0; }
-            x.ax += (i - x.ax) * 0.2f;
-            if (Math.abs(i - x.ax) > 0.01f) again = true; else x.ax = i;
-            x.appear += (1 - x.appear) * 0.16f;
-            if (1 - x.appear > 0.01f) again = true; else x.appear = 1;
-            float cx = startX + (x.ax + 0.5f) * slot, cy = (top + bottom) / 2 - 3 * dp;
-            float s = icon * (0.35f + 0.65f * x.appear);
-            if (x.pkg.equals(recPressed)) {
-                float t = (now - recPressAt) / 380f;
-                if (t < 1) { s *= 1 - 0.22f * (float) Math.sin(Math.PI * t); again = true; }
-            }
-            if (x.icon == null) continue;
-            bmpPaint.setAlpha(Math.round(255 * x.appear));
-            c.drawBitmap(x.icon, null, new RectF(cx - s / 2, cy - s / 2, cx + s / 2, cy + s / 2), bmpPaint);
+        if (!scrubbing) {
+            recScroll += (recTarget - recScroll) * 0.2f;
+            if (Math.abs(recTarget - recScroll) > 0.003f) again = true; else recScroll = recTarget;
+        }
+        c.save();
+        c.clipRect(6 * dp, top - 4 * dp, width - 6 * dp, h - 4 * dp);
+        long now = android.os.SystemClock.uptimeMillis();
+        for (int i = 0; i < strip.size(); i++) {
+            float d = Math.abs(i - recScroll);
+            float x = cx0 + (i - recScroll) * slot;
+            if (x < -slot || x > width + slot) continue;
+            float k = 1 - Math.min(d, 3) * 0.13f;
+            float s = icon * k;
+            if (d < 0.5f && now - recPressAt < 380) { s *= 1 - 0.15f * (float) Math.sin(Math.PI * (now - recPressAt) / 380f); again = true; }
+            int alpha = Math.round(255 * Math.max(0.25f, 1 - Math.min(d, 4) * 0.2f));
+            Recent r = strip.get(i);
+            RectF dst = new RectF(x - s / 2, cy - s / 2, x + s / 2, cy + s / 2);
+            if (r.pkg.isEmpty()) drawDesktopTile(c, dst, alpha);
+            else if (r.icon != null) { bmpPaint.setAlpha(alpha); c.drawBitmap(r.icon, null, dst, bmpPaint); }
         }
         bmpPaint.setAlpha(255);
+        c.restore();
+        // la mira: un cuadradito fijo al centro
+        float sh = icon / 2 + 7 * dp;
+        RectF sc = new RectF(cx0 - sh, cy - sh, cx0 + sh, cy + sh);
+        scope.setStyle(Paint.Style.STROKE);
+        scope.setStrokeWidth(5 * dp);
+        scope.setColor((accent & 0x00FFFFFF) | 0x40000000);
+        c.drawRoundRect(sc, 14 * dp, 14 * dp, scope);
+        scope.setStrokeWidth(2.4f * dp);
+        scope.setColor(accent);
+        c.drawRoundRect(sc, 14 * dp, 14 * dp, scope);
+        // nombre de lo que está en la mira; punto verde si es lo que está al frente en el principal
+        int ci = Math.max(0, Math.min(strip.size() - 1, Math.round(recScroll)));
+        Recent cur = strip.get(ci);
+        small.setColor(fg);
+        small.setTextSize(12 * dp);
+        String name = ellipsize(cur.label, small, width * 0.6f);
+        float tw = small.measureText(name);
+        c.drawText(name, cx0 - tw / 2, labelY, small);
+        if (cur.pkg.equals(recActive)) {
+            recHi.setColor(0xFF34C759);
+            c.drawCircle(cx0 - tw / 2 - 8 * dp, labelY - 4 * dp, 3 * dp, recHi);
+        }
         if (again) postInvalidateOnAnimation();
     }
 
-    private void tapRecents(float lx, float ly, float width, float h) {
-        if (host == null) return;
-        if (!recentsAccess) { host.onRecent(null, null); return; }
-        float[] L = recentsLayout(width, h);
-        int i = (int) Math.floor((lx - L[0]) / L[1]);
-        if (i < 0 || i >= (int) L[2] || ly < L[3] - 8 * dp) return;
-        Recent x = recents.get(i);
-        recPressed = x.pkg;
+    /** "Desktop": un cuadradito con la cuadrícula de la mesa. */
+    private void drawDesktopTile(Canvas c, RectF r, int alpha) {
+        recHi.setColor((accent & 0x00FFFFFF) | (Math.round(alpha * 0.9f) << 24));
+        float rad = r.width() * 0.24f;
+        c.drawRoundRect(r, rad, rad, recHi);
+        recHi.setColor((0x00FFFFFF) | (alpha << 24));
+        float g = r.width() * 0.13f, cell = (r.width() - g * 4) / 3 * 0.9f;
+        for (int a = 0; a < 2; a++) for (int b = 0; b < 3; b++) {
+            float x = r.left + g + b * (cell + g * 0.9f) + r.width() * 0.04f, y = r.top + g + a * (cell + g * 0.8f);
+            c.drawRoundRect(new RectF(x, y, x + cell, y + cell), cell * 0.25f, cell * 0.25f, recHi);
+        }
+        small.setColor((0x00FFFFFF) | (alpha << 24));
+        float ts = r.width() * 0.2f;
+        small.setTextSize(ts);
+        String t = "Desktop";
+        c.drawText(t, r.centerX() - small.measureText(t) / 2, r.bottom - r.width() * 0.1f, small);
+    }
+
+    private void drawPin(Canvas c, float x, float y, boolean on) {
+        recHi.setColor(on ? accent : (muted & 0x00FFFFFF) | 0x99000000);
+        c.save();
+        c.rotate(on ? 0 : 35, x, y);
+        c.drawCircle(x, y - 3 * dp, 4.5f * dp, recHi);
+        c.drawRect(x - 1 * dp, y, x + 1 * dp, y + 7 * dp, recHi);
+        c.restore();
+    }
+
+    private boolean onPin(float lx, float ly, float width) { return lx > width - 44 * dp && ly < recTop(); }
+
+    /** Al soltar: la barra se acomoda en el ícono más cercano y esa app se abre en el principal. */
+    private void scrubEnd(boolean moved, float lx, float width, float vx) {
+        scrubbing = false;
+        int n = strip.size();
+        if (n == 0) return;
+        float t = moved ? recScroll - vx / recSlot * 0.12f : recScroll + (lx - width / 2) / recSlot;
+        int i = Math.max(0, Math.min(n - 1, Math.round(t)));
+        recTarget = i;
+        userUntil = android.os.SystemClock.uptimeMillis() + 3500;
         recPressAt = android.os.SystemClock.uptimeMillis();
         invalidate();
-        host.onRecent(x.pkg, x.label);
+        Recent x = strip.get(i);
+        if (host != null && !x.pkg.equals(recActive)) host.onRecent(x.pkg, x.label);
     }
 
     /** Alto de la franja superior de un widget (nombre y botones); el widget va debajo. */
@@ -215,7 +278,7 @@ public class DeskView extends View {
     private final Paint glassEdge = new Paint(Paint.ANTI_ALIAS_FLAG), glassShine = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     // ---- estado del toque
-    private static final int NONE = 0, DRAG = 1, ROTATE = 2, RESIZE = 3, PINCH = 4, SWIPE = 5;
+    private static final int NONE = 0, DRAG = 1, ROTATE = 2, RESIZE = 3, PINCH = 4, SWIPE = 5, SCRUB = 6;
 
     // ---- escritorios a los lados (páginas) y apps
     private int page = 0, pages = 1;
@@ -401,8 +464,10 @@ public class DeskView extends View {
         invalidate();
     }
 
-    private boolean locked(Item it) { return lockApps && Item.APP.equals(it.kind); }
-    private boolean visible(Item it) { return it.page == page || it == dragging || remoteDrags.containsKey(it.id); }
+    private boolean locked(Item it) { return it.pin || (lockApps && Item.APP.equals(it.kind)); }
+    private boolean visible(Item it) { return onPage(it) || it == dragging || remoteDrags.containsKey(it.id); }
+    /** ¿Está en el escritorio actual? (los fijos están en todos) */
+    private boolean onPage(Item it) { return it.page == page || it.pin; }
     private int screenOf(Item it) { return onFirst(it) ? 0 : 1; }
 
     /**
@@ -813,7 +878,7 @@ public class DeskView extends View {
         String tag = isNote ? "NOTA" : isImg ? "IMAGEN" : isApp ? "APP" : isWidget ? "WIDGET" : isClock ? "RELOJ" : isBatt ? "BATERÍA" : isRec ? "APPS RECIENTES" : "ENLACE";
         if (isRec) {
             c.drawText(tag, 10 * dp, 18 * dp, label);
-            drawRecents(c, width, h);
+            drawRecents(c, it, width, h);
         } else if (isBatt) {
             c.drawText(tag, 10 * dp, 18 * dp, label);
             int[] b = host != null ? host.battery() : new int[]{-1, 0, -1, 0};
@@ -1000,7 +1065,7 @@ public class DeskView extends View {
         List<Item> sorted = new ArrayList<>(items);
         Collections.sort(sorted, (p, q) -> Long.compare(q.z, p.z));
         for (Item it : sorted) {
-            if (it.page != page) continue;
+            if (!onPage(it)) continue;
             float[] l = toLocal(it, px, py);
             if (l[0] >= 0 && l[0] <= l[2] && l[1] >= 0 && l[1] <= l[3]) return it;
         }
@@ -1067,6 +1132,11 @@ public class DeskView extends View {
                 if (pressed == null) { mode = SWIPE; return true; }   // espacio vacío: deslizar cambia de escritorio
                 float[] l = toLocal(pressed, e.getX(), e.getY());
                 downLocal = l;
+                if (Item.RECENTS.equals(pressed.kind) && editing == null && recentsAccess && strip.size() > 1
+                        && l[1] > recTop() - 4 * dp) {
+                    mode = SCRUB; scrubbing = true; scrubStart = recScroll; scrubItem = pressed;
+                    return true;
+                }
                 pressedBtn = locked(pressed) ? null : pressed == editing && pressed.delBtn.contains(l[0], l[1]) ? "del"
                         : Item.LINK.equals(pressed.kind) && pressed.openBtn.contains(l[0], l[1]) ? "open" : null;
                 ox = pressed.x; oy = pressed.y;
@@ -1075,6 +1145,7 @@ public class DeskView extends View {
             }
             case MotionEvent.ACTION_POINTER_DOWN: {
                 // segundo dedo sobre un elemento: girar y escalar con dos dedos
+                if (mode == SCRUB) return true;
                 Item target = pressed != null ? pressed : editing;
                 if (target == null || e.getPointerCount() != 2 || mode == SWIPE || locked(target)) return true;
                 removeCallbacks(longPress);
@@ -1087,6 +1158,15 @@ public class DeskView extends View {
                 return true;
             }
             case MotionEvent.ACTION_MOVE: {
+                if (mode == SCRUB && scrubItem != null) {
+                    if (vt != null) vt.addMovement(e);
+                    float dx = toLocal(scrubItem, e.getX(), e.getY())[0] - downLocal[0];
+                    if (!moved && Math.abs(dx) < touchSlop) return true;
+                    moved = true;
+                    recScroll = Math.max(-0.45f, Math.min(strip.size() - 0.55f, scrubStart - dx / recSlot));
+                    invalidate();
+                    return true;
+                }
                 if (mode == SWIPE) {
                     if (vt != null) vt.addMovement(e);
                     float sx = e.getX() - downX;
@@ -1160,6 +1240,15 @@ public class DeskView extends View {
                 edgeDir = 0;
                 Item it = pressed; pressed = null;
                 int m = mode; mode = NONE;
+                if (m == SCRUB) {
+                    float vx = 0;
+                    if (vt != null) { vt.addMovement(e); vt.computeCurrentVelocity(1000); vx = vt.getXVelocity(); vt.recycle(); vt = null; }
+                    if (e.getActionMasked() == MotionEvent.ACTION_CANCEL) { scrubbing = false; invalidate(); return true; }
+                    float[] l = scrubItem != null ? toLocal(scrubItem, e.getX(), e.getY()) : downLocal;
+                    scrubEnd(moved, l[0], l[2], vx);
+                    scrubItem = null;
+                    return true;
+                }
                 if (m == SWIPE) {
                     float vx = 0;
                     if (vt != null) { vt.addMovement(e); vt.computeCurrentVelocity(1000); vx = vt.getXVelocity(); vt.recycle(); vt = null; }
@@ -1237,7 +1326,11 @@ public class DeskView extends View {
             else host.onWidgetTap(it);
         }
         else if (Item.CLOCK.equals(it.kind)) { if (host != null) host.onOpenAlarms(); }
-        else if (Item.RECENTS.equals(it.kind)) { if (downLocal != null) tapRecents(downLocal[0], downLocal[1], downLocal[2], downLocal[3]); }
+        else if (Item.RECENTS.equals(it.kind)) {
+            if (downLocal == null || host == null) return;
+            if (onPin(downLocal[0], downLocal[1], downLocal[2])) { it.pin = !it.pin; if (it.pin) it.page = page; commit(it); }
+            else if (!recentsAccess) host.onRecent(null, null);
+        }
         else { it.z = System.currentTimeMillis(); invalidate(); }
     }
 }

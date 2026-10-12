@@ -913,7 +913,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .option(Ui.IMAGE, "Imagen", "Una foto de la galería", this::pickImage)
                 .option(Ui.BATTERY, "Batería", "Nivel de batería del principal y del extendido", this::addBattery)
                 .option(Ui.CLOCK, "Reloj", "Hora, fecha y próxima alarma; al tocarlo abre las alarmas", this::addClock)
-                .option(Ui.GRID, "Apps recientes", "Barra con las apps abiertas del principal: toca una para cambiar a ella", this::addRecents)
+                .option(Ui.GRID, "Apps recientes", "Barra deslizante: lo que queda en la mira es la app al frente en el principal", this::addRecents)
                 .option(Ui.WIDGETS, "Widget", "Widgets de tus apps (clima, calendario, música...)", this::addWidget)
                 .option(Ui.FOLDER, "Archivos", "Pasar archivos entre los dos teléfonos", this::openFiles)
                 .option(Ui.SEND, "Control de video", "Play/pausa, adelantar y volumen de lo que se ve en el principal",
@@ -983,11 +983,12 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             }
             return;
         }
+        if (pkg.isEmpty()) { pkg = getPackageName(); label = "Mesa Doble"; }   // "Desktop": volver a la mesa del principal
         openOnPrincipal(pkg, label);
-        main.postDelayed(pollRecents, 1500);
+        main.postDelayed(pollRecents, 900);
     }
 
-    /** Mientras se ve el widget, la lista se refresca cada 4 segundos (solo viaja si cambió). */
+    /** Mientras se ve el widget, la lista se refresca cada 2 segundos (solo viaja si cambió). */
     private final Runnable pollRecents = new Runnable() {
         @Override public void run() {
             main.removeCallbacks(this);
@@ -999,7 +1000,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                     main.post(() -> desk.setRecents(m));
                 });
             } else if (hub.connected()) hub.send("recReq", "sig", desk.recentsSig());
-            main.postDelayed(this, 4000);
+            main.postDelayed(this, 2000);
         }
     };
     private boolean resumed;

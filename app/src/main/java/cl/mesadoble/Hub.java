@@ -348,7 +348,20 @@ public class Hub implements Link.Listener {
         Intent i = app.getPackageManager().getLaunchIntentForPackage(pkg);
         if (i == null) return NOT_INSTALLED;
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
-        return startOrNotify(i, pkg.hashCode(), "Abrir " + (label.isEmpty() ? "la app" : label), "Toca para abrirla en este teléfono");
+        if (foreground || Settings.canDrawOverlays(app)) return startOrNotify(i, pkg.hashCode(), "Abrir " + label, "Toca para abrirla");
+        // Con otra app al frente Android no deja abrir apps desde el fondo, pero sí ir al inicio; justo después
+        // de eso da unos segundos de gracia: se va al inicio (sin animación) y enseguida se abre la app.
+        Intent home = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION);
+        try { app.startActivity(home); } catch (Exception ignored) { }
+        main.postDelayed(() -> { try { app.startActivity(i); } catch (Exception ignored) { } }, 70);
+        // si igual no se abrió (se puede comprobar con el acceso a datos de uso), queda el aviso de un toque
+        if (RecentApps.hasAccess(app) && !pkg.equals(app.getPackageName()))
+            main.postDelayed(() -> RecentApps.worker.execute(() -> {
+                if (!pkg.equals(RecentApps.active(app)))
+                    main.post(() -> startOrNotify(i, pkg.hashCode(), "Abrir " + (label.isEmpty() ? "la app" : label), "Toca para abrirla en este teléfono"));
+            }), 1800);
+        return LAUNCHED;
     }
 
     public void openAlarms() {

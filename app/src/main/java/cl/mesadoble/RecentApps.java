@@ -27,7 +27,7 @@ import java.util.concurrent.Executors;
  * Apps recientes del PRINCIPAL (las que están abiertas o se usaron hace poco), para el widget "Apps recientes".
  * Android solo lo permite con el "Acceso a datos de uso", que se activa a mano en Ajustes del principal.
  *   recReq  (extendido → principal) {sig}: pide la lista; si no cambió no se responde
- *   recList (principal → extendido) {sig, access, apps:[{p, l, i}]}
+ *   recList (principal → extendido) {sig, access, active, apps:[{p, l, i}]}  (active "" = la mesa)
  */
 final class RecentApps {
 
@@ -47,28 +47,55 @@ final class RecentApps {
 
     static Intent accessIntent() { return new Intent("android.settings.USAGE_ACCESS_SETTINGS"); }
 
-    /** Paquetes recientes, el más reciente primero. */
-    static List<String> packages(Context c) {
-        List<String> out = new ArrayList<>();
+    // uso acumulado: se consulta solo lo nuevo desde la última vez (es más liviano)
+    private static final Map<String, Long> last = new HashMap<>();
+    private static long queriedTo;
+    private static String lastResumed = "";
+
+    private static synchronized void refresh(Context c) {
         UsageStatsManager um = (UsageStatsManager) c.getSystemService(Context.USAGE_STATS_SERVICE);
-        if (um == null) return out;
+        if (um == null) return;
         long now = System.currentTimeMillis();
-        final Map<String, Long> last = new HashMap<>();
+        long from = queriedTo == 0 ? now - 2L * 24 * 3600 * 1000 : queriedTo - 2000;
+        long newest = 0;
         try {
-            UsageEvents ev = um.queryEvents(now - 2L * 24 * 3600 * 1000, now);
+            UsageEvents ev = um.queryEvents(from, now);
             UsageEvents.Event e = new UsageEvents.Event();
             while (ev.hasNextEvent()) {
                 ev.getNextEvent(e);
-                if (e.getEventType() == 1 /* ACTIVITY_RESUMED / MOVE_TO_FOREGROUND */) last.put(e.getPackageName(), e.getTimeStamp());
+                if (e.getEventType() == 1 /* ACTIVITY_RESUMED / MOVE_TO_FOREGROUND */) {
+                    last.put(e.getPackageName(), e.getTimeStamp());
+                    if (e.getTimeStamp() >= newest) { newest = e.getTimeStamp(); lastResumed = e.getPackageName(); }
+                }
             }
+            queriedTo = now;
         } catch (Exception ignored) { }
-        PackageManager pm = c.getPackageManager();
+    }
+
+    private static Set<String> homes(Context c) {
         Set<String> skip = new HashSet<>();
+        for (ResolveInfo ri : c.getPackageManager().queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0))
+            skip.add(ri.activityInfo.packageName);   // pantallas de inicio
+        return skip;
+    }
+
+    /** App que está al frente en el principal ("" = la mesa o la pantalla de inicio). */
+    static synchronized String active(Context c) {
+        refresh(c);
+        String p = lastResumed;
+        if (p.isEmpty() || p.equals(c.getPackageName()) || homes(c).contains(p) || "com.android.systemui".equals(p)) return "";
+        return p;
+    }
+
+    /** Paquetes recientes, el más reciente primero. */
+    static synchronized List<String> packages(Context c) {
+        refresh(c);
+        List<String> out = new ArrayList<>();
+        PackageManager pm = c.getPackageManager();
+        Set<String> skip = homes(c);
         skip.add(c.getPackageName());
         skip.add("com.android.systemui");
         skip.add("android");
-        for (ResolveInfo ri : pm.queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0))
-            skip.add(ri.activityInfo.packageName);   // pantallas de inicio
         List<String> pk = new ArrayList<>(last.keySet());
         Collections.sort(pk, (a, b) -> Long.compare(last.get(b), last.get(a)));
         for (String p : pk) {
@@ -85,6 +112,7 @@ final class RecentApps {
     static JSONObject message(Context c) {
         boolean access = hasAccess(c);
         List<String> pk = access ? packages(c) : new ArrayList<>();
+        String act = access ? active(c) : "";
         JSONObject m = new JSONObject();
         JSONArray arr = new JSONArray();
         PackageManager pm = c.getPackageManager();
@@ -101,7 +129,7 @@ final class RecentApps {
                 arr.put(o);
             } catch (Exception ignored) { }
         }
-        try { m.put("t", "recList"); m.put("sig", (access ? "" : "-") + sig(pk)); m.put("access", access); m.put("apps", arr); } catch (JSONException ignored) { }
+        try { m.put("t", "recList"); m.put("sig", (access ? "" : "-") + act + "|" + sig(pk)); m.put("active", act); m.put("access", access); m.put("apps", arr); } catch (JSONException ignored) { }
         return m;
     }
 }
