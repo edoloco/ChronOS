@@ -65,6 +65,87 @@ public class DeskView extends View {
         int[] battery();
         /** Widget de apps recientes: abrir esa app en el principal (pkg null = pedir el permiso de uso). */
         void onRecent(String pkg, String label);
+        /** Widget de cámara: open | switch | shot | flash | close (la cámara corre en el principal). */
+        void onCamera(String action);
+    }
+
+    // ---------------- widget de cámara: visor y botones de la cámara del principal ----------------
+
+    private Bitmap camFrame;
+    private boolean camOpen, camFront;
+    private int camFlash;
+    private long camFrameAt;
+    private String camMsg = "";
+    private final Paint camBtn = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+    public boolean hasCameraWidget() {
+        for (Item it : items) if (Item.CAMERA.equals(it.kind) && onPage(it)) return true;
+        return false;
+    }
+
+    public void setCamState(boolean open, boolean front, int flash) {
+        camOpen = open; camFront = front; camFlash = flash;
+        if (!open) camFrame = null;
+        invalidate();
+    }
+
+    public void setCamFrame(Bitmap b) { camFrame = b; camFrameAt = android.os.SystemClock.uptimeMillis(); camOpen = true; invalidate(); }
+    public void setCamMessage(String m) { camMsg = m; invalidate(); postDelayed(() -> { camMsg = ""; invalidate(); }, 2500); }
+
+    private float camBar() { return 64 * dp; }
+
+    private void drawCamera(Canvas c, float width, float h) {
+        float top = 26 * dp, bar = camBar();
+        RectF view = new RectF(8 * dp, top, width - 8 * dp, h - bar);
+        camBtn.setColor(0xFF000000);
+        c.drawRoundRect(view, 10 * dp, 10 * dp, camBtn);
+        if (camFrame != null && camOpen) {
+            float s = Math.min(view.width() / camFrame.getWidth(), view.height() / camFrame.getHeight());
+            float w = camFrame.getWidth() * s, hh = camFrame.getHeight() * s;
+            c.drawBitmap(camFrame, null, new RectF(view.centerX() - w / 2, view.centerY() - hh / 2, view.centerX() + w / 2, view.centerY() + hh / 2), bmpPaint);
+        } else {
+            small.setColor(0xFFDDDDDD);
+            small.setTextSize(14 * dp);
+            String t = ellipsize(camOpen ? "Esperando imagen…" : "Toca para abrir la cámara del principal", small, view.width() - 16 * dp);
+            c.drawText(t, view.centerX() - small.measureText(t) / 2, view.centerY() + 5 * dp, small);
+        }
+        if (!camMsg.isEmpty()) {
+            small.setColor(0xFFFFFFFF);
+            small.setTextSize(13 * dp);
+            c.drawText(camMsg, view.left + 10 * dp, view.top + 20 * dp, small);
+        }
+        // botones: flash · cambiar cámara · disparar (grande) · cerrar
+        float cy = h - bar / 2, r = 20 * dp;
+        float[] xs = {width * 0.14f, width * 0.36f, width * 0.62f, width * 0.86f};
+        for (int i = 0; i < 4; i++) {
+            if (i == 2) continue;
+            camBtn.setColor(CardTheme.dark(deskColor) || night ? 0x33FFFFFF : 0x22000000);
+            c.drawCircle(xs[i], cy, r, camBtn);
+        }
+        camBtn.setColor(0xFFFFFFFF);
+        c.drawCircle(xs[2], cy, 25 * dp, camBtn);
+        camBtn.setColor(0xFF5A5A60);
+        camBtn.setStyle(Paint.Style.STROKE); camBtn.setStrokeWidth(4 * dp);
+        c.drawCircle(xs[2], cy, 25 * dp, camBtn);
+        camBtn.setStyle(Paint.Style.FILL);
+        small.setColor(fg);
+        small.setTextSize(17 * dp);
+        String[] g = {camFlash == 0 ? "⚡✕" : camFlash == 1 ? "⚡A" : "⚡", "🔄", "", camOpen ? "✕" : "📷"};
+        for (int i = 0; i < 4; i++) if (!g[i].isEmpty()) c.drawText(g[i], xs[i] - small.measureText(g[i]) / 2, cy + 6 * dp, small);
+        small.setTextSize(10 * dp);
+        String fs = camFront ? "delantera" : "trasera";
+        c.drawText(fs, xs[1] - small.measureText(fs) / 2, cy + r + 9 * dp, small);
+    }
+
+    private void tapCamera(float lx, float ly, float width, float h) {
+        if (host == null) return;
+        if (ly < h - camBar()) { if (!camOpen) host.onCamera("open"); return; }
+        float[] xs = {width * 0.14f, width * 0.36f, width * 0.62f, width * 0.86f};
+        String[] a = {"flash", "switch", "shot", camOpen ? "close" : "open"};
+        int best = 0;
+        for (int i = 1; i < 4; i++) if (Math.abs(lx - xs[i]) < Math.abs(lx - xs[best])) best = i;
+        if (!camOpen && best != 3) { host.onCamera("open"); return; }
+        host.onCamera(a[best]);
     }
 
     // ---------------- apps recientes del principal ----------------
@@ -824,6 +905,8 @@ public class DeskView extends View {
             it.hPx = Math.max(128 * dp, width * 0.42f);
         } else if (Item.RECENTS.equals(it.kind)) {
             it.hPx = 96 * dp;
+        } else if (Item.CAMERA.equals(it.kind)) {
+            it.hPx = 26 * dp + width * 0.6f + camBar();
         } else {
             it.hPx = 132 * dp;
         }
@@ -839,7 +922,7 @@ public class DeskView extends View {
         RectF box = new RectF(0, 0, width, h);
 
         boolean isNote = Item.NOTE.equals(it.kind), isImg = Item.IMG.equals(it.kind), isApp = Item.APP.equals(it.kind),
-                isWidget = Item.WIDGET.equals(it.kind), isClock = Item.CLOCK.equals(it.kind), isBatt = Item.BATTERY.equals(it.kind), isRec = Item.RECENTS.equals(it.kind);
+                isWidget = Item.WIDGET.equals(it.kind), isClock = Item.CLOCK.equals(it.kind), isBatt = Item.BATTERY.equals(it.kind), isRec = Item.RECENTS.equals(it.kind), isCam = Item.CAMERA.equals(it.kind);
         boolean glassCard = CardTheme.isGlass() && !isNote && !isImg;
         boolean aeroCard = glassCard && CardTheme.isAero();
         boolean intense = glassCard && CardTheme.isIntense();
@@ -875,8 +958,11 @@ public class DeskView extends View {
 
         int ink = isNote || isImg ? 0xFF2B2A22 : fg;
         label.setColor((ink & 0x00FFFFFF) | 0x77000000);
-        String tag = isNote ? "NOTA" : isImg ? "IMAGEN" : isApp ? "APP" : isWidget ? "WIDGET" : isClock ? "RELOJ" : isBatt ? "BATERÍA" : isRec ? "APPS RECIENTES" : "ENLACE";
-        if (isRec) {
+        String tag = isNote ? "NOTA" : isImg ? "IMAGEN" : isApp ? "APP" : isWidget ? "WIDGET" : isClock ? "RELOJ" : isBatt ? "BATERÍA" : isRec ? "APPS RECIENTES" : isCam ? "CÁMARA" : "ENLACE";
+        if (isCam) {
+            c.drawText(tag, 10 * dp, 18 * dp, label);
+            drawCamera(c, width, h);
+        } else if (isRec) {
             c.drawText(tag, 10 * dp, 18 * dp, label);
             drawRecents(c, it, width, h);
         } else if (isBatt) {
@@ -1328,6 +1414,7 @@ public class DeskView extends View {
             else host.onWidgetTap(it);
         }
         else if (Item.CLOCK.equals(it.kind)) { if (host != null) host.onOpenAlarms(); }
+        else if (Item.CAMERA.equals(it.kind)) { if (downLocal != null) tapCamera(downLocal[0], downLocal[1], downLocal[2], downLocal[3]); }
         else if (Item.RECENTS.equals(it.kind)) {
             if (downLocal == null || host == null) return;
             if (onPin(downLocal[0], downLocal[1], downLocal[2])) { it.pin = !it.pin; if (it.pin) it.page = page; commit(it); }

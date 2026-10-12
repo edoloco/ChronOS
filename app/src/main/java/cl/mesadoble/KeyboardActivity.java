@@ -33,8 +33,8 @@ import java.util.List;
  */
 public class KeyboardActivity extends Activity implements Link.Listener, KeyboardView.Sink {
 
-    static final int KB = 0, KB_PAD = 1, PAD = 2, GAME = 3, DICT = 4, MEDIA = 5, CAMERA = 6, MDCAM = 7;
-    private static final String[] NAMES = {"Teclado", "Teclado + touchpad", "Touchpad", "Gamepad", "Dictado", "Control de video", "Cámara del teléfono", "Cámara Mesa Doble"};
+    static final int KB = 0, KB_PAD = 1, PAD = 2, GAME = 3, DICT = 4, MEDIA = 5, CAMERA = 6;
+    private static final String[] NAMES = {"Teclado", "Teclado + touchpad", "Touchpad", "Gamepad", "Dictado", "Control de video", "Cámara"};
     /** ¿Está a la vista el control de video? (para no abrirlo de nuevo) */
     static boolean showingMedia, showingCamera;
 
@@ -46,7 +46,6 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     private GamepadView gamepad;
     private MediaControlView mediaView;
     private CameraControlView cameraView;
-    private PhoneCameraView phoneCamView;
     private EditText field;
     private LinearLayout content, suggestBar;
     private TextView status, modeBtn, editBtn, resetBtn, sendBtn, outBtn, pairBtn;
@@ -78,7 +77,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         MainActivity.applyOrientation(this);   // misma orientación que la mesa
         prefs = getSharedPreferences("mesa", MODE_PRIVATE);
-        mode = Math.min(MDCAM, Math.max(KB, prefs.getInt("kbMode3", KB)));
+        mode = Math.min(CAMERA, Math.max(KB, prefs.getInt("kbMode3", KB)));
         mode = startMode(getIntent(), mode);
         dict = Dict.get(this);
 
@@ -186,14 +185,6 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
 
         mediaView = new MediaControlView(this, Hub.get(this));
         cameraView = new CameraControlView(this, Hub.get(this));
-        phoneCamView = new PhoneCameraView(this, Hub.get(this));
-        phoneCamView.setHost(() -> {
-            mode = MDCAM;
-            arrange();
-            JSONObject o = new JSONObject();
-            try { o.put("t", "camCmd"); o.put("a", "open"); } catch (Exception ignored) { }
-            if (hub.isPrincipal()) CameraActivity.command(this, o); else hub.send(o);
-        });
 
         field = new EditText(this);
         field.setHint("Escribe o dicta aquí: aparece en el principal");
@@ -238,7 +229,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     /** Modo pedido al abrir: el control de video (al empezar un video) o, si se abrió para escribir, un modo de teclado. */
     private static int startMode(Intent i, int current) {
         int m = i.getIntExtra("mode", -1);
-        if (m >= KB && m <= MDCAM) return m;
+        if (m >= KB && m <= CAMERA) return m;
         if (i.getBooleanExtra("auto", false) && current >= MEDIA) return KB;
         return current;
     }
@@ -249,7 +240,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         resumed = true;
         hub.keyboardVisible = mode < MEDIA;
         showingMedia = mode == MEDIA;
-        showingCamera = mode == CAMERA || mode == MDCAM;
+        showingCamera = mode == CAMERA;
         hub.add(this);
         hub.send("kbAsk");
     }
@@ -365,7 +356,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     /** Arma la pantalla según el modo y la orientación. */
     @SuppressWarnings("deprecation")
     private void arrange() {
-        for (View v : new View[]{keyboard, suggestBar, touchpad, gamepad, field, mediaView, cameraView, phoneCamView}) detach(v);
+        for (View v : new View[]{keyboard, suggestBar, touchpad, gamepad, field, mediaView, cameraView}) detach(v);
         content.removeAllViews();
         boolean land = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
         InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
@@ -419,10 +410,6 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
                 break;
             case CAMERA:
                 content.setOrientation(LinearLayout.VERTICAL);
-                content.addView(phoneCamView, new LinearLayout.LayoutParams(-1, -1));
-                break;
-            case MDCAM:
-                content.setOrientation(LinearLayout.VERTICAL);
                 content.addView(cameraView, new LinearLayout.LayoutParams(-1, -1));
                 break;
             default: {
@@ -436,14 +423,14 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
                 field.post(() -> { if (imm != null) imm.showSoftInput(field, InputMethodManager.SHOW_IMPLICIT); });
             }
         }
-        if (hub != null && resumed) { hub.keyboardVisible = mode < MEDIA; showingMedia = mode == MEDIA; showingCamera = mode == CAMERA || mode == MDCAM; }
+        if (hub != null && resumed) { hub.keyboardVisible = mode < MEDIA; showingMedia = mode == MEDIA; showingCamera = mode == CAMERA; }
         updateTouchpadHint();
         refreshSuggestions();
         syncBluetooth();
     }
 
     private void pickMode() {
-        int[] icons = {Ui.KEYBOARD, Ui.KB_TOUCHPAD, Ui.TOUCHPAD, Ui.GAMEPAD, Ui.MIC, Ui.SEND, Ui.IMAGE, Ui.IMAGE};
+        int[] icons = {Ui.KEYBOARD, Ui.KB_TOUCHPAD, Ui.TOUCHPAD, Ui.GAMEPAD, Ui.MIC, Ui.SEND, Ui.IMAGE};
         String[] subs = {
                 "Teclado completo con sugerencias",
                 "Teclado y touchpad juntos",
@@ -451,8 +438,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
                 "Joystick, cruceta y botones que se pueden mover",
                 "Escribir con el teclado del teléfono o dictar por voz",
                 "Play/pausa, adelantar 10 s y volumen del video del principal",
-                "La cámara del teléfono principal: foto, video, trasera/delantera y disparar",
-                "Cámara propia: ver aquí lo que ve, trasera/delantera, foto, flash y zoom"};
+                "Cámara del principal: ver aquí lo que ve, trasera/delantera, foto, flash y zoom"};
         Ui.Sheet sh = new Ui.Sheet(this).title("¿Cómo quieres controlar el principal?");
         for (int i = 0; i < NAMES.length; i++) {
             final int m = i;
@@ -595,7 +581,6 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         if ("kbState".equals(t) || "kbAck".equals(t)) updateStatus();
         if (mediaView != null && t.startsWith("m")) mediaView.onMessage(m);
         if (cameraView != null && t.startsWith("cam")) cameraView.onMessage(m);
-        if (phoneCamView != null && (t.startsWith("phoneCam") || "camApp".equals(t))) phoneCamView.onMessage(m);
         // abierto solo (al tocar un campo en el principal): se cierra solo cuando ya no hay dónde escribir
         if ("kbState".equals(t) && auto && (mode == KB || mode == KB_PAD || mode == DICT)) {
             h.removeCallbacks(autoClose);

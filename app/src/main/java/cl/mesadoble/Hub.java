@@ -244,13 +244,7 @@ public class Hub implements Link.Listener {
         if ("alarms".equals(t)) { openAlarms(); return; }
         // cámara del principal, controlada desde el extendido
         if ("camCmd".equals(t)) { if (isPrincipal()) CameraActivity.command(app, m); return; }
-        if ("phoneCam".equals(t)) { if (isPrincipal()) PhoneCamera.command(app, this, m); return; }
-        if (("camOpen".equals(t) || "camApp".equals(t)) && !isPrincipal() && !KeyboardActivity.showingCamera) {
-            Intent k = new Intent(app, KeyboardActivity.class)
-                    .putExtra("mode", "camOpen".equals(t) ? KeyboardActivity.MDCAM : KeyboardActivity.CAMERA).putExtra("manual", true)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-            startOrNotify(k, 48, "Controles de cámara", "Toca para controlar la cámara del principal");
-        }
+
         // widget de apps recientes: la lista es del principal
         if ("recReq".equals(t)) {
             if (!isPrincipal()) return;
@@ -545,7 +539,6 @@ public class Hub implements Link.Listener {
                 lastVideoAt = now;
                 if (!videoSession) { videoSession = true; fresh = true; }
             } else if (videoSession && now - lastVideoAt > 60000) videoSession = false;
-            checkCameraApp();
             if (on != musicActive || video != videoActive || fresh) {
                 musicActive = on;
                 videoActive = video;
@@ -554,28 +547,6 @@ public class Hub implements Link.Listener {
             main.postDelayed(this, 1500);
         }
     };
-
-    // la cámara del teléfono (otra app) al frente: el extendido ofrece sus controles una vez por apertura
-    private String camPkgs;
-    private boolean inCameraApp;
-    private void checkCameraApp() {
-        if (!RecentApps.hasAccess(app)) return;
-        RecentApps.worker.execute(() -> {
-            if (camPkgs == null) {
-                StringBuilder sb = new StringBuilder("|");
-                for (String a : new String[]{"android.media.action.STILL_IMAGE_CAMERA", "android.media.action.IMAGE_CAPTURE"})
-                    for (android.content.pm.ResolveInfo ri : app.getPackageManager().queryIntentActivities(new Intent(a), 0))
-                        sb.append(ri.activityInfo.packageName).append('|');
-                camPkgs = sb.toString();
-            }
-            String act = RecentApps.active(app);
-            boolean cam = !act.isEmpty() && !act.startsWith("@") && camPkgs.contains("|" + act + "|");
-            if (cam != inCameraApp) {
-                inCameraApp = cam;
-                if (cam) send("camApp", "pkg", act);
-            }
-        });
-    }
 
     /** ¿Algo suena como película (video)? */
     private static boolean moviePlaying(AudioManager am) {

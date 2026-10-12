@@ -221,13 +221,6 @@ public class CameraControlView extends LinearLayout {
             case "camOpen":
                 post(() -> { show(true); sendStream(true); });
                 break;
-            case "camApp":
-                post(() -> {
-                    show(false);
-                    status.setText("El principal usa la cámara del teléfono");
-                    note.setText("Esa app no se puede controlar desde aquí. Toca \"Abrir la cámara en el principal\" para usar la cámara de Mesa Doble, que sí se controla desde este teléfono.");
-                });
-                break;
             case "camFrame":
                 try {
                     byte[] b = Base64.decode(m.optString("j"), Base64.DEFAULT);

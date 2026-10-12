@@ -206,6 +206,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         main.removeCallbacks(updatePoll);
         main.postDelayed(updatePoll, 10 * 60_000L);
         main.postDelayed(pollRecents, 300);
+        main.postDelayed(camKeepAlive, 500);
         if (orient.canDetectOrientation()) orient.enable();
         if (hub.isPrincipal() && hub.connected() && MesaAccess.instance != null) MesaAccess.instance.switchToMesa();
     }
@@ -214,6 +215,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         hub.foreground = false;
         resumed = false;
         main.removeCallbacks(pollRecents);
+        main.removeCallbacks(camKeepAlive);
+        if (!hub.isPrincipal() && hub.connected() && desk.hasCameraWidget()) hub.send("camCmd", "a", "stream", "v", false);
         orient.disable();
         super.onPause();
     }
@@ -956,9 +959,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .option(Ui.GRID, "Apps recientes", "Barra deslizante: lo que queda en la mira es la app al frente en el principal", this::addRecents)
                 .option(Ui.WIDGETS, "Widget", "Widgets de tus apps (clima, calendario, música...)", this::addWidget)
                 .option(Ui.FOLDER, "Archivos", "Pasar archivos entre los dos teléfonos", this::openFiles)
-                .option(Ui.IMAGE, "Cámara", "Abre la cámara del principal y su control aquí: foto, video, trasera/delantera y disparar", this::openCamera)
-                .option(Ui.SEND, "Control de video", "Play/pausa, adelantar y volumen de lo que se ve en el principal",
-                        () -> MediaHub.openControls(this, MediaHub.VIDEO))
+                .option(Ui.IMAGE, "Cámara", "Widget con el visor y los botones de la cámara del principal", this::addCamera)
                 .option(Ui.RECEIVE, "Actualizar app", Updater.updateAvailable(this) ? "Hay una versión nueva: " + Updater.latestKnown(this)
                         : "Versión instalada: " + Updater.clean(Updater.installedVersion(this)), () -> Updater.check(this, hub))
                 .badgeIf(Updater.updateAvailable(this), "1")
@@ -992,18 +993,34 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         addItem(it);
     }
 
-    /** Cámara: corre en el principal; los controles, en el extendido. */
-    private void openCamera() {
-        if (hub.isPrincipal()) {
-            org.json.JSONObject m = new org.json.JSONObject();
-            try { m.put("a", "photo"); } catch (Exception ignored) { }
-            PhoneCamera.command(this, hub, m);
-            return;
-        }
-        startActivity(new Intent(this, KeyboardActivity.class).putExtra("mode", KeyboardActivity.CAMERA).putExtra("manual", true));
-        if (hub.connected()) hub.send("phoneCam", "a", "photo");   // abre la cámara del teléfono en el principal
+    /** Widget de cámara: la cámara corre en el principal; el visor y los botones, en la mesa. */
+    private void addCamera() {
+        Item it = new Item();
+        it.kind = Item.CAMERA;
+        it.w = sized(0.5);
+        double[] p = desk.spot(it.w);
+        it.x = p[0]; it.y = p[1];
+        addItem(it);
+        camKeepAlive.run();
+    }
+
+    @Override public void onCamera(String a) {
+        org.json.JSONObject m = new org.json.JSONObject();
+        try { m.put("t", "camCmd"); m.put("a", a); } catch (Exception ignored) { }
+        if (hub.isPrincipal()) CameraActivity.command(this, m);
+        else if (hub.connected()) { hub.send(m); if ("open".equals(a)) hub.send("camCmd", "a", "stream", "v", true); }
         else Toast.makeText(this, "El principal no está conectado", Toast.LENGTH_SHORT).show();
     }
+
+    /** Mientras se ve el widget de cámara en el extendido, se pide la imagen en vivo (cada 3 s se renueva). */
+    private final Runnable camKeepAlive = new Runnable() {
+        @Override public void run() {
+            main.removeCallbacks(this);
+            if (!resumed || hub.isPrincipal()) return;
+            if (desk.hasCameraWidget() && hub.connected()) hub.send("camCmd", "a", "stream", "v", true);
+            main.postDelayed(this, 3000);
+        }
+    };
 
     private void addRecents() {
         Item it = new Item();
@@ -1067,11 +1084,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (hub.connected()) hub.send("fmOpen");
     }
 
-    @Override public void onOpenAlarms() {
-        if (hub.isPrincipal() || !hub.connected()) { hub.openAlarms(); return; }
-        hub.send("alarms");
-        Toast.makeText(this, "Abriendo las alarmas en el principal", Toast.LENGTH_SHORT).show();
-    }
+    /** El reloj muestra la próxima alarma de ESTE teléfono: al tocarlo se abren las alarmas de este teléfono. */
+    @Override public void onOpenAlarms() { hub.openAlarms(); }
 
     private void showApps() {
         AppsDialog.show(this, night, new AppsDialog.Host() {
@@ -1457,6 +1471,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     @Override public void onWidgetTap(Item it) { if (it.wid < 0) requestBind(it); }
 
     @Override public void onWidgetTouch(Item it, float fx, float fy) {
+        if (getPackageName().equals(it.pkg)) { hub.openAlarms(); return; }   // el reloj de Mesa Doble: alarmas de este teléfono
         if (hub.isPrincipal() || !hub.connected()) return;
         hub.send("wTap", "wid", it.wid, "x", (double) fx, "y", (double) fy);
     }
@@ -1724,6 +1739,19 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
         switch (t) {
+            case "camState":
+                main.post(() -> desk.setCamState(m.optBoolean("open"), m.optBoolean("front"), m.optInt("flash")));
+                break;
+            case "camFrame":
+                try {
+                    byte[] jb = android.util.Base64.decode(m.optString("j"), android.util.Base64.DEFAULT);
+                    android.graphics.Bitmap fb = android.graphics.BitmapFactory.decodeByteArray(jb, 0, jb.length);
+                    if (fb != null) main.post(() -> desk.setCamFrame(fb));
+                } catch (Exception ignored) { }
+                break;
+            case "camShot":
+                main.post(() -> desk.setCamMessage(m.optBoolean("ok") ? "📸 Foto guardada en el principal" : "No se pudo guardar la foto"));
+                break;
             case "alarmsAck":
                 main.post(() -> Toast.makeText(this, "El principal no encontró la app de alarmas", Toast.LENGTH_SHORT).show());
                 break;
