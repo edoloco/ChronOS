@@ -1148,6 +1148,7 @@ public class DeskView extends View {
                 if (mode == SCRUB) return true;
                 Item target = pressed != null ? pressed : editing;
                 if (target == null || e.getPointerCount() != 2 || mode == SWIPE || locked(target)) return true;
+                if (target != editing) return true;   // girar o escalar: solo después de mantenerlo presionado
                 removeCallbacks(longPress);
                 if (mode == DRAG) { target.x = dragX; target.y = dragY; dragging = null; }
                 mode = PINCH;
@@ -1213,7 +1214,8 @@ public class DeskView extends View {
                 float ddx = e.getX() - downX, ddy = e.getY() - downY;
                 if (!moved && Math.hypot(ddx, ddy) < touchSlop) return true;
                 removeCallbacks(longPress);
-                if (!moved && locked(pressed)) {   // app bloqueada: no se mueve; el gesto desliza el escritorio
+                // nada se mueve sin mantenerlo presionado antes (o si está fijo): el gesto desliza el escritorio
+                if (!moved && (locked(pressed) || (!longPressed && pressed != editing))) {
                     pressed = null; mode = SWIPE; downX = e.getX(); moved = false;
                     return true;
                 }

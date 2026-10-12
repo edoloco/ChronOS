@@ -179,7 +179,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
         side = hub.side();
         if (side >= 0) applySide();
-        if (b == null) chooseSide();   // al iniciar, elegir principal o extendido
+        if (side < 0) chooseSide();   // solo la primera vez: después se recuerda (se cambia en Ajustes)
         hub.add(this);
         LinkService.start(this);
         if (android.os.Build.VERSION.SDK_INT >= 33 && !prefs.getBoolean("askedNotif", false)) {
@@ -203,6 +203,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         hub.foreground = true;
         resumed = true;
         Updater.checkQuiet(this, false, this::showUpdateBadge);
+        main.removeCallbacks(updatePoll);
+        main.postDelayed(updatePoll, 10 * 60_000L);
         main.postDelayed(pollRecents, 300);
         if (orient.canDetectOrientation()) orient.enable();
         if (hub.isPrincipal() && hub.connected() && MesaAccess.instance != null) MesaAccess.instance.switchToMesa();
@@ -734,6 +736,14 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .show();
     }
 
+    private final Runnable updatePoll = new Runnable() {
+        @Override public void run() {
+            if (!resumed) return;
+            Updater.checkQuiet(MainActivity.this, false, MainActivity.this::showUpdateBadge);
+            main.postDelayed(this, 10 * 60_000L);
+        }
+    };
+
     /** Círculo rojo en Ajustes cuando hay una versión nueva publicada. */
     private void showUpdateBadge() {
         if (settingsBtn != null) settingsBtn.setBadge(Updater.updateAvailable(this));
@@ -761,6 +771,15 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             sb.append("\n");
         } else sb.append("Otro teléfono: sin conexión\n");
         sb.append("Repositorio: ").append(repo.isEmpty() ? "(sin definir)" : repo).append("\n\n");
+        // lo que trajo la versión instalada
+        org.json.JSONArray notes = Updater.notes(this);
+        for (int k = 0; k < notes.length(); k++) {
+            org.json.JSONObject o = notes.optJSONObject(k);
+            if (o == null || !Updater.clean(o.optString("tag")).equals(Updater.clean(v))) continue;
+            sb.append("Lo nuevo en esta versión:\n");
+            for (String ch : Updater.changes(o.optString("body"))) sb.append("  – ").append(ch).append("\n");
+            sb.append("\n");
+        }
         sb.append("Mesa Doble une dos teléfonos como si fueran uno: mesa compartida, teclado, touchpad, gamepad y archivos.\n");
         sb.append("Diccionario: FrequencyWords (MIT).");
         new Ui.Sheet(this)
@@ -769,8 +788,22 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .option(Ui.RECEIVE, Updater.updateAvailable(this) ? "Actualizar a la versión " + Updater.latestKnown(this) : "Buscar actualización",
                         null, () -> Updater.check(this, hub))
                 .badgeIf(Updater.updateAvailable(this), "1")
+                .option(Ui.NOTE, "Novedades", "Qué trae cada versión", this::showNotes)
                 .button("Cerrar", false, null)
                 .show();
+    }
+
+    /** Historial de cambios (de las versiones publicadas). */
+    private void showNotes() {
+        Runnable show = () -> {
+            String t = Updater.notesText(this, 25);
+            new Ui.Sheet(this)
+                    .title("Novedades")
+                    .message(t.isEmpty() ? "No pude leer las novedades (¿sin internet?)." : t)
+                    .button("Cerrar", true, null)
+                    .show();
+        };
+        Updater.checkQuiet(this, true, () -> { if (!isFinishing()) { show.run(); showUpdateBadge(); } });
     }
 
     /** Horizontal o vertical, con dibujos de cómo van los teléfonos. */
@@ -848,6 +881,13 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             } else lines.add("✓ Sigue conectado con la pantalla apagada");
         }
         if (fixes.isEmpty() && !always) return;
+        if (!always) {
+            // solo se avisa solo si falta algo distinto a lo que ya se avisó (se recuerda la respuesta)
+            StringBuilder miss = new StringBuilder(hub.isPrincipal() ? "P" : "E");
+            for (String l : lines) if (l.startsWith("✗")) miss.append('|').append(l);
+            if (miss.toString().equals(prefs.getString("setupSeen", ""))) return;
+            prefs.edit().putString("setupSeen", miss.toString()).apply();
+        }
         Ui.Sheet sh = new Ui.Sheet(this)
                 .title(hub.isPrincipal() ? "Configurar el principal" : "Configurar el extendido")
                 .message(fixes.isEmpty() ? "Todo listo." : "Toca lo que falta para resolverlo. En teléfonos Xiaomi revisa también: "
@@ -918,7 +958,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .option(Ui.FOLDER, "Archivos", "Pasar archivos entre los dos teléfonos", this::openFiles)
                 .option(Ui.SEND, "Control de video", "Play/pausa, adelantar y volumen de lo que se ve en el principal",
                         () -> MediaHub.openControls(this, MediaHub.VIDEO))
-                .option(Ui.RECEIVE, "Actualizar app", "Versión instalada: " + Updater.clean(Updater.installedVersion(this)), () -> Updater.check(this, hub))
+                .option(Ui.RECEIVE, "Actualizar app", Updater.updateAvailable(this) ? "Hay una versión nueva: " + Updater.latestKnown(this)
+                        : "Versión instalada: " + Updater.clean(Updater.installedVersion(this)), () -> Updater.check(this, hub))
+                .badgeIf(Updater.updateAvailable(this), "1")
                 .button("Cerrar", false, null)
                 .show();
     }
@@ -1213,13 +1255,14 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     private void setSide(int s) {
+        boolean changed = side != s;
         side = s;
         prefs.edit().putInt("side", s).apply();
         applyOrientation(this);
         relayout();
         if (s == 1) sendView();
         if (s == 1 && hub.connected() && MesaAccess.instance != null) MesaAccess.instance.switchToMesa();
-        main.postDelayed(() -> checkSetup(false), 400);
+        if (changed) main.postDelayed(() -> checkSetup(false), 400);
     }
 
     private void updateStatus() {

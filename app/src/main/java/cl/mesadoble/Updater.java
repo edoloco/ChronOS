@@ -91,9 +91,15 @@ public class Updater {
             JSONArray rels = new JSONArray(new String(b.toByteArray(), StandardCharsets.UTF_8));
             String want = apkName(c);
             Release best = null;
+            JSONArray notes = new JSONArray();
             for (int k = 0; k < rels.length(); k++) {
                 JSONObject o = rels.getJSONObject(k);
                 if (o.optBoolean("draft") || o.optBoolean("prerelease")) continue;
+                if (notes.length() < 25) {
+                    JSONObject n = new JSONObject();
+                    n.put("tag", o.optString("tag_name")); n.put("body", o.optString("body")); n.put("date", o.optString("published_at"));
+                    notes.put(n);
+                }
                 Release r = new Release();
                 r.tag = o.optString("tag_name");
                 JSONArray as = o.optJSONArray("assets");
@@ -104,6 +110,7 @@ public class Updater {
                 if (r.url == null) continue;
                 if (best == null || newer(r.tag, best.tag)) best = r;
             }
+            c.getSharedPreferences("mesa", Context.MODE_PRIVATE).edit().putString("relNotes", notes.toString()).apply();
             if (best == null) throw new IOException("No encontré versiones publicadas con " + want);
             return best;
         } catch (org.json.JSONException e) { throw new IOException("Respuesta inválida de GitHub"); }
@@ -219,10 +226,10 @@ public class Updater {
 
     static String latestKnown(Context c) { return clean(c.getSharedPreferences("mesa", Context.MODE_PRIVATE).getString("latestTag", "")); }
 
-    /** Revisa en silencio (como mucho cada 2 horas, o ya si force) y avisa en el hilo principal. */
+    /** Revisa en silencio (como mucho cada 10 minutos, o ya si force) y avisa en el hilo principal. */
     static void checkQuiet(Context c, boolean force, Runnable done) {
         android.content.SharedPreferences p = c.getSharedPreferences("mesa", Context.MODE_PRIVATE);
-        if (!force && System.currentTimeMillis() - p.getLong("latestAt", 0) < 2 * 3600_000L) { main.post(done); return; }
+        if (!force && System.currentTimeMillis() - p.getLong("latestAt", 0) < 10 * 60_000L) { main.post(done); return; }
         Context app = c.getApplicationContext();
         new Thread(() -> {
             try {
@@ -231,6 +238,47 @@ public class Updater {
             } catch (Exception ignored) { }
             main.post(done);
         }, "buscar-version").start();
+    }
+
+    // ---------------- novedades de cada versión ----------------
+
+    /** Lo que trae una versión, en puntos (sacado de la descripción publicada). */
+    static java.util.List<String> changes(String body) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        String first = body == null ? "" : body.split("\n", 2)[0];
+        int i = first.indexOf("Incluye:");
+        String list = i >= 0 ? first.substring(i + 8).trim() : first.trim();
+        for (String part : list.split(";\\s*")) {
+            String t = part.trim();
+            if (t.endsWith(".")) t = t.substring(0, t.length() - 1);
+            if (!t.isEmpty()) out.add(Character.toUpperCase(t.charAt(0)) + t.substring(1));
+        }
+        return out;
+    }
+
+    /** Novedades guardadas: [{tag, body, date}], de la más nueva a la más antigua. */
+    static JSONArray notes(Context c) {
+        try { return new JSONArray(c.getSharedPreferences("mesa", Context.MODE_PRIVATE).getString("relNotes", "[]")); }
+        catch (org.json.JSONException e) { return new JSONArray(); }
+    }
+
+    /** Texto de novedades: la versión instalada primero (y las más nuevas si hay), luego las anteriores. */
+    static String notesText(Context c, int max) {
+        JSONArray a = notes(c);
+        String cur = clean(installedVersion(c));
+        StringBuilder sb = new StringBuilder();
+        for (int k = 0; k < a.length() && k < max; k++) {
+            JSONObject o = a.optJSONObject(k);
+            if (o == null) continue;
+            String v = clean(o.optString("tag"));
+            String date = o.optString("date");
+            if (date.length() >= 16) date = date.substring(8, 10) + "/" + date.substring(5, 7) + " " + date.substring(11, 16) + " UTC";
+            sb.append(v.equals(cur) ? "▶ " : newer(v, cur) ? "★ " : "• ").append(v)
+              .append(v.equals(cur) ? "  (instalada)" : newer(v, cur) ? "  (nueva, sin instalar)" : "").append("   ").append(date).append("\n");
+            for (String ch : changes(o.optString("body"))) sb.append("     – ").append(ch).append("\n");
+            sb.append("\n");
+        }
+        return sb.toString().trim();
     }
 
     // ---------------- en pantalla ----------------
