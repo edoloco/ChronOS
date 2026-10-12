@@ -25,7 +25,10 @@ public class SquareButton extends View {
     private final float dp;
     private final Paint bg = new Paint(Paint.ANTI_ALIAS_FLAG), stroke = new Paint(Paint.ANTI_ALIAS_FLAG),
             fill = new Paint(Paint.ANTI_ALIAS_FLAG), label = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final int bgColor, bgPressed, fgColor, accent, warn;
+    private int bgColor, bgPressed, fgColor;
+    private final int accent, warn;
+    private final boolean night;
+    private final Paint border = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final boolean primary;
     private float rot = 0;
     private ValueAnimator anim;
@@ -38,11 +41,12 @@ public class SquareButton extends View {
         this.text = text;
         this.primary = primary;
         dp = c.getResources().getDisplayMetrics().density;
+        this.night = night;
         accent = night ? 0xFF5CC3CF : 0xFF1F7F8C;
         warn = night ? 0xFFF0A26B : 0xFFB4541A;
-        bgColor = primary ? accent : (night ? 0xFF223040 : 0xFFFFFFFF);
-        bgPressed = night ? 0xFF2F4258 : 0xFFE2E8ED;
-        fgColor = primary ? (night ? 0xFF18212B : 0xFFFFFFFF) : (night ? 0xFFE6EDF3 : 0xFF1D2733);
+        border.setStyle(Paint.Style.STROKE);
+        border.setStrokeWidth(dp);
+        applyTheme();
         stroke.setStyle(Paint.Style.STROKE);
         stroke.setStrokeWidth(2 * dp);
         stroke.setStrokeCap(Paint.Cap.ROUND);
@@ -59,6 +63,18 @@ public class SquareButton extends View {
     }
 
     public void setStatus(int level) { statusLevel = level; invalidate(); }
+
+    /** Colores según el tema de tarjetas y menús (automático, cristal o un color). */
+    public void applyTheme() {
+        bgColor = primary ? accent : CardTheme.buttonFill(night);
+        bgPressed = CardTheme.buttonPressed(night);
+        fgColor = primary ? (night ? 0xFF18212B : 0xFFFFFFFF) : CardTheme.fg(night);
+        border.setColor(CardTheme.stroke());
+        stroke.setColor(fgColor);
+        fill.setColor(fgColor);
+        label.setColor(fgColor);
+        invalidate();
+    }
 
     private boolean compact;
     /** Versión chica, solo ícono (para la barra superior del teclado). */
@@ -104,6 +120,7 @@ public class SquareButton extends View {
         float w = getWidth(), h = getHeight(), r = 12 * dp;
         bg.setColor(pressed && !primary ? bgPressed : bgColor);
         c.drawRoundRect(new RectF(0, 0, w, h), r, r, bg);
+        if (CardTheme.isGlass() && !primary) c.drawRoundRect(new RectF(dp / 2, dp / 2, w - dp / 2, h - dp / 2), r, r, border);
         c.save();
         c.rotate(rot, w / 2, h / 2);
         float cx = w / 2, cy = compact ? h / 2 : h * 0.42f, u = (compact ? 6 : 7) * dp;   // u: unidad del ícono

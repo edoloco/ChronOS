@@ -91,7 +91,10 @@ public class DeskView extends View {
     private final TextPaint hand = new TextPaint(Paint.ANTI_ALIAS_FLAG), small = new TextPaint(Paint.ANTI_ALIAS_FLAG),
             label = new TextPaint(Paint.ANTI_ALIAS_FLAG), empty = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private int deskColor, deskColor2;
-    private final int accent, fg, muted, linkBg;
+    private final int accent;
+    private int fg, muted, linkBg;
+    private final boolean night;
+    private final Paint glassEdge = new Paint(Paint.ANTI_ALIAS_FLAG), glassShine = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     // ---- estado del toque
     private static final int NONE = 0, DRAG = 1, ROTATE = 2, RESIZE = 3, PINCH = 4, SWIPE = 5;
@@ -135,6 +138,10 @@ public class DeskView extends View {
         fg = night ? 0xFFE6EDF3 : 0xFF1D2733;
         muted = night ? 0xFF93A4B5 : 0xFF5B6B7A;
         linkBg = night ? 0xFF223040 : 0xFFFFFFFF;
+        this.night = night;
+        glassEdge.setStyle(Paint.Style.STROKE);
+        glassEdge.setStrokeWidth(1.2f * dp);
+        setCardTheme();
 
         bg.setColor(deskColor);
         dot.setColor(night ? 0x1ABED7EB : 0x29283C50);
@@ -171,10 +178,20 @@ public class DeskView extends View {
         deskColor2 = dark ? Color.rgb((int) (r + (255 - r) * k), (int) (g + (255 - g) * k), (int) (b + (255 - b) * k))
                           : Color.rgb((int) (r * (1 - k)), (int) (g * (1 - k)), (int) (b * (1 - k)));
         bg.setColor(deskColor);
+        CardTheme.desk = c;
         dot.setColor(dark ? 0x1FFFFFFF : 0x29000000);
         empty.setColor(dark ? 0xFFB0BCC8 : 0xFF4B5966);
+        setCardTheme();   // el texto sobre cristal depende del fondo
+    }
+    /** Colores de las tarjetas (apps, enlaces, widgets, reloj, batería) según el tema elegido. */
+    public void setCardTheme() {
+        linkBg = CardTheme.fill(night);
+        fg = CardTheme.fg(night);
+        muted = CardTheme.muted(night);
+        glassEdge.setColor(CardTheme.stroke());
         invalidate();
     }
+
     public boolean isDragging(Item it) { return dragging == it || (editing == it && mode != NONE); }
     public void setSide(int s) { side = s; invalidate(); }
     public void setVertical(boolean v) { vertical = v; invalidate(); }
@@ -597,9 +614,19 @@ public class DeskView extends View {
 
         boolean isNote = Item.NOTE.equals(it.kind), isImg = Item.IMG.equals(it.kind), isApp = Item.APP.equals(it.kind),
                 isWidget = Item.WIDGET.equals(it.kind), isClock = Item.CLOCK.equals(it.kind), isBatt = Item.BATTERY.equals(it.kind);
+        boolean glassCard = CardTheme.isGlass() && !isNote && !isImg;
+        float rr = isApp ? 18 * dp : glassCard ? 14 * dp : r;
         card.setColor(isNote ? it.color : isImg ? 0xFFFFFFFF : linkBg);
-        card.setShadowLayer((lifted ? 18 : 10) * dp, 0, (lifted ? 10 : 5) * dp, 0x55000000);
-        c.drawRoundRect(box, isApp ? 18 * dp : r, isApp ? 18 * dp : r, card);
+        if (glassCard) card.clearShadowLayer();   // una sombra se vería como mancha detrás del vidrio
+        else card.setShadowLayer((lifted ? 18 : 10) * dp, 0, (lifted ? 10 : 5) * dp, 0x55000000);
+        c.drawRoundRect(box, rr, rr, card);
+        if (glassCard) {
+            // cristal: brillo arriba y un borde fino claro
+            glassShine.setShader(new LinearGradient(0, 0, 0, h * 0.55f,
+                    CardTheme.glass == CardTheme.GLASS_LIGHT ? 0x40FFFFFF : 0x22FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
+            c.drawRoundRect(box, rr, rr, glassShine);
+            c.drawRoundRect(new RectF(0.6f * dp, 0.6f * dp, width - 0.6f * dp, h - 0.6f * dp), rr, rr, glassEdge);
+        }
 
         int ink = isNote || isImg ? 0xFF2B2A22 : fg;
         label.setColor((ink & 0x00FFFFFF) | 0x77000000);

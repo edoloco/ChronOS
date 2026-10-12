@@ -39,7 +39,10 @@ public class Ui {
     }
 
     static int surface(boolean n) { return n ? 0xFF1E2934 : 0xFFF7F9FB; }
-    static int row(boolean n) { return n ? 0xFF253445 : 0xFFFFFFFF; }
+    static int row(boolean n) {
+        if (CardTheme.isGlass()) return n ? 0x26FFFFFF : 0x80FFFFFF;   // filas translúcidas sobre el cristal
+        return n ? 0xFF253445 : 0xFFFFFFFF;
+    }
     static int fg(boolean n) { return n ? 0xFFE6EDF3 : 0xFF1D2733; }
     static int muted(boolean n) { return n ? 0xFF93A4B5 : 0xFF5B6B7A; }
     static int accent(boolean n) { return n ? 0xFF5CC3CF : 0xFF1F7F8C; }
@@ -56,7 +59,7 @@ public class Ui {
 
         public Sheet(Activity a) {
             this.a = a;
-            n = night(a);
+            n = CardTheme.sheetNight(night(a));   // el texto se adapta al color elegido para los menús
             dp = a.getResources().getDisplayMetrics().density;
             d = new Dialog(a, android.R.style.Theme_Material_Dialog_NoActionBar);
             d.requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -65,7 +68,8 @@ public class Ui {
             card.setOrientation(LinearLayout.VERTICAL);
             card.setPadding(px(22), px(20), px(22), px(16));
             GradientDrawable bg = new GradientDrawable();
-            bg.setColor(surface(n));
+            bg.setColor(CardTheme.sheetFill(night(a)));
+            if (CardTheme.isGlass()) bg.setStroke(px(1), CardTheme.stroke());
             bg.setCornerRadius(px(26));
             card.setBackground(bg);
             card.setElevation(px(12));
@@ -196,7 +200,16 @@ public class Ui {
                 w.setBackgroundDrawable(new ColorDrawable(0x00000000));
                 w.setLayout(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
                 w.addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND);
-                w.setDimAmount(0.45f);
+                w.setDimAmount(CardTheme.isGlass() ? 0.2f : 0.45f);
+                if (CardTheme.isGlass() && android.os.Build.VERSION.SDK_INT >= 31) {
+                    // cristal: lo de atrás se ve borroso (Android 12 o superior, si el teléfono lo permite)
+                    try {
+                        w.addFlags(0x00000004 /* FLAG_BLUR_BEHIND */);
+                        WindowManager.LayoutParams lp = w.getAttributes();
+                        WindowManager.LayoutParams.class.getMethod("setBlurBehindRadius", int.class).invoke(lp, px(28));
+                        w.setAttributes(lp);
+                    } catch (Exception ignored) { }
+                }
             }
             d.show();
             return d;

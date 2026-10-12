@@ -92,6 +92,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         super.onCreate(b);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         prefs = getSharedPreferences("mesa", MODE_PRIVATE);
+        CardTheme.load(this);
 
         FrameLayout root = new FrameLayout(this);
         desk = new DeskView(this, night);
@@ -105,7 +106,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setPadding(dp(6), dp(6), dp(6), dp(6));
-        bar.setBackground(pill(night ? 0xE6182129 : 0xEEFFFFFF));
+        bar.setBackground(barBg());
         bar.setElevation(dp(6));
         bar.setLayoutTransition(new android.animation.LayoutTransition());
         barOpen = prefs.getBoolean("barOpen", true);
@@ -121,7 +122,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         // Atrás, Inicio y Recientes del PRINCIPAL, al lado de la barra (solo en el extendido)
         navPill = new LinearLayout(this);
         navPill.setPadding(dp(6), dp(6), dp(6), dp(6));
-        navPill.setBackground(pill(night ? 0xE6182129 : 0xEEFFFFFF));
+        navPill.setBackground(barBg());
         navPill.setElevation(dp(6));
         int[] nk = {SquareButton.BACK, SquareButton.HOME, SquareButton.RECENTS};
         String[] nl = {"Atrás", "Inicio", "Recientes"}, nkeys = {"back", "home", "recents"};
@@ -255,6 +256,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         boolean h = locked() ? prefs.getBoolean("orientH", true) : landscapeNow();
         hub.send("view", "h", h, "lock", locked());
         hub.send("bg", "c", prefs.getInt("deskColor", 0));
+        hub.send("cardTheme", "c", CardTheme.color, "g", CardTheme.glass);
         hub.send("pages", "n", desk.pages(), "cur", desk.page());
         hub.send("apps", "lock", prefs.getBoolean("appsLock", false), "auto", prefs.getBoolean("appsAuto", false));
         hub.send("snap", "on", prefs.getBoolean("snapGrid", false));
@@ -337,7 +339,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .title("Color de fondo")
                 .message("Se aplica en ambos teléfonos. El primero sigue el modo claro u oscuro del sistema.")
                 .view(sc)
-                .option(Ui.PALETTE, "Color personalizado", "Elegir tono, intensidad y brillo", () -> customColor(cur))
+                .option(Ui.PALETTE, "Color personalizado", "Elegir tono, intensidad y brillo", () -> customColor(cur, col -> setDeskColor(col, false)))
                 .button("Cerrar", false, null)
                 .show();
     }
@@ -361,7 +363,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     /** Cualquier color: tono, intensidad y brillo, con vista previa en vivo. */
-    private void customColor(int start) {
+    private void customColor(int start, java.util.function.IntConsumer use) {
         float[] hsv = new float[3];
         android.graphics.Color.colorToHSV(start == 0 ? (night ? 0xFF18212B : 0xFFDDE3E8) : start, hsv);
         LinearLayout box = new LinearLayout(this);
@@ -396,8 +398,59 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .title("Color personalizado")
                 .view(box)
                 .button("Cancelar", false, null)
-                .button("Usar", true, () -> setDeskColor(android.graphics.Color.HSVToColor(hsv), false))
+                .button("Usar", true, () -> use.accept(android.graphics.Color.HSVToColor(hsv)))
                 .show();
+    }
+
+    // ---------------- color de tarjetas y menús ----------------
+
+    static final int[] CARD_COLORS = {0xFF223040, 0xFF2A2A2E, 0xFF000000, 0xFFFFFFFF, 0xFFF1EDE4, 0xFF1F7F8C,
+            0xFF2E5EAA, 0xFF6A3FA0, 0xFFB03A6B, 0xFFC0532B, 0xFF3F8F4A, 0xFFE8A33D};
+
+    private GradientDrawable barBg() {
+        GradientDrawable g = pill(CardTheme.barFill(night));
+        if (CardTheme.isGlass()) g.setStroke(dp(1), CardTheme.stroke());
+        return g;
+    }
+
+    /** Tarjetas de apps y elementos, barra de opciones y ventanas de menú: automático, cristal o un color. */
+    private void chooseCardColor() {
+        final android.app.Dialog[] dlg = new android.app.Dialog[1];
+        LinearLayout grid = new LinearLayout(this);
+        grid.setOrientation(LinearLayout.VERTICAL);
+        for (int r = 0; r < CARD_COLORS.length / 6; r++) {
+            LinearLayout row = new LinearLayout(this);
+            row.setGravity(Gravity.CENTER);
+            for (int i = r * 6; i < r * 6 + 6; i++) {
+                final int col = CARD_COLORS[i];
+                row.addView(swatch(col, !CardTheme.isGlass() && CardTheme.color == col,
+                        () -> { setCardTheme(col, CardTheme.NONE, false); if (dlg[0] != null) dlg[0].dismiss(); }), swatchLp());
+            }
+            grid.addView(row);
+        }
+        dlg[0] = new Ui.Sheet(this)
+                .title("Tarjetas y menús")
+                .message("Color de las tarjetas de apps y elementos, de la barra de opciones y de estos menús. Se aplica en ambos teléfonos.")
+                .option(Ui.PALETTE, -1, "Cristal claro", "Translúcido, como vidrio esmerilado", CardTheme.glass == CardTheme.GLASS_LIGHT,
+                        () -> setCardTheme(0, CardTheme.GLASS_LIGHT, false))
+                .option(Ui.PALETTE, -1, "Cristal oscuro", "Vidrio ahumado, para fondos claros u oscuros", CardTheme.glass == CardTheme.GLASS_DARK,
+                        () -> setCardTheme(0, CardTheme.GLASS_DARK, false))
+                .option(Ui.AUTO, -1, "Automático", "Según el modo claro u oscuro del teléfono", !CardTheme.isGlass() && CardTheme.color == 0,
+                        () -> setCardTheme(0, CardTheme.NONE, false))
+                .view(grid)
+                .option(Ui.PALETTE, "Color personalizado", "Elegir tono, intensidad y brillo",
+                        () -> customColor(CardTheme.color == 0 ? 0xFF223040 : CardTheme.color, col -> setCardTheme(col, CardTheme.NONE, false)))
+                .button("Cerrar", false, null)
+                .show();
+    }
+
+    private void setCardTheme(int color, int glass, boolean fromRemote) {
+        CardTheme.save(this, color, glass);
+        desk.setCardTheme();
+        for (SquareButton b : squares) b.applyTheme();
+        bar.setBackground(barBg());
+        navPill.setBackground(barBg());
+        if (!fromRemote) hub.send("cardTheme", "c", color, "g", glass);
     }
 
     private void setDeskColor(int c, boolean fromRemote) {
@@ -602,6 +655,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                             if (on) main.postDelayed(() -> checkSetup(false), 300);
                         })
                 .option(Ui.PALETTE, "Color de fondo", "Elegir el color de la mesa", this::chooseColor)
+                .option(Ui.PALETTE, "Color de tarjetas y menús", CardTheme.glass == CardTheme.GLASS_LIGHT ? "Cristal claro"
+                        : CardTheme.glass == CardTheme.GLASS_DARK ? "Cristal oscuro" : CardTheme.color == 0 ? "Automático" : "Color propio", this::chooseCardColor)
                 .option(Ui.HOME, isLauncher() ? "Pantalla de inicio: sí" : "Pantalla de inicio: no",
                         isLauncher() ? "Mesa Doble es tu launcher (tocar para dejar de usarla)" : "Usar Mesa Doble como launcher de este teléfono", this::toggleLauncher)
                 .option(Ui.GEAR, "Revisar configuración", principal ? "Permisos del principal" : "Permisos del extendido", () -> checkSetup(true))
@@ -1486,6 +1541,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             }
             case "apps":
                 setAppsMode(m.optBoolean("lock", false), m.optBoolean("auto", false), true);
+                break;
+            case "cardTheme":
+                if (m.optInt("c") != CardTheme.color || m.optInt("g") != CardTheme.glass) setCardTheme(m.optInt("c"), m.optInt("g"), true);
                 break;
             case "bg":
                 if (m.optInt("c") != prefs.getInt("deskColor", 0)) setDeskColor(m.optInt("c"), true);
