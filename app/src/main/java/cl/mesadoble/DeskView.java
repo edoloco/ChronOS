@@ -615,12 +615,18 @@ public class DeskView extends View {
         boolean isNote = Item.NOTE.equals(it.kind), isImg = Item.IMG.equals(it.kind), isApp = Item.APP.equals(it.kind),
                 isWidget = Item.WIDGET.equals(it.kind), isClock = Item.CLOCK.equals(it.kind), isBatt = Item.BATTERY.equals(it.kind);
         boolean glassCard = CardTheme.isGlass() && !isNote && !isImg;
+        boolean aeroCard = glassCard && CardTheme.isAero();
+        // Aero: texto oscuro con halo blanco (como los títulos de Windows 7)
+        for (Paint tp : new Paint[]{small, label, clockPaint}) {
+            if (aeroCard) Aero.glowText(tp, dp); else tp.clearShadowLayer();
+        }
         float rr = isApp ? 18 * dp : glassCard ? 14 * dp : r;
         card.setColor(isNote ? it.color : isImg ? 0xFFFFFFFF : linkBg);
         if (glassCard) card.clearShadowLayer();   // una sombra se vería como mancha detrás del vidrio
         else card.setShadowLayer((lifted ? 18 : 10) * dp, 0, (lifted ? 10 : 5) * dp, 0x55000000);
-        c.drawRoundRect(box, rr, rr, card);
-        if (glassCard) {
+        if (aeroCard) Aero.draw(c, box, rr, CardTheme.aeroTint(), dp);
+        else c.drawRoundRect(box, rr, rr, card);
+        if (glassCard && !aeroCard) {
             // cristal: brillo arriba y un borde fino claro
             glassShine.setShader(new LinearGradient(0, 0, 0, h * 0.55f,
                     CardTheme.glass == CardTheme.GLASS_LIGHT ? 0x40FFFFFF : 0x22FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));

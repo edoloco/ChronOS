@@ -71,7 +71,12 @@ public class Ui {
             bg.setColor(CardTheme.sheetFill(night(a)));
             if (CardTheme.isGlass()) bg.setStroke(px(1), CardTheme.stroke());
             bg.setCornerRadius(px(26));
-            card.setBackground(bg);
+            if (CardTheme.isAero()) {
+                // Aero: el vidrio de color con brillo, sobre un fondo claro para que se lea
+                android.graphics.drawable.LayerDrawable ld = new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[]{
+                        bg, new Aero.Bg(CardTheme.aeroTint(), px(26), dp)});
+                card.setBackground(ld);
+            } else card.setBackground(bg);
             card.setElevation(px(12));
 
             title = new TextView(a);
@@ -79,6 +84,7 @@ public class Ui {
             title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
             title.setTextColor(fg(n));
             title.setVisibility(View.GONE);
+            if (CardTheme.isAero()) title.setShadowLayer(px(5), 0, 0, 0xCCFFFFFF);
             card.addView(title);
 
             message = new TextView(a);

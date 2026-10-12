@@ -119,8 +119,14 @@ public class SquareButton extends View {
     @Override protected void onDraw(Canvas c) {
         float w = getWidth(), h = getHeight(), r = 12 * dp;
         bg.setColor(pressed && !primary ? bgPressed : bgColor);
-        c.drawRoundRect(new RectF(0, 0, w, h), r, r, bg);
-        if (CardTheme.isGlass() && !primary) c.drawRoundRect(new RectF(dp / 2, dp / 2, w - dp / 2, h - dp / 2), r, r, border);
+        if (CardTheme.isAero() && !primary) {
+            Aero.draw(c, new RectF(0, 0, w, h), r, pressed ? CardTheme.shade(CardTheme.aeroTint(), 0.3f) : CardTheme.aeroTint(), dp);
+            Aero.glowText(label, dp);
+        } else {
+            c.drawRoundRect(new RectF(0, 0, w, h), r, r, bg);
+            label.clearShadowLayer();
+        }
+        if (CardTheme.isGlass() && !CardTheme.isAero() && !primary) c.drawRoundRect(new RectF(dp / 2, dp / 2, w - dp / 2, h - dp / 2), r, r, border);
         c.save();
         c.rotate(rot, w / 2, h / 2);
         float cx = w / 2, cy = compact ? h / 2 : h * 0.42f, u = (compact ? 6 : 7) * dp;   // u: unidad del ícono
