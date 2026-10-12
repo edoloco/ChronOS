@@ -207,6 +207,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         main.postDelayed(updatePoll, 10 * 60_000L);
         main.postDelayed(pollRecents, 300);
         main.postDelayed(camKeepAlive, 500);
+        if (!hub.isPrincipal()) desk.setBgImage(GameBg.current);
         if (orient.canDetectOrientation()) orient.enable();
         if (hub.isPrincipal() && hub.connected() && MesaAccess.instance != null) MesaAccess.instance.switchToMesa();
     }
@@ -725,6 +726,12 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                             if (on) main.postDelayed(() -> checkSetup(false), 300);
                         })
                 .option(Ui.PALETTE, "Color de fondo", "Elegir el color de la mesa", this::chooseColor)
+                .option(Ui.IMAGE, -1, "Fondo de juegos: " + (GameBg.enabled(this) ? "sí" : "no"),
+                        "Al abrir un juego en el principal, el extendido muestra una imagen del juego", GameBg.enabled(this), () -> {
+                            boolean on = !GameBg.enabled(this);
+                            prefs.edit().putBoolean("gameBg", on).apply();
+                            if (!on) { GameBg.current = null; GameBg.currentPkg = ""; desk.setBgImage(null); }
+                        })
                 .option(Ui.PALETTE, "Color de tarjetas y menús", CardTheme.glass == CardTheme.GLASS_LIGHT ? "Cristal claro"
                         : CardTheme.glass == CardTheme.GLASS_DARK ? "Cristal oscuro" : CardTheme.isIntense() ? "Cristal intenso"
                         : CardTheme.isAero() ? "Cristal Aero" : CardTheme.color == 0 ? "Automático" : "Color propio", this::chooseCardColor)
@@ -1739,6 +1746,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
         switch (t) {
+            case "gameBg":
+                main.post(() -> desk.setBgImage(GameBg.current));
+                break;
             case "camState":
                 main.post(() -> desk.setCamState(m.optBoolean("open"), m.optBoolean("front"), m.optInt("flash")));
                 break;

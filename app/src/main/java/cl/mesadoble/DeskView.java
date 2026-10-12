@@ -745,6 +745,30 @@ public class DeskView extends View {
 
     @Override protected void onSizeChanged(int w, int h, int ow, int oh) { super.onSizeChanged(w, h, ow, oh); blurDirty = true; }
 
+    // ---- fondo de juego (imagen del juego que corre en el principal), con fundido
+    private Bitmap bgImage, bgOld;
+    private float bgFade = 1f;
+    private final Paint bgPaint = new Paint(Paint.FILTER_BITMAP_FLAG), bgShade = new Paint();
+
+    public void setBgImage(Bitmap b) {
+        if (b == bgImage) return;
+        bgOld = bgImage;
+        bgImage = b;
+        bgFade = 0f;
+        blurDirty = true;
+        invalidate();
+    }
+
+    private void drawCover(Canvas c, Bitmap b, int W, int H, float alpha) {
+        if (b == null || alpha <= 0) return;
+        float s = Math.max(W / (float) b.getWidth(), H / (float) b.getHeight());
+        float w = b.getWidth() * s, h = b.getHeight() * s;
+        bgPaint.setAlpha(Math.round(255 * alpha));
+        c.drawBitmap(b, null, new RectF((W - w) / 2, (H - h) / 2, (W + w) / 2, (H + h) / 2), bgPaint);
+        bgShade.setColor(Color.argb(Math.round(70 * alpha), 0, 0, 0));   // un poco más oscuro: se leen las tarjetas
+        c.drawRect(0, 0, W, H, bgShade);
+    }
+
     /** Fondo de la mesa: color, brillo en la unión, manchas de luz (cristal intenso) y puntos. */
     private void drawDesk(Canvas c, int W, int H) {
         c.drawRect(0, 0, W, H, bg);
@@ -768,6 +792,11 @@ public class DeskView extends View {
                 c.drawCircle(cx, cy, rad, blob);
             }
         }
+        if (bgImage != null || bgOld != null) {
+            drawCover(c, bgOld, W, H, 1 - bgFade);
+            drawCover(c, bgImage, W, H, bgFade);
+            return;   // con imagen de juego no van los puntos
+        }
         float step = 22 * dp;
         float offX = vertical ? 0 : (side * W) % step, offY = vertical ? (side * H) % step : 0;
         for (float x = step / 2 - offX; x < W; x += step)
@@ -790,6 +819,11 @@ public class DeskView extends View {
     @Override protected void onDraw(Canvas c) {
         int W = getWidth(), H = getHeight();
         clockTick = false;
+        if (bgFade < 1f) {
+            bgFade = Math.min(1f, bgFade + 0.06f);
+            if (bgFade >= 1f) { bgOld = null; blurDirty = true; }
+            postInvalidateOnAnimation();
+        }
         drawDesk(c, W, H);
         if (Glass.on() && (blurDirty || Glass.blur == null || Glass.desk.get() != this) && W > 0 && H > 0) rebuildBlur(W, H);
 

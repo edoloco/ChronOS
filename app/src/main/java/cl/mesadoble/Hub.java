@@ -242,6 +242,7 @@ public class Hub implements Link.Listener {
             return;
         }
         if ("alarms".equals(t)) { openAlarms(); return; }
+        if ("game".equals(t)) { if (!isPrincipal()) GameBg.handle(app, this, m); return; }
         // cámara del principal, controlada desde el extendido
         if ("camCmd".equals(t)) { if (isPrincipal()) CameraActivity.command(app, m); return; }
 
@@ -530,6 +531,7 @@ public class Hub implements Link.Listener {
     private final Runnable musicPoll = new Runnable() {
         @Override public void run() {
             if (!isPrincipal() || !connected()) return;
+            RecentApps.worker.execute(() -> GameBg.poll(app, Hub.this));   // ¿empezó un juego? → fondo en el extendido
             AudioManager am = (AudioManager) app.getSystemService(Context.AUDIO_SERVICE);
             boolean on = am != null && am.isMusicActive() && MediaHub.current == null;   // los visores propios ya tienen sus controles
             boolean video = on && moviePlaying(am);
