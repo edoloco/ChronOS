@@ -1,6 +1,7 @@
 package cl.mesadoble;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
@@ -62,6 +63,13 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         night = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
         setTheme(night ? android.R.style.Theme_Material_NoActionBar : android.R.style.Theme_Material_Light_NoActionBar);
         super.onCreate(b);
+        // El teclado es para el EXTENDIDO. En el principal solo se abre si se pidió a propósito (Teclado → Usar este teléfono
+        // como teclado); si Android lo reabre solo (al volver a la app o tras cerrarla), se va a la mesa.
+        if (Hub.get(this).isPrincipal() && !getIntent().getBooleanExtra("manual", false)) {
+            startActivity(new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP));
+            finish();
+            return;
+        }
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         MainActivity.applyOrientation(this);   // misma orientación que la mesa
         prefs = getSharedPreferences("mesa", MODE_PRIVATE);
@@ -104,7 +112,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         outBtn = chip("", v -> toggleOutput());
         pairBtn = chip("Vincular", v -> pairBluetooth());
         top.addView(sendBtn); top.addView(pairBtn); top.addView(outBtn); top.addView(resetBtn); top.addView(editBtn); top.addView(modeBtn);
-        top.addView(chip("Cerrar", v -> finish()));
+        top.addView(chip("Cerrar", v -> close()));
         root.addView(top, new LinearLayout.LayoutParams(-1, dp(44)));
 
         content = new LinearLayout(this);
@@ -192,7 +200,13 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
 
     private boolean auto;
     private final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
-    private final Runnable autoClose = () -> { if (auto && !hub.remoteImeReady()) finish(); };
+    private final Runnable autoClose = () -> { if (auto && !hub.remoteImeReady()) close(); };
+
+    /** Cerrar el teclado vuelve a la mesa (no saca de la app, aunque el teclado se haya abierto solo). */
+    private void close() {
+        if (isTaskRoot()) startActivity(new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        finish();
+    }
 
     @Override protected void onNewIntent(android.content.Intent i) {
         super.onNewIntent(i);

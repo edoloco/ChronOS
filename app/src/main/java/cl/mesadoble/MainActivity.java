@@ -983,7 +983,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         new Ui.Sheet(this)
                 .title("Teclado")
                 .option(Ui.KEYBOARD, "Usar este teléfono como teclado", "Teclado, touchpad, gamepad o dictado",
-                        () -> startActivity(new Intent(this, KeyboardActivity.class)))
+                        () -> startActivity(new Intent(this, KeyboardActivity.class).putExtra("manual", true)))
                 .option(Ui.RECEIVE, "Recibir aquí lo que escribo", "Elegir el teclado Mesa Doble en este teléfono", this::setupReceiver)
                 .button("Cerrar", false, null)
                 .show();
