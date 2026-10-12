@@ -75,27 +75,36 @@ public class Updater {
     static Release latest(Context c) throws IOException {
         String repo = repo(c);
         if (repo.isEmpty()) throw new IOException("Esta versión no sabe de qué repositorio viene. Escribe el repositorio en Actualizar → Repositorio.");
-        HttpURLConnection h = (HttpURLConnection) new URL("https://api.github.com/repos/" + repo + "/releases/latest").openConnection();
+        // se revisan las últimas versiones publicadas y se elige la de número MÁS ALTO
+        // (no la marcada "Latest": si dos compilaciones terminan desordenadas, esa puede ser una más vieja)
+        HttpURLConnection h = (HttpURLConnection) new URL("https://api.github.com/repos/" + repo + "/releases?per_page=30").openConnection();
         h.setRequestProperty("Accept", "application/vnd.github+json");
         h.setRequestProperty("User-Agent", "MesaDoble");
         h.setConnectTimeout(10000); h.setReadTimeout(15000);
         int code = h.getResponseCode();
-        if (code == 404) throw new IOException("No encontré versiones publicadas en " + repo + " (si el repositorio es privado, la app no puede verlo)");
+        if (code == 404) throw new IOException("No encontré el repositorio " + repo + " (si es privado, la app no puede verlo)");
         if (code != 200) throw new IOException("GitHub respondió " + code + ". Prueba en un rato.");
         ByteArrayOutputStream b = new ByteArrayOutputStream();
         try (InputStream in = h.getInputStream()) { byte[] buf = new byte[16384]; int n; while ((n = in.read(buf)) > 0) b.write(buf, 0, n); }
         try {
-            JSONObject o = new JSONObject(new String(b.toByteArray(), StandardCharsets.UTF_8));
-            Release r = new Release();
-            r.tag = o.optString("tag_name");
-            JSONArray as = o.optJSONArray("assets");
+            JSONArray rels = new JSONArray(new String(b.toByteArray(), StandardCharsets.UTF_8));
             String want = apkName(c);
-            for (int i = 0; as != null && i < as.length(); i++) {
-                JSONObject a = as.getJSONObject(i);
-                if (want.equals(a.optString("name"))) { r.url = a.optString("browser_download_url"); r.size = a.optLong("size"); r.name = want; }
+            Release best = null;
+            for (int k = 0; k < rels.length(); k++) {
+                JSONObject o = rels.getJSONObject(k);
+                if (o.optBoolean("draft") || o.optBoolean("prerelease")) continue;
+                Release r = new Release();
+                r.tag = o.optString("tag_name");
+                JSONArray as = o.optJSONArray("assets");
+                for (int i = 0; as != null && i < as.length(); i++) {
+                    JSONObject a = as.getJSONObject(i);
+                    if (want.equals(a.optString("name"))) { r.url = a.optString("browser_download_url"); r.size = a.optLong("size"); r.name = want; }
+                }
+                if (r.url == null) continue;
+                if (best == null || newer(r.tag, best.tag)) best = r;
             }
-            if (r.url == null) throw new IOException("La última versión no trae " + want);
-            return r;
+            if (best == null) throw new IOException("No encontré versiones publicadas con " + want);
+            return best;
         } catch (org.json.JSONException e) { throw new IOException("Respuesta inválida de GitHub"); }
     }
 
