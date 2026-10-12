@@ -246,6 +246,20 @@ public class Hub implements Link.Listener {
         }
         if ("fmPath".equals(t)) FileServer.remoteDir = m.optString("path");
         if ("batt".equals(t)) { otherBatt = m.optInt("l", -1); otherChg = m.optBoolean("c"); }
+        // fotos, música y video: se ven en el principal; los controles, en el extendido
+        if ("mPlay".equals(t)) { if (isPrincipal()) MediaHub.open(app, m.optString("kind"), MediaHub.paths(m), m.optInt("idx")); return; }
+        if ("mCmd".equals(t)) { if (isPrincipal()) MediaHub.command(app, m); return; }
+        if ("mOpen".equals(t)) { if (!isPrincipal()) MediaHub.openControls(app, m.optString("kind")); return; }
+        // widgets: todos viven en el principal
+        if ("wList".equals(t)) { if (isPrincipal()) WidgetHub.get(app).sendProviders(this); return; }
+        if ("wWant".equals(t)) { if (isPrincipal()) WidgetHub.get(app).want(m, this); return; }
+        if ("wTap".equals(t)) { if (isPrincipal()) WidgetHub.get(app).tap(m); return; }
+        if ("wBind".equals(t)) {
+            if (isPrincipal()) startOrNotify(new Intent(app, MainActivity.class).putExtra("bindWidget", m.optString("id"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP), 24,
+                    "Activar widget", "Toca para permitir el widget en el principal");
+            return;
+        }
         if ("fmJob".equals(t)) { if (isPrincipal()) FileServer.get(app).runJob(m, this); return; }
         if ("fmOpenFile".equals(t)) { if (isPrincipal()) FileServer.openHere(app, this, m.optString("path")); return; }
         if ("fmCancel".equals(t)) { FileServer.get(app).cancelJob(); return; }

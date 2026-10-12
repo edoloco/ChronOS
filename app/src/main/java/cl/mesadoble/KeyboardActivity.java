@@ -85,7 +85,8 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         // Atrás, Inicio y Recientes del PRINCIPAL, junto al indicador "Escribiendo en el principal"
         int[] kinds = {SquareButton.BACK, SquareButton.HOME, SquareButton.RECENTS};
         String[] labels = {"Atrás", "Inicio", "Recientes"}, keys = {"back", "home", "recents"};
-        for (int i = 0; i < 3; i++) {
+        int navCount = Updater.isLiviana(this) ? 2 : 3;   // Recientes solo funciona con la versión completa
+        for (int i = 0; i < navCount; i++) {
             final String k = keys[i];
             SquareButton sb = new SquareButton(this, kinds[i], labels[i], false, night);
             sb.setCompact(true);

@@ -87,7 +87,14 @@ public class FilesActivity extends Activity implements Link.Listener {
     private final List<Entry> entries = new ArrayList<>();
     private final Set<String> sel = new HashSet<>();
     private BaseAdapter adapter;
-    private ListView list;
+    private android.widget.AbsListView list;      // la vista activa: lista o miniaturas
+    private ListView listView;
+    private android.widget.GridView gridView;
+    private boolean grid;
+    private TextView viewChip;
+    private final android.util.LruCache<String, android.graphics.Bitmap> thumbs = new android.util.LruCache<>(120);
+    private final java.util.Set<String> thumbLoading = new HashSet<>();
+    private final ExecutorService thumbWork = Executors.newSingleThreadExecutor();
     private TextView phoneChip, pathText, destText, countText;
     private LinearLayout fab;
     private TextView copyFab, moveFab, renameFab;
@@ -124,26 +131,36 @@ public class FilesActivity extends Activity implements Link.Listener {
         destText.setPadding(dp(14), 0, dp(14), dp(4));
         col.addView(destText);
 
-        list = new ListView(this);
-        list.setDivider(null);
-        list.setFastScrollEnabled(true);
-        list.setClipToPadding(false);
-        list.setPadding(0, 0, 0, dp(90));
+        grid = getSharedPreferences("mesa", MODE_PRIVATE).getBoolean("fmGrid", false);
         adapter = buildAdapter();
-        list.setAdapter(adapter);
-        list.setOnItemClickListener((p, v, pos, id) -> {
-            if (error != null) { load(); return; }
-            Entry e = entries.get(pos);
-            if (!sel.isEmpty()) { toggle(e); return; }
-            if (e.dir) { path = child(dir(), e.name); load(); }
-            else openEntry(e);
-        });
-        list.setOnItemLongClickListener((p, v, pos, id) -> {
-            if (error == null) { toggle(entries.get(pos)); v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS); }
-            return true;
-        });
+        listView = new ListView(this);
+        listView.setDivider(null);
+        gridView = new android.widget.GridView(this);
+        gridView.setNumColumns(android.widget.GridView.AUTO_FIT);
+        gridView.setColumnWidth(dp(112));
+        gridView.setStretchMode(android.widget.GridView.STRETCH_COLUMN_WIDTH);
+        gridView.setVerticalSpacing(dp(6));
+        gridView.setHorizontalSpacing(dp(6));
         dragLayer = new DragLayer();
-        dragLayer.addView(list, new FrameLayout.LayoutParams(-1, -1));
+        for (android.widget.AbsListView lv : new android.widget.AbsListView[]{listView, gridView}) {
+            lv.setFastScrollEnabled(true);
+            lv.setClipToPadding(false);
+            lv.setPadding(dp(4), 0, dp(4), dp(90));
+            lv.setAdapter(adapter);
+            lv.setOnItemClickListener((p, v, pos, id) -> {
+                if (error != null) { load(); return; }
+                Entry e = entries.get(pos);
+                if (!sel.isEmpty()) { toggle(e); return; }
+                if (e.dir) { path = child(dir(), e.name); load(); }
+                else openEntry(e);
+            });
+            lv.setOnItemLongClickListener((p, v, pos, id) -> {
+                if (error == null) { toggle(entries.get(pos)); v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS); }
+                return true;
+            });
+            dragLayer.addView(lv, new FrameLayout.LayoutParams(-1, -1));
+        }
+        setGrid(grid);
         col.addView(dragLayer, new LinearLayout.LayoutParams(-1, 0, 1));
         root.addView(col, new FrameLayout.LayoutParams(-1, -1));
 
@@ -177,6 +194,7 @@ public class FilesActivity extends Activity implements Link.Listener {
     @Override protected void onDestroy() {
         hub.remove(this);
         work.shutdownNow();
+        thumbWork.shutdownNow();
         super.onDestroy();
     }
 
@@ -265,7 +283,8 @@ public class FilesActivity extends Activity implements Link.Listener {
         countText.setTextSize(12);
         countText.setPadding(0, 0, dp(8), 0);
         row.addView(countText);
-        for (TextView t : new TextView[]{chip("+ Carpeta", v -> newFolder()), chip("Ocultos", v -> { showHidden = !showHidden; load(); }),
+        viewChip = chip("", v -> setGrid(!grid));
+        for (TextView t : new TextView[]{viewChip, chip("+ Carpeta", v -> newFolder()), chip("Ocultos", v -> { showHidden = !showHidden; load(); }),
                 chip("Cerrar", v -> { if (hub.connected()) hub.send("fmClose"); finish(); })}) {
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, dp(38));
             lp.setMarginStart(dp(6));
@@ -275,24 +294,77 @@ public class FilesActivity extends Activity implements Link.Listener {
         return sc;
     }
 
+    /** Lista (con detalles) o miniaturas (cuadrícula con fotos y videos en pequeño). */
+    private void setGrid(boolean g) {
+        grid = g;
+        getSharedPreferences("mesa", MODE_PRIVATE).edit().putBoolean("fmGrid", g).apply();
+        listView.setVisibility(g ? View.GONE : View.VISIBLE);
+        gridView.setVisibility(g ? View.VISIBLE : View.GONE);
+        list = g ? gridView : listView;
+        if (viewChip != null) viewChip.setText(g ? "☰ Lista" : "▦ Miniaturas");
+        adapter.notifyDataSetChanged();
+    }
+
+    private static boolean thumbable(String n) {
+        String t = FilesProvider.mime(n);
+        return t.startsWith("image/") || t.startsWith("video/");
+    }
+
+    /** Miniatura de una foto o video del principal (aquí mismo, o pedida al principal). */
+    private void thumbInto(android.widget.ImageView iv, TextView emoji, Entry e) {
+        String p = child(dir(), e.name);
+        iv.setTag(p);
+        android.graphics.Bitmap b = thumbs.get(p);
+        if (b != null) { iv.setImageBitmap(b); iv.setVisibility(View.VISIBLE); emoji.setVisibility(View.INVISIBLE); return; }
+        iv.setImageDrawable(null); iv.setVisibility(View.INVISIBLE); emoji.setVisibility(View.VISIBLE);
+        if (!thumbable(e.name) || !thumbLoading.add(p)) return;
+        final int size = dp(160);
+        thumbWork.execute(() -> {
+            android.graphics.Bitmap r = null;
+            try {
+                if (!remote) r = FileServer.thumb(new File(p), size);
+                else {
+                    JSONObject res = request("fsThumb", "path", p, "size", size);
+                    byte[] bytes = android.util.Base64.decode(res.optString("img"), android.util.Base64.DEFAULT);
+                    if (bytes.length > 0) r = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                }
+            } catch (Exception ignored) { }
+            final android.graphics.Bitmap fr = r;
+            main.post(() -> {
+                thumbLoading.remove(p);
+                if (fr != null) { thumbs.put(p, fr); adapter.notifyDataSetChanged(); }
+            });
+        });
+    }
+
     private BaseAdapter buildAdapter() {
         return new BaseAdapter() {
             @Override public int getCount() { return error != null ? 1 : entries.size(); }
             @Override public Object getItem(int i) { return i; }
             @Override public long getItemId(int i) { return i; }
+            @Override public int getViewTypeCount() { return 2; }
+            @Override public int getItemViewType(int i) { return grid && error == null ? 1 : 0; }
             @Override public View getView(int i, View v, ViewGroup parent) {
+                if (getItemViewType(i) == 1) return cell(i, v);
                 LinearLayout row = (LinearLayout) v;
                 if (row == null) {
                     row = new LinearLayout(FilesActivity.this);
                     row.setGravity(Gravity.CENTER_VERTICAL);
-                    row.setPadding(dp(14), dp(8), dp(14), dp(8));
+                    row.setPadding(dp(10), dp(8), dp(14), dp(8));
+                    FrameLayout icBox = new FrameLayout(FilesActivity.this);
                     TextView ic = new TextView(FilesActivity.this);
                     ic.setTextSize(24);
                     ic.setGravity(Gravity.CENTER);
-                    row.addView(ic, new LinearLayout.LayoutParams(dp(42), -2));
+                    icBox.addView(ic, new FrameLayout.LayoutParams(-1, -1));
+                    android.widget.ImageView th = new android.widget.ImageView(FilesActivity.this);
+                    th.setScaleType(android.widget.ImageView.ScaleType.CENTER_CROP);
+                    th.setClipToOutline(true);
+                    th.setBackground(round(0x22000000, 8));
+                    icBox.addView(th, new FrameLayout.LayoutParams(-1, -1));
+                    row.addView(icBox, new LinearLayout.LayoutParams(dp(46), dp(46)));
                     LinearLayout c = new LinearLayout(FilesActivity.this);
                     c.setOrientation(LinearLayout.VERTICAL);
-                    c.setPadding(dp(10), 0, 0, 0);
+                    c.setPadding(dp(12), 0, 0, 0);
                     TextView t1 = new TextView(FilesActivity.this); t1.setTextSize(16); t1.setSingleLine(true); t1.setEllipsize(TextUtils.TruncateAt.MIDDLE);
                     TextView t2 = new TextView(FilesActivity.this); t2.setTextSize(12);
                     c.addView(t1); c.addView(t2);
@@ -301,18 +373,22 @@ public class FilesActivity extends Activity implements Link.Listener {
                     check.setTextSize(18);
                     row.addView(check);
                 }
-                TextView ic = (TextView) row.getChildAt(0);
+                FrameLayout icBox = (FrameLayout) row.getChildAt(0);
+                TextView ic = (TextView) icBox.getChildAt(0);
+                android.widget.ImageView th = (android.widget.ImageView) icBox.getChildAt(1);
                 LinearLayout c = (LinearLayout) row.getChildAt(1);
                 TextView t1 = (TextView) c.getChildAt(0), t2 = (TextView) c.getChildAt(1), check = (TextView) row.getChildAt(2);
                 t1.setTextColor(fg); t2.setTextColor(muted); check.setTextColor(accent);
                 if (error != null) {
-                    ic.setText("⚠"); t1.setSingleLine(false); t1.setText(error); t2.setText("Toca para reintentar"); check.setText("");
+                    ic.setText("⚠"); ic.setVisibility(View.VISIBLE); th.setVisibility(View.INVISIBLE);
+                    t1.setSingleLine(false); t1.setText(error); t2.setText("Toca para reintentar"); check.setText("");
                     row.setBackground(null);
                     return row;
                 }
                 t1.setSingleLine(true);
                 Entry e = entries.get(i);
                 ic.setText(e.dir ? "📁" : icon(e.name));
+                if (e.dir) { th.setVisibility(View.INVISIBLE); ic.setVisibility(View.VISIBLE); } else thumbInto(th, ic, e);
                 t1.setText(e.name);
                 String date = e.mtime > 0 ? DateFormat.getDateInstance(DateFormat.MEDIUM).format(new Date(e.mtime)) : "";
                 t2.setText(e.dir ? date : Formatter.formatShortFileSize(FilesActivity.this, e.size) + " · " + date);
@@ -320,6 +396,56 @@ public class FilesActivity extends Activity implements Link.Listener {
                 check.setText(s ? "✓" : "");
                 row.setBackground(s ? round((accent & 0x00FFFFFF) | 0x3A000000, 12) : null);
                 return row;
+            }
+
+            /** Celda de miniaturas: imagen grande (o ícono) y el nombre abajo. */
+            private View cell(int i, View v) {
+                LinearLayout cell = (LinearLayout) v;
+                if (cell == null) {
+                    cell = new LinearLayout(FilesActivity.this);
+                    cell.setOrientation(LinearLayout.VERTICAL);
+                    cell.setGravity(Gravity.CENTER_HORIZONTAL);
+                    cell.setPadding(dp(6), dp(6), dp(6), dp(6));
+                    FrameLayout box = new FrameLayout(FilesActivity.this);
+                    box.setBackground(round(night ? 0xFF1E2934 : 0xFFF4F7F9, 12));
+                    TextView ic = new TextView(FilesActivity.this);
+                    ic.setTextSize(40);
+                    ic.setGravity(Gravity.CENTER);
+                    box.addView(ic, new FrameLayout.LayoutParams(-1, -1));
+                    android.widget.ImageView th = new android.widget.ImageView(FilesActivity.this);
+                    th.setScaleType(android.widget.ImageView.ScaleType.CENTER_CROP);
+                    th.setClipToOutline(true);
+                    th.setBackground(round(0x00000000, 12));
+                    box.addView(th, new FrameLayout.LayoutParams(-1, -1));
+                    TextView check = new TextView(FilesActivity.this);
+                    check.setTextSize(16);
+                    check.setGravity(Gravity.CENTER);
+                    check.setTextColor(night ? 0xFF18212B : 0xFFFFFFFF);
+                    FrameLayout.LayoutParams cl = new FrameLayout.LayoutParams(dp(26), dp(26), Gravity.TOP | Gravity.END);
+                    cl.setMargins(dp(4), dp(4), dp(4), dp(4));
+                    box.addView(check, cl);
+                    cell.addView(box, new LinearLayout.LayoutParams(-1, dp(96)));
+                    TextView name = new TextView(FilesActivity.this);
+                    name.setTextSize(12);
+                    name.setMaxLines(2);
+                    name.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+                    name.setGravity(Gravity.CENTER_HORIZONTAL);
+                    name.setPadding(0, dp(4), 0, 0);
+                    cell.addView(name, new LinearLayout.LayoutParams(-1, -2));
+                }
+                FrameLayout box = (FrameLayout) cell.getChildAt(0);
+                TextView ic = (TextView) box.getChildAt(0), check = (TextView) box.getChildAt(2), name = (TextView) cell.getChildAt(1);
+                android.widget.ImageView th = (android.widget.ImageView) box.getChildAt(1);
+                Entry e = entries.get(i);
+                ic.setText(e.dir ? "📁" : icon(e.name));
+                if (e.dir) { th.setVisibility(View.INVISIBLE); ic.setVisibility(View.VISIBLE); } else thumbInto(th, ic, e);
+                name.setText(e.name);
+                name.setTextColor(fg);
+                boolean s = sel.contains(e.name);
+                check.setText(s ? "✓" : "");
+                check.setBackground(s ? round(accent, 13) : null);
+                cell.setBackground(s ? round((accent & 0x00FFFFFF) | 0x3A000000, 14) : null);
+                return cell;
             }
         };
     }
@@ -489,7 +615,7 @@ public class FilesActivity extends Activity implements Link.Listener {
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
         switch (t) {
-            case "fsListR": case "fsOpR": {
+            case "fsListR": case "fsOpR": case "fsThumbR": {
                 Wait w = waits.get(m.optInt("req"));
                 if (w != null) { w.r = m; w.l.countDown(); }
                 break;
@@ -584,6 +710,16 @@ public class FilesActivity extends Activity implements Link.Listener {
     /** Abrir: los archivos son del principal y se abren en el principal (como las apps). */
     private void openEntry(Entry e) {
         String p = child(dir(), e.name);
+        String kind = MediaHub.kindOf(e.name);
+        if (kind != null) {   // fotos, música y videos: visores propios de la app, en el principal
+            java.util.ArrayList<String> paths = new java.util.ArrayList<>();
+            int idx = 0;
+            for (Entry x : entries) if (!x.dir && kind.equals(MediaHub.kindOf(x.name))) { if (x == e) idx = paths.size(); paths.add(child(dir(), x.name)); }
+            if (!remote) MediaHub.open(this, kind, paths, idx);
+            else if (hub.connected()) { MediaHub.requestPlay(hub, kind, paths, idx); Toast.makeText(this, "Abriendo en el principal", Toast.LENGTH_SHORT).show(); }
+            else Toast.makeText(this, "El principal no está conectado", Toast.LENGTH_SHORT).show();
+            return;
+        }
         if (!remote) { view(new File(p)); return; }
         if (!hub.connected()) { Toast.makeText(this, "El principal no está conectado", Toast.LENGTH_SHORT).show(); return; }
         hub.send("fmOpenFile", "path", p);

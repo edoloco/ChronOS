@@ -68,11 +68,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private String otherVersion = "";
     private LinearLayout dock, navPill;   // dock = barra de opciones + botones de navegación del principal
     // widgets de Android
-    private static final int REQ_BIND = 31, REQ_CONF = 32, HOST_ID = 4711;
-    private android.appwidget.AppWidgetHost widgetHost;
-    private android.appwidget.AppWidgetManager widgetManager;
+    private static final int REQ_BIND = 31, REQ_CONF = 32;
     private FrameLayout widgetLayer;
-    private final Map<String, android.appwidget.AppWidgetHostView> widgetViews = new HashMap<>();
     private Item pendingWidget;
     private int pendingWidgetId = -1;
     private boolean pendingWidgetNew;
@@ -104,8 +101,6 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         widgetLayer = new FrameLayout(this);
         widgetLayer.setClipChildren(false);
         root.addView(widgetLayer, new FrameLayout.LayoutParams(-1, -1));
-        widgetManager = android.appwidget.AppWidgetManager.getInstance(this);
-        widgetHost = new android.appwidget.AppWidgetHost(getApplicationContext(), HOST_ID);
 
         bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
@@ -130,7 +125,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         navPill.setElevation(dp(6));
         int[] nk = {SquareButton.BACK, SquareButton.HOME, SquareButton.RECENTS};
         String[] nl = {"Atrás", "Inicio", "Recientes"}, nkeys = {"back", "home", "recents"};
-        for (int i = 0; i < 3; i++) {
+        int navCount = Updater.isLiviana(this) ? 2 : 3;   // Recientes solo funciona con la versión completa
+        for (int i = 0; i < navCount; i++) {
             final String k = nkeys[i];
             SquareButton nb = new SquareButton(this, nk[i], nl[i], false, night);
             nb.setOnClickListener(v -> {
@@ -184,21 +180,15 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 3);
         }
         handleShare(getIntent());
+        String bw = getIntent().getStringExtra("bindWidget");
+        if (bw != null) bindRequested(bw, 0);
     }
 
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        String bw = intent.getStringExtra("bindWidget");
+        if (bw != null) { intent.removeExtra("bindWidget"); bindRequested(bw, 0); }
         handleShare(intent);
-    }
-
-    @Override protected void onStart() {
-        super.onStart();
-        try { widgetHost.startListening(); } catch (Exception ignored) { }
-    }
-
-    @Override protected void onStop() {
-        try { widgetHost.stopListening(); } catch (Exception ignored) { }
-        super.onStop();
     }
 
     @Override protected void onResume() {
@@ -317,38 +307,96 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     // ---------------- color de fondo ----------------
 
-    static final int[] COLORS = {0, 0xFF18212B, 0xFF0F2A44, 0xFF173A2E, 0xFF3B1622, 0xFF2A2A2E,
-            0xFFDDE3E8, 0xFFE9DFC9, 0xFFE4E0F2, 0xFFDDEBDD, 0xFFF3D9CF, 0xFFFFFFFF};
+    // 0 = según el tema. Oscuros, intensos, pasteles y claros.
+    static final int[] COLORS = {
+            0, 0xFF18212B, 0xFF0F2A44, 0xFF173A2E, 0xFF3B1622, 0xFF2A2A2E,
+            0xFF000000, 0xFF1B1035, 0xFF0B3B3B, 0xFF3A2410, 0xFF2B0F0F, 0xFF102A1A,
+            0xFF1F7F8C, 0xFF2E5EAA, 0xFF6A3FA0, 0xFFB03A6B, 0xFFC0532B, 0xFF3F8F4A,
+            0xFF5CC3CF, 0xFF7FA7E6, 0xFFB79BE0, 0xFFF29BB8, 0xFFF4B183, 0xFF9DD6A3,
+            0xFFDDE3E8, 0xFFE9DFC9, 0xFFE4E0F2, 0xFFDDEBDD, 0xFFF3D9CF, 0xFFFFFFFF,
+            0xFFF6E6A2, 0xFFFFF4D6, 0xFFE0F2F1, 0xFFFCE4EC, 0xFFE3F2FD, 0xFFECEFF1};
 
     private void chooseColor() {
         int cur = prefs.getInt("deskColor", 0);
         final android.app.Dialog[] dlg = new android.app.Dialog[1];
         LinearLayout grid = new LinearLayout(this);
         grid.setOrientation(LinearLayout.VERTICAL);
-        for (int r = 0; r < 2; r++) {
+        for (int r = 0; r < COLORS.length / 6; r++) {
             LinearLayout row = new LinearLayout(this);
             row.setGravity(Gravity.CENTER);
             for (int i = r * 6; i < r * 6 + 6; i++) {
                 final int col = COLORS[i];
-                View sw = new View(this);
-                GradientDrawable g = new GradientDrawable();
-                g.setShape(GradientDrawable.OVAL);
-                g.setColor(col == 0 ? (night ? 0xFF18212B : 0xFFDDE3E8) : col);
-                g.setStroke(dp(col == cur ? 4 : 1), col == cur ? (night ? 0xFF5CC3CF : 0xFF1F7F8C) : 0x55888888);
-                sw.setBackground(g);
-                sw.setContentDescription(col == 0 ? "Según el tema" : "Color");
-                sw.setOnClickListener(v -> { setDeskColor(col, false); if (dlg[0] != null) dlg[0].dismiss(); });
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(44), dp(44));
-                lp.setMargins(dp(6), dp(6), dp(6), dp(6));
-                row.addView(sw, lp);
+                row.addView(swatch(col, col == cur, () -> { setDeskColor(col, false); if (dlg[0] != null) dlg[0].dismiss(); }), swatchLp());
             }
             grid.addView(row);
         }
+        android.widget.ScrollView sc = new android.widget.ScrollView(this);
+        sc.addView(grid);
+        sc.setLayoutParams(new LinearLayout.LayoutParams(-1, Math.min(dp(300), getResources().getDisplayMetrics().heightPixels / 2)));
         dlg[0] = new Ui.Sheet(this)
                 .title("Color de fondo")
                 .message("Se aplica en ambos teléfonos. El primero sigue el modo claro u oscuro del sistema.")
-                .view(grid)
+                .view(sc)
+                .option(Ui.PALETTE, "Color personalizado", "Elegir tono, intensidad y brillo", () -> customColor(cur))
                 .button("Cerrar", false, null)
+                .show();
+    }
+
+    private View swatch(int col, boolean selected, Runnable r) {
+        View sw = new View(this);
+        GradientDrawable g = new GradientDrawable();
+        g.setShape(GradientDrawable.OVAL);
+        g.setColor(col == 0 ? (night ? 0xFF18212B : 0xFFDDE3E8) : col);
+        g.setStroke(dp(selected ? 4 : 1), selected ? (night ? 0xFF5CC3CF : 0xFF1F7F8C) : 0x55888888);
+        sw.setBackground(g);
+        sw.setContentDescription(col == 0 ? "Según el tema" : "Color");
+        sw.setOnClickListener(v -> r.run());
+        return sw;
+    }
+
+    private LinearLayout.LayoutParams swatchLp() {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(40), dp(40));
+        lp.setMargins(dp(5), dp(5), dp(5), dp(5));
+        return lp;
+    }
+
+    /** Cualquier color: tono, intensidad y brillo, con vista previa en vivo. */
+    private void customColor(int start) {
+        float[] hsv = new float[3];
+        android.graphics.Color.colorToHSV(start == 0 ? (night ? 0xFF18212B : 0xFFDDE3E8) : start, hsv);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        View preview = new View(this);
+        GradientDrawable pg = new GradientDrawable();
+        pg.setCornerRadius(dp(14));
+        preview.setBackground(pg);
+        box.addView(preview, new LinearLayout.LayoutParams(-1, dp(56)));
+        String[] names = {"Tono", "Intensidad", "Brillo"};
+        int[] max = {360, 100, 100};
+        Runnable upd = () -> { int c = android.graphics.Color.HSVToColor(hsv); pg.setColor(c); preview.invalidate(); };
+        for (int i = 0; i < 3; i++) {
+            final int k = i;
+            TextView t = new TextView(this);
+            t.setText(names[i]);
+            t.setTextColor(night ? 0xFFE6EDF3 : 0xFF1D2733);
+            t.setPadding(0, dp(10), 0, 0);
+            box.addView(t);
+            android.widget.SeekBar sb = new android.widget.SeekBar(this);
+            sb.setMax(max[i]);
+            sb.setProgress(Math.round(k == 0 ? hsv[0] : hsv[k] * 100));
+            sb.setOnSeekBarChangeListener(new android.widget.SeekBar.OnSeekBarChangeListener() {
+                @Override public void onProgressChanged(android.widget.SeekBar b, int p, boolean u) { hsv[k] = k == 0 ? p : p / 100f; upd.run(); }
+                @Override public void onStartTrackingTouch(android.widget.SeekBar b) { }
+                @Override public void onStopTrackingTouch(android.widget.SeekBar b) { }
+            });
+            box.addView(sb);
+        }
+        upd.run();
+        new Ui.Sheet(this)
+                .title("Color personalizado")
+                .view(box)
+                .button("Cancelar", false, null)
+                .button("Usar", true, () -> setDeskColor(android.graphics.Color.HSVToColor(hsv), false))
                 .show();
     }
 
@@ -832,6 +880,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     @Override public void onOpenApp(Item it) { openOnPrincipal(it.pkg, it.title); }
 
     @Override protected void onDestroy() {
+        widgetLayer.removeAllViews();   // los widgets siguen vivos en WidgetHub
         hub.remove(this);   // la conexión sigue viva para el teclado
         super.onDestroy();
     }
@@ -1120,7 +1169,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     @Override public void onItemDeleted(Item it) {
-        if (Item.WIDGET.equals(it.kind)) releaseWidget(it.id);
+        if (Item.WIDGET.equals(it.kind)) releaseWidget(it);
         JSONObject m = new JSONObject();
         try { m.put("t", "del"); m.put("id", it.id); } catch (JSONException ignored) { }
         hub.send(m);
@@ -1143,66 +1192,66 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     // ---------------- widgets de Android ----------------
-    // Cada teléfono tiene su propia copia del widget (Android no deja mostrar el de otro teléfono):
-    // la mesa guarda qué widget es y dónde va; cada teléfono lo activa la primera vez que lo muestra.
+    // Todos los widgets son del PRINCIPAL (ahí corren). El principal los muestra de verdad;
+    // el extendido ve su imagen en vivo y sus toques se hacen en el principal.
 
-    private Map<String, Integer> widgetMapCache;
+    private final Map<Integer, android.graphics.Bitmap> mirrors = new HashMap<>();
+    private final Map<Integer, int[]> wantNow = new HashMap<>();
+    private String wantSent = "";
 
-    private Map<String, Integer> widgetMap() {
-        if (widgetMapCache != null) return widgetMapCache;
-        Map<String, Integer> m = new HashMap<>();
-        widgetMapCache = m;
-        try {
-            JSONObject o = new JSONObject(prefs.getString("widgetMap", "{}"));
-            java.util.Iterator<String> k = o.keys();
-            while (k.hasNext()) { String id = k.next(); m.put(id, o.getInt(id)); }
-        } catch (JSONException ignored) { }
-        return m;
+    @Override public boolean widgetBound(Item it) { return it.wid >= 0 && (hub.isPrincipal() || mirrors.containsKey(it.wid)); }
+
+    @Override public android.graphics.Bitmap widgetMirror(Item it) { return hub.isPrincipal() ? null : mirrors.get(it.wid); }
+
+    @Override public void onWidgetTap(Item it) { if (it.wid < 0) requestBind(it); }
+
+    @Override public void onWidgetTouch(Item it, float fx, float fy) {
+        if (hub.isPrincipal() || !hub.connected()) return;
+        hub.send("wTap", "wid", it.wid, "x", (double) fx, "y", (double) fy);
     }
-
-    private void saveWidgetMap(Map<String, Integer> m) {
-        prefs.edit().putString("widgetMap", new JSONObject(m).toString()).apply();
-    }
-
-    @Override public boolean widgetBound(Item it) { return widgetViews.containsKey(it.id) || widgetMap().containsKey(it.id); }
-
-    @Override public void onWidgetTap(Item it) { if (!widgetMap().containsKey(it.id)) bindWidget(it, false); }
 
     private void addWidget() {
-        WidgetsDialog.show(this, night, (info, label) -> {
+        WidgetsDialog.show(this, night, (prov, label, mwDp, mhDp) -> {
             Item it = new Item();
             it.kind = Item.WIDGET;
-            it.url = info.provider.flattenToString();
-            it.pkg = info.provider.getPackageName();
+            it.url = prov;
+            int slash = prov.indexOf('/');
+            it.pkg = slash > 0 ? prov.substring(0, slash) : prov;
             it.title = label;
             int W = Math.max(1, desk.getWidth());
-            float minW = Math.max(info.minWidth, dp(140)), minH = Math.max(info.minHeight, dp(60));
+            float minW = Math.max(dp(mwDp), dp(140)), minH = Math.max(dp(mhDp), dp(60));
             it.w = Math.max(0.25, Math.min(0.95, (minW + dp(40)) / W));
             it.ar = Math.max(0.2, Math.min(3, (minH + dp(20)) / (it.w * W)));
             double[] p = desk.spot(it.w);
             it.x = p[0]; it.y = p[1];
-            bindWidget(it, true);
+            addItem(it);
+            requestBind(it);
         });
     }
 
-    private android.appwidget.AppWidgetProviderInfo providerOf(Item it) {
-        android.content.ComponentName cn = android.content.ComponentName.unflattenFromString(it.url);
-        if (cn == null) return null;
-        for (android.appwidget.AppWidgetProviderInfo i : widgetManager.getInstalledProviders()) if (cn.equals(i.provider)) return i;
-        return null;
+    /** El widget se activa en el principal: ahí Android pide el permiso y su configuración. */
+    private void requestBind(Item it) {
+        if (hub.isPrincipal()) { bindWidget(it); return; }
+        if (!hub.connected()) { Toast.makeText(this, "El principal no está conectado", Toast.LENGTH_SHORT).show(); return; }
+        hub.send("wBind", "id", it.id);
+        Toast.makeText(this, "Confirma el widget en el principal", Toast.LENGTH_SHORT).show();
     }
 
-    /** Activa el widget en este teléfono: permiso para usarlo y, si lo tiene, su pantalla de configuración. */
-    private void bindWidget(Item it, boolean isNew) {
-        android.appwidget.AppWidgetProviderInfo info = providerOf(it);
-        if (info == null) {
-            Toast.makeText(this, "Ese widget no está instalado en este teléfono (" + it.title + ")", Toast.LENGTH_LONG).show();
-            return;
-        }
-        pendingWidget = it; pendingWidgetNew = isNew;
-        pendingWidgetId = widgetHost.allocateAppWidgetId();
+    /** Pedido del extendido: activar un widget que se agregó allá (puede que el elemento aún no llegue). */
+    private void bindRequested(String id, int tries) {
+        Item it = desk.find(id);
+        if (it != null) { if (it.wid < 0) bindWidget(it); return; }
+        if (tries < 10) main.postDelayed(() -> bindRequested(id, tries + 1), 400);
+    }
+
+    private void bindWidget(Item it) {
+        WidgetHub wh = WidgetHub.get(this);
+        android.appwidget.AppWidgetProviderInfo info = wh.provider(it.url);
+        if (info == null) { Toast.makeText(this, "Ese widget no está instalado en el principal (" + it.title + ")", Toast.LENGTH_LONG).show(); return; }
+        pendingWidget = it;
+        pendingWidgetId = wh.allocate();
         boolean ok;
-        try { ok = widgetManager.bindAppWidgetIdIfAllowed(pendingWidgetId, info.provider); } catch (Exception e) { ok = false; }
+        try { ok = wh.awm.bindAppWidgetIdIfAllowed(pendingWidgetId, info.provider); } catch (Exception e) { ok = false; }
         if (ok) { configureWidget(); return; }
         Intent i = new Intent(android.appwidget.AppWidgetManager.ACTION_APPWIDGET_BIND);
         i.putExtra(android.appwidget.AppWidgetManager.EXTRA_APPWIDGET_ID, pendingWidgetId);
@@ -1212,9 +1261,10 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     private void configureWidget() {
-        android.appwidget.AppWidgetProviderInfo info = widgetManager.getAppWidgetInfo(pendingWidgetId);
+        WidgetHub wh = WidgetHub.get(this);
+        android.appwidget.AppWidgetProviderInfo info = wh.awm.getAppWidgetInfo(pendingWidgetId);
         if (info != null && info.configure != null) {
-            try { widgetHost.startAppWidgetConfigureActivityForResult(this, pendingWidgetId, 0, REQ_CONF, null); return; }
+            try { wh.host.startAppWidgetConfigureActivityForResult(this, pendingWidgetId, 0, REQ_CONF, null); return; }
             catch (Exception ignored) { }
         }
         finishWidget();
@@ -1223,68 +1273,57 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private void finishWidget() {
         Item it = pendingWidget;
         if (it == null) return;
-        Map<String, Integer> m = widgetMap();
-        m.put(it.id, pendingWidgetId);
-        saveWidgetMap(m);
+        it.wid = pendingWidgetId;
         pendingWidget = null; pendingWidgetId = -1;
-        if (pendingWidgetNew) addItem(it);
+        it.touch();
+        onItemChanged(it);
         desk.invalidate();
     }
 
     private void cancelPendingWidget(String msg) {
-        if (pendingWidgetId >= 0) try { widgetHost.deleteAppWidgetId(pendingWidgetId); } catch (Exception ignored) { }
+        if (pendingWidgetId >= 0) WidgetHub.get(this).delete(pendingWidgetId);
         pendingWidget = null; pendingWidgetId = -1;
         if (msg != null) Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
     }
 
-    private void releaseWidget(String itemId) {
-        android.appwidget.AppWidgetHostView v = widgetViews.remove(itemId);
-        if (v != null) widgetLayer.removeView(v);
-        Map<String, Integer> m = widgetMap();
-        Integer wid = m.remove(itemId);
-        if (wid != null) { try { widgetHost.deleteAppWidgetId(wid); } catch (Exception ignored) { } saveWidgetMap(m); }
+    private void releaseWidget(Item it) {
+        mirrors.remove(it.wid);
+        if (hub.isPrincipal()) WidgetHub.get(this).delete(it.wid);
     }
 
-    /** Borra widgets que quedaron activados pero ya no están en la mesa. */
+    /** Borra widgets activados que ya no están en la mesa (solo el principal los tiene). */
     private void cleanWidgets() {
-        Map<String, Integer> m = widgetMap();
+        if (!hub.isPrincipal()) return;
         Set<Integer> used = new HashSet<>();
-        boolean changed = false;
-        for (java.util.Iterator<Map.Entry<String, Integer>> i = m.entrySet().iterator(); i.hasNext(); ) {
-            Map.Entry<String, Integer> e = i.next();
-            if (desk.find(e.getKey()) == null) { try { widgetHost.deleteAppWidgetId(e.getValue()); } catch (Exception ignored) { } i.remove(); changed = true; }
-            else used.add(e.getValue());
-        }
-        if (changed) saveWidgetMap(m);
-        try { for (int id : widgetHost.getAppWidgetIds()) if (!used.contains(id)) widgetHost.deleteAppWidgetId(id); } catch (Exception ignored) { }
+        for (Item it : desk.items) if (Item.WIDGET.equals(it.kind) && it.wid >= 0) used.add(it.wid);
+        WidgetHub.get(this).clean(used);
     }
 
-    private final Map<String, int[]> widgetSizes = new HashMap<>();
+    private final Map<Integer, int[]> widgetSizes = new HashMap<>();
 
-    /** La mesa avisa dónde dibujó la tarjeta del widget: la vista real se pone justo ahí. */
-    @SuppressWarnings("deprecation")
+    /** La mesa avisa dónde dibujó la tarjeta del widget. */
     @Override public void onWidgetFrame(Item it, float left, float top, float width, float height, float rot, float px, float py, boolean shown) {
-        android.appwidget.AppWidgetHostView v = widgetViews.get(it.id);
-        if (!shown) { if (v != null && v.getVisibility() != View.GONE) v.setVisibility(View.GONE); return; }
-        if (v == null) {
-            Integer wid = widgetMap().get(it.id);
-            if (wid == null) return;
-            android.appwidget.AppWidgetProviderInfo info = widgetManager.getAppWidgetInfo(wid);
-            if (info == null) { Map<String, Integer> m = widgetMap(); m.remove(it.id); saveWidgetMap(m); return; }
-            v = widgetHost.createView(getApplicationContext(), wid, info);
-            v.setAppWidget(wid, info);
-            widgetLayer.addView(v, new FrameLayout.LayoutParams(Math.max(1, Math.round(width)), Math.max(1, Math.round(height))));
-            widgetViews.put(it.id, v);
+        if (!hub.isPrincipal()) {   // extendido: pedir al principal la imagen de lo que se ve
+            if (it.wid < 0) return;
+            if (shown) wantNow.put(it.wid, new int[]{Math.round(width), Math.round(height)}); else wantNow.remove(it.wid);
+            main.removeCallbacks(sendWant);
+            main.postDelayed(sendWant, 300);
+            return;
+        }
+        android.appwidget.AppWidgetHostView v = it.wid >= 0 ? WidgetHub.get(this).view(it.wid) : null;
+        if (v == null) return;
+        if (!shown) { if (v.getVisibility() != View.GONE) v.setVisibility(View.GONE); return; }
+        int iw = Math.max(1, Math.round(width)), ih = Math.max(1, Math.round(height));
+        if (v.getParent() != widgetLayer) {
+            if (v.getParent() instanceof android.view.ViewGroup) ((android.view.ViewGroup) v.getParent()).removeView(v);
+            widgetLayer.addView(v, new FrameLayout.LayoutParams(iw, ih));
         }
         if (v.getVisibility() != View.VISIBLE) v.setVisibility(View.VISIBLE);
-        int iw = Math.max(1, Math.round(width)), ih = Math.max(1, Math.round(height));
         FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) v.getLayoutParams();
         if (lp.width != iw || lp.height != ih) {
             lp.width = iw; lp.height = ih;
             v.setLayoutParams(lp);
-            final android.appwidget.AppWidgetHostView fv = v;
-            final int wdp = Math.round(iw / getResources().getDisplayMetrics().density), hdp = Math.round(ih / getResources().getDisplayMetrics().density);
-            widgetSizes.put(it.id, new int[]{wdp, hdp});
+            widgetSizes.put(it.wid, new int[]{Math.round(iw / getResources().getDisplayMetrics().density), Math.round(ih / getResources().getDisplayMetrics().density)});
             main.removeCallbacks(widgetResize);
             main.postDelayed(widgetResize, 350);
         }
@@ -1293,11 +1332,26 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         v.setRotation(rot);
     }
 
+    /** Extendido: avisa al principal qué widgets se están viendo y a qué tamaño. */
+    private final Runnable sendWant = () -> {
+        StringBuilder key = new StringBuilder();
+        JSONArray ids = new JSONArray(), ws = new JSONArray(), hs = new JSONArray();
+        for (Map.Entry<Integer, int[]> e : wantNow.entrySet()) {
+            ids.put(e.getKey()); ws.put(e.getValue()[0]); hs.put(e.getValue()[1]);
+            key.append(e.getKey()).append(':').append(e.getValue()[0] / 16).append('x').append(e.getValue()[1] / 16).append(';');
+        }
+        if (key.toString().equals(wantSent) || !hub.connected()) return;
+        wantSent = key.toString();
+        JSONObject m = new JSONObject();
+        try { m.put("t", "wWant"); m.put("ids", ids); m.put("w", ws); m.put("h", hs); } catch (JSONException ignored) { }
+        hub.send(m);
+    };
+
     /** Informa el nuevo tamaño a los widgets cuando se dejó de cambiar (algunos cambian su diseño). */
     @SuppressWarnings("deprecation")
     private final Runnable widgetResize = () -> {
-        for (Map.Entry<String, int[]> e : widgetSizes.entrySet()) {
-            android.appwidget.AppWidgetHostView v = widgetViews.get(e.getKey());
+        for (Map.Entry<Integer, int[]> e : widgetSizes.entrySet()) {
+            android.appwidget.AppWidgetHostView v = WidgetHub.get(this).view(e.getKey());
             if (v != null) try { v.updateAppWidgetSize(null, e.getValue()[0], e.getValue()[1], e.getValue()[0], e.getValue()[1]); } catch (Exception ignored) { }
         }
         widgetSizes.clear();
@@ -1408,6 +1462,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 full.put("t", "full"); full.put("items", arr);
             } catch (JSONException ignored) { }
             if (side == 1) sendView();   // el principal define la forma; va antes que los elementos
+            wantSent = ""; main.postDelayed(sendWant, 800);   // widgets: volver a pedir las imágenes
             hub.send(hello);
             hub.send(full);
         }
@@ -1458,7 +1513,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             }
             case "del": {
                 Item it = desk.find(m.optString("id"));
-                if (it != null) { desk.items.remove(it); if (Item.WIDGET.equals(it.kind)) releaseWidget(it.id); desk.invalidate(); scheduleSave(); }
+                if (it != null) { desk.items.remove(it); if (Item.WIDGET.equals(it.kind)) releaseWidget(it); desk.invalidate(); scheduleSave(); }
                 break;
             }
             case "drag":
@@ -1495,6 +1550,14 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 prefs.edit().putBoolean("snapGrid", m.optBoolean("on")).apply();
                 desk.setSnap(m.optBoolean("on"));
                 break;
+            case "wImg": {   // imagen en vivo de un widget del principal
+                try {
+                    byte[] bytes = Base64.decode(m.optString("img"), Base64.DEFAULT);
+                    android.graphics.Bitmap bm = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                    if (bm != null) { mirrors.put(m.optInt("wid"), bm); desk.invalidate(); }
+                } catch (Exception ignored) { }
+                break;
+            }
             case "navAck":
                 if (!m.optBoolean("ok")) Toast.makeText(this, "Recientes necesita la versión completa en el principal", Toast.LENGTH_SHORT).show();
                 break;

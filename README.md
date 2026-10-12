@@ -43,16 +43,19 @@ cuando cruzas más de la mitad o los lanzas.
 - **Batería** (*Herramientas*): muestra el nivel de batería del principal y del extendido (⚡ si está cargando).
 - **Ordenar y alinear** (*Mesas → Ordenar y alinear*): ordenar todo en filas, ordenar solo las apps, alinear a
   los puntos, enderezar todo, *Imán* (al soltar se ajusta a los puntos), orden automático y apps bloqueadas.
-- **Enviar al otro teléfono**: la flecha dentro de un círculo, abajo a la izquierda de cada elemento.
+- **Pasar al otro teléfono**: lanza el elemento con el dedo hacia el otro teléfono (o arrástralo más de la mitad).
+- **Quitar, girar y cambiar tamaño**: mantén presionado un elemento; aparecen la ✕ roja, el círculo de giro y la esquina de tamaño.
 - **Reloj**: hora, fecha y próxima alarma en la mesa; al tocarlo abre las alarmas del principal.
 - **Archivos**: administra los archivos del **principal**, como Total Commander con dos ventanas: una en cada
-  pantalla (en horizontal, arriba y abajo), las dos mostrando carpetas del principal. Al abrirlo en un teléfono
-  se abre en el otro. Mantén presionado para elegir; aparecen botones flotantes **Copiar**, **Mover**,
-  **Eliminar** (y Renombrar con uno solo). Copiar/Mover llevan lo elegido a la carpeta abierta en la otra
-  ventana. También se puede **arrastrar o lanzar** lo elegido hacia la otra pantalla para moverlo, con una
-  animación de hojas que vuelan de una pantalla a la otra. El trabajo siempre lo hace el principal. Los archivos
-  nunca pasan al extendido: al tocar uno, se abre en el principal. Solo el principal necesita *Acceso a todos
-  los archivos*.
+  pantalla, las dos mostrando carpetas del principal. Vista **Lista** o **Miniaturas** (fotos y videos en pequeño).
+  Mantén presionado para elegir; botones flotantes **Copiar**, **Mover**, **Eliminar** (y Renombrar). Arrastrar o
+  lanzar hacia la otra pantalla mueve, con animación. Los archivos nunca pasan al extendido.
+  - **Fotos**: galería propia al estilo de Android 2.3 (deslizar, pellizcar, zoom − / +, presentación, girar), en el
+    principal; en el extendido aparecen anterior/siguiente, presentación, girar y zoom.
+  - **Música**: suena en el principal (sigue aunque cambies de app, con controles en la notificación) y aparece un
+    reproductor flotante tipo Winamp moderno en el extendido: pantalla LCD, espectro, barra de avance y volumen.
+  - **Videos**: reproductor tipo YouTube en el principal; en el extendido, los controles grandes (barra roja,
+    retroceder/adelantar 10 s, anterior/siguiente, volumen).
 - **Widget propio "Mesa Doble · Reloj"**: hora, fecha y próxima alarma; al tocarlo abre las alarmas. Está en
   *Herramientas → Widget* (primero de la lista) y también en el inicio normal del teléfono.
 - **Girar y cambiar tamaño**: mantén presionado un elemento o usa dos dedos.
@@ -71,7 +74,8 @@ cuando cruzas más de la mitad o los lanzas.
 - **Apps ordenadas o fijas** (botón *Mesas*): *Ordenar apps ahora* las pone en cuadrícula por nombre;
   *Orden automático* las reacomoda al agregarlas o soltarlas; *Apps bloqueadas* las deja fijas (no se mueven
   ni se borran, pero se abren al tocarlas). Se aplica en ambos teléfonos.
-- **Widgets** (botón *Widget*): agrega widgets de Android (reloj, clima, calendario, música...). Se mueven
+- **Widgets** (*Herramientas → Widget*): siempre son los del **principal**. El principal los muestra de verdad;
+  en el extendido se ve su imagen en vivo y los toques se hacen en el principal. Antes: agrega widgets de Android (reloj, clima, calendario, música...). Se mueven
   tomándolos por su franja superior; mantén presionada esa franja para girarlos o cambiar su ancho y alto.
   Cada teléfono muestra su propia copia: si pasas un widget al otro teléfono, tócalo una vez ahí para activarlo
   (la app tiene que estar instalada en ese teléfono).
@@ -83,7 +87,7 @@ cuando cruzas más de la mitad o los lanzas.
   solo "bloquear"), notificaciones de pantalla completa y batería *Sin restricciones*. En Xiaomi activa también
   *Otros permisos → Mostrar en pantalla de bloqueo*. Si el extendido tiene PIN, pedirá el PIN al desbloquear;
   sin PIN se desbloquea solo.
-- **Color de fondo**: *Ajustes → Color de fondo*, se aplica en ambos teléfonos.
+- **Color de fondo**: *Ajustes → Color de fondo* (36 colores o uno personalizado con tono, intensidad y brillo), se aplica en ambos teléfonos.
 - **Pantalla de inicio**: *Ajustes → Pantalla de inicio* convierte Mesa Doble en el launcher del teléfono
   (no necesita permisos; se desactiva igual).
 

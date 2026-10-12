@@ -55,7 +55,11 @@ public class DeskView extends View {
         /** Widgets de Android: la vista real va encima de la mesa, donde la mesa dibuja su tarjeta. */
         void onWidgetFrame(Item it, float left, float top, float width, float height, float rot, float pivotX, float pivotY, boolean shown);
         boolean widgetBound(Item it);
+        /** En el extendido: la imagen en vivo del widget que corre en el principal (null en el principal). */
+        Bitmap widgetMirror(Item it);
         void onWidgetTap(Item it);
+        /** En el extendido: un toque sobre el widget (x, y de 0 a 1), para hacerlo en el principal. */
+        void onWidgetTouch(Item it, float fx, float fy);
         void onOpenAlarms();
         /** {nivel principal, cargando principal, nivel extendido, cargando extendido}; -1 = sin dato. */
         int[] battery();
@@ -101,6 +105,7 @@ public class DeskView extends View {
     private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
     { ring.setStyle(Paint.Style.STROKE); ring.setStrokeWidth(1.6f * getResources().getDisplayMetrics().density); }
     private boolean snapGrid;
+    private float[] downLocal;
     private final Paint battBody = new Paint(Paint.ANTI_ALIAS_FLAG), battFill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private boolean clockTick;
     private String alarmText = "";
@@ -562,7 +567,7 @@ public class DeskView extends View {
                         .setLineSpacing(0, 1.1f).build();
                 it.layoutKey = key;
             }
-            it.hPx = Math.max(96 * dp, 34 * dp + it.layout.getHeight() + pad + 26 * dp);   // abajo va el círculo de enviar
+            it.hPx = Math.max(96 * dp, 34 * dp + it.layout.getHeight() + pad);
         } else if (Item.IMG.equals(it.kind)) {
             Bitmap b = bitmapOf(it);
             float inner = width - 16 * dp;
@@ -631,16 +636,19 @@ public class DeskView extends View {
             small.setColor(fg);
             small.setTextSize(13 * dp);
             c.drawText(ellipsize(it.title, small, width - 92 * dp), 10 * dp, 24 * dp, small);
+            float bar0 = widgetBar();
+            Bitmap mirror = host != null ? host.widgetMirror(it) : null;
+            if (mirror != null) c.drawBitmap(mirror, new Rect(0, 0, mirror.getWidth(), mirror.getHeight()), new RectF(0, bar0, width, h), bmpPaint);
             boolean bound = host != null && host.widgetBound(it);
-            if (!bound) {
+            if (!bound && mirror == null) {
                 small.setColor(muted);
                 small.setTextSize(13 * dp);
-                String t = "Toca para mostrar este widget aquí";
+                String t = it.wid < 0 ? "Toca para activar el widget (en el principal)" : "Cargando widget del principal…";
                 float bar = widgetBar();
                 c.drawText(ellipsize(t, small, width - 16 * dp), width / 2 - Math.min(small.measureText(t), width - 16 * dp) / 2,
                         bar + (h - bar) / 2, small);
             }
-        } else if (isImg) c.drawText(tag, 44 * dp, h - 15 * dp, label);
+        } else if (isImg) c.drawText(tag, 10 * dp, h - 12 * dp, label);
         else c.drawText(tag, 10 * dp, 18 * dp, label);
 
         if (isNote) {
@@ -665,7 +673,7 @@ public class DeskView extends View {
             if (b != null) c.drawBitmap(b, new Rect(0, 0, b.getWidth(), b.getHeight()), dst, bmpPaint);
             small.setColor(fg);
             small.setTextSize(Math.max(12 * dp, Math.min(16 * dp, width * 0.07f)));
-            String t = ellipsize(it.title, small, width - 84 * dp);
+            String t = ellipsize(it.title, small, width - 16 * dp);
             c.drawText(t, width / 2 - small.measureText(t) / 2, h - 16 * dp, small);
         } else if (!isWidget && !isClock && !isBatt) {
             small.setColor(muted);
@@ -676,7 +684,7 @@ public class DeskView extends View {
             small.setTextSize(16 * dp);
             String t = it.title.isEmpty() ? dom : it.title;
             c.drawText(ellipsize(t, small, width - 2 * pad), pad, 72 * dp, small);
-            it.openBtn.set(width - pad - 92 * dp, 88 * dp, width - pad, 120 * dp);
+            it.openBtn.set(pad, 88 * dp, pad + 92 * dp, 120 * dp);
             btn.setColor((accent & 0x00FFFFFF) | 0x38000000);
             c.drawRoundRect(it.openBtn, 16 * dp, 16 * dp, btn);
             small.setColor(accent);
@@ -684,35 +692,20 @@ public class DeskView extends View {
             c.drawText("Abrir  ↗", it.openBtn.left + 14 * dp, it.openBtn.centerY() + 5 * dp, small);
         }
 
-        if (locked(it)) { it.sendBtn.setEmpty(); it.delBtn.setEmpty(); c.restore(); return; }
-        // botones cuadrados: enviar al otro lado y quitar
-        float bs = 30 * dp, gap = 3 * dp;
-        it.delBtn.set(width - 4 * dp - bs, 4 * dp, width - 4 * dp, 4 * dp + bs);
-        if (isWidget) it.sendBtn.set(it.delBtn.left - gap - bs, 4 * dp, it.delBtn.left - gap, 4 * dp + bs);   // abajo está el widget
-        else it.sendBtn.set(6 * dp, h - 6 * dp - bs, 6 * dp + bs, h - 6 * dp);   // abajo a la izquierda
-        btn.setColor(isNote || isImg ? 0x14000000 : (accent & 0x00FFFFFF) | 0x38000000);
-        c.drawRoundRect(it.delBtn, 6 * dp, 6 * dp, btn);
-        // enviar al otro teléfono: flecha dentro de un círculo
-        btn.setColor(isNote || isImg ? 0x26000000 : (accent & 0x00FFFFFF) | 0x55000000);
-        c.drawCircle(it.sendBtn.centerX(), it.sendBtn.centerY(), bs / 2, btn);
-        ring.setColor(isNote || isImg ? 0x552B2A22 : (accent & 0x00FFFFFF) | 0xAA000000);
-        c.drawCircle(it.sendBtn.centerX(), it.sendBtn.centerY(), bs / 2 - 0.8f * dp, ring);
-        icon.setColor(isNote || isImg ? 0xFF2B2A22 : fg);
-        float cx = it.sendBtn.centerX(), cy = it.sendBtn.centerY(), s = 6 * dp;
-        float sign = onFirst(it) ? 1 : -1;
-        float ux = vertical ? 0 : sign, uy = vertical ? sign : 0;   // hacia el otro teléfono
-        // la flecha se dibuja dentro del elemento girado: se compensa el giro para que apunte al otro teléfono
-        double ar = Math.toRadians(-it.rot);
-        float rx = (float) (ux * Math.cos(ar) - uy * Math.sin(ar)), ry = (float) (ux * Math.sin(ar) + uy * Math.cos(ar));
-        float tipX = cx + rx * s, tipY = cy + ry * s, hb = 5 * dp;
-        Path p = new Path();
-        p.moveTo(cx - rx * s, cy - ry * s); p.lineTo(tipX, tipY);
-        p.moveTo(tipX - rx * hb - ry * hb, tipY - ry * hb + rx * hb); p.lineTo(tipX, tipY);
-        p.lineTo(tipX - rx * hb + ry * hb, tipY - ry * hb - rx * hb);
-        c.drawPath(p, icon);
-        cx = it.delBtn.centerX(); cy = it.delBtn.centerY(); s = 5 * dp;
-        c.drawLine(cx - s, cy - s, cx + s, cy + s, icon);
-        c.drawLine(cx + s, cy - s, cx - s, cy + s, icon);
+        // sin flecha: para pasar al otro teléfono basta lanzarlo con el dedo.
+        // la ✕ para quitar solo aparece al mantener presionado (modo edición), junto a girar y tamaño.
+        it.sendBtn.setEmpty();
+        if (locked(it) || it != editing) { it.delBtn.setEmpty(); if (locked(it)) { c.restore(); return; } }
+        else {
+            float bs = 32 * dp;
+            it.delBtn.set(width - 6 * dp - bs, 6 * dp, width - 6 * dp, 6 * dp + bs);
+            btn.setColor(0xFFD9534F);
+            c.drawCircle(it.delBtn.centerX(), it.delBtn.centerY(), bs / 2, btn);
+            icon.setColor(0xFFFFFFFF);
+            float cx = it.delBtn.centerX(), cy = it.delBtn.centerY(), s5 = 5.5f * dp;
+            c.drawLine(cx - s5, cy - s5, cx + s5, cy + s5, icon);
+            c.drawLine(cx + s5, cy - s5, cx - s5, cy + s5, icon);
+        }
 
         // controles de giro y tamaño
         if (it == editing) {
@@ -863,7 +856,8 @@ public class DeskView extends View {
                 slide = 0;
                 if (pressed == null) { mode = SWIPE; return true; }   // espacio vacío: deslizar cambia de escritorio
                 float[] l = toLocal(pressed, e.getX(), e.getY());
-                pressedBtn = locked(pressed) ? null : pressed.sendBtn.contains(l[0], l[1]) ? "send" : pressed.delBtn.contains(l[0], l[1]) ? "del"
+                downLocal = l;
+                pressedBtn = locked(pressed) ? null : pressed == editing && pressed.delBtn.contains(l[0], l[1]) ? "del"
                         : Item.LINK.equals(pressed.kind) && pressed.openBtn.contains(l[0], l[1]) ? "open" : null;
                 ox = pressed.x; oy = pressed.y;
                 if (pressedBtn == null && editing == null && !locked(pressed)) postDelayed(longPress, 450);
@@ -1025,7 +1019,13 @@ public class DeskView extends View {
         else if (Item.NOTE.equals(it.kind)) { if (host != null) host.onEditNote(it); }
         else if (Item.LINK.equals(it.kind) && "open".equals(pressedBtn)) { if (host != null) host.onOpenLink(it); }
         else if (Item.APP.equals(it.kind)) { if (host != null) host.onOpenApp(it); }
-        else if (Item.WIDGET.equals(it.kind)) { if (host != null) host.onWidgetTap(it); }
+        else if (Item.WIDGET.equals(it.kind)) {
+            if (host == null) return;
+            float bar = widgetBar();
+            if (it.wid >= 0 && downLocal != null && downLocal[1] > bar && downLocal[3] > bar)
+                host.onWidgetTouch(it, downLocal[0] / downLocal[2], (downLocal[1] - bar) / (downLocal[3] - bar));
+            else host.onWidgetTap(it);
+        }
         else if (Item.CLOCK.equals(it.kind)) { if (host != null) host.onOpenAlarms(); }
         else { it.z = System.currentTimeMillis(); invalidate(); }
     }

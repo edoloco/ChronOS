@@ -29,6 +29,7 @@ public class Item {
     public long u = System.currentTimeMillis();   // última modificación (solo para desempatar)
     public int rev = 1;                           // versión: sube con cada cambio
     public float rot = 0f;
+    public int wid = -1;                          // widget: su número en el PRINCIPAL (-1 = sin activar)
     public double ar = 0.6;                       // widget: alto / ancho del contenido
     public int page = 0;                          // escritorio (0 = el primero; los demás van a los lados)
 
@@ -51,7 +52,7 @@ public class Item {
             o.put("id", id); o.put("kind", kind); o.put("text", text); o.put("url", url);
             o.put("title", title); o.put("color", color); o.put("pkg", pkg); o.put("ik", ik);
             if (withImg) o.put("img", img);
-            o.put("x", x); o.put("y", y); o.put("w", w); o.put("z", z); o.put("u", u); o.put("rev", rev); o.put("rot", (double) rot); o.put("page", page); o.put("ar", ar);
+            o.put("x", x); o.put("y", y); o.put("w", w); o.put("z", z); o.put("u", u); o.put("rev", rev); o.put("rot", (double) rot); o.put("page", page); o.put("ar", ar); o.put("wid", wid);
         } catch (JSONException ignored) { }
         return o;
     }
@@ -76,6 +77,7 @@ public class Item {
         it.rev = o.optInt("rev", 1);
         it.rot = (float) o.optDouble("rot", 0);
         it.page = Math.max(0, Math.min(49, o.optInt("page", 0)));
+        it.wid = o.optInt("wid", -1);
         it.ar = Math.max(0.15, Math.min(4, o.optDouble("ar", 0.6)));
         // nunca dejar un elemento fuera de ambas pantallas
         if (Double.isNaN(it.w) || it.w <= 0.05 || it.w > 1) it.w = 0.62;
@@ -90,7 +92,7 @@ public class Item {
         kind = o.kind; text = o.text; url = o.url; title = o.title; color = o.color; pkg = o.pkg;
         if (!o.img.isEmpty()) { if (!o.img.equals(img)) bmp = null; img = o.img; ik = o.ik; }
         else if (!o.ik.equals(ik)) { img = ""; ik = o.ik; bmp = null; }   // cambió la imagen: llegará aparte
-        x = o.x; y = o.y; w = o.w; z = o.z; u = o.u; rev = o.rev; rot = o.rot; page = o.page; ar = o.ar;
+        x = o.x; y = o.y; w = o.w; z = o.z; u = o.u; rev = o.rev; rot = o.rot; page = o.page; ar = o.ar; wid = o.wid;
     }
 
     public void setImage(String b64) {

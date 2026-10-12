@@ -134,6 +134,37 @@ public class FileServer {
         }
     }
 
+    /** Miniatura cuadrada de una foto o un video (null si no se puede). */
+    @SuppressWarnings("deprecation")
+    static android.graphics.Bitmap thumb(File f, int size) {
+        try {
+            String type = FilesProvider.mime(f.getName());
+            android.graphics.Bitmap src;
+            if (type.startsWith("video/")) {
+                src = android.media.ThumbnailUtils.createVideoThumbnail(f.getAbsolutePath(), android.provider.MediaStore.Images.Thumbnails.MINI_KIND);
+            } else {
+                android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
+                o.inJustDecodeBounds = true;
+                android.graphics.BitmapFactory.decodeFile(f.getAbsolutePath(), o);
+                int sample = 1;
+                while (Math.min(o.outWidth, o.outHeight) / (sample * 2) >= size) sample *= 2;
+                o = new android.graphics.BitmapFactory.Options();
+                o.inSampleSize = sample;
+                src = android.graphics.BitmapFactory.decodeFile(f.getAbsolutePath(), o);
+                if (src != null) {
+                    int rot = PhotoActivity.exifRotation(f.getAbsolutePath());
+                    if (rot != 0) {
+                        android.graphics.Matrix mx = new android.graphics.Matrix();
+                        mx.postRotate(rot);
+                        src = android.graphics.Bitmap.createBitmap(src, 0, 0, src.getWidth(), src.getHeight(), mx, true);
+                    }
+                }
+            }
+            if (src == null) return null;
+            return android.media.ThumbnailUtils.extractThumbnail(src, size, size);
+        } catch (Exception e) { return null; }
+    }
+
     static boolean delete(File f) {
         if (f.isDirectory()) {
             File[] cs = f.listFiles();
@@ -207,9 +238,16 @@ public class FileServer {
                     try { r.put("entries", list(d)); } catch (IOException e) { r.put("err", e.getMessage()); }
                 } else if ("fsOp".equals(t)) {
                     op(m, r);
+                } else if ("fsThumb".equals(t)) {
+                    android.graphics.Bitmap b = thumb(resolve(m.optString("path")), Math.max(64, Math.min(320, m.optInt("size", 160))));
+                    if (b != null) {
+                        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+                        b.compress(android.graphics.Bitmap.CompressFormat.JPEG, 72, bos);
+                        r.put("img", android.util.Base64.encodeToString(bos.toByteArray(), android.util.Base64.NO_WRAP));
+                    }
                 }
             } catch (JSONException ignored) { }
-            try { r.put("t", "fsList".equals(t) ? "fsListR" : "fsOpR"); } catch (JSONException ignored) { }
+            try { r.put("t", t + "R"); } catch (JSONException ignored) { }
             hub.send(r);
         });
     }

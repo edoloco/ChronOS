@@ -2,14 +2,13 @@ package cl.mesadoble;
 
 import android.app.Activity;
 import android.app.Dialog;
-import android.appwidget.AppWidgetManager;
-import android.appwidget.AppWidgetProviderInfo;
-import android.content.pm.ApplicationInfo;
-import android.content.pm.PackageManager;
+import android.graphics.BitmapFactory;
+import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.util.Base64;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -21,25 +20,29 @@ import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 import java.text.Collator;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 
-/** Lista de los widgets de Android instalados en este teléfono. */
+/** Los widgets de Android del teléfono PRINCIPAL (en el extendido se piden por la conexión). */
 public class WidgetsDialog {
 
-    public interface Host { void pick(AppWidgetProviderInfo info, String label); }
+    public interface Host { void pick(String provider, String label, int minWdp, int minHdp); }
 
     static class W {
-        final AppWidgetProviderInfo info;
-        final String label, app;
-        final Drawable icon;
-        W(AppWidgetProviderInfo i, String l, String a, Drawable d) { info = i; label = l; app = a; icon = d; }
+        String provider, label, app;
+        Drawable icon;
+        int mw, mh;
     }
 
     public static void show(Activity a, boolean night, Host host) {
+        final Hub hub = Hub.get(a);
+        final boolean remote = !hub.isPrincipal();
         final Dialog d = new Dialog(a, night ? android.R.style.Theme_Material_NoActionBar_Fullscreen
                 : android.R.style.Theme_Material_Light_NoActionBar_Fullscreen);
         d.requestWindowFeature(Window.FEATURE_NO_TITLE);
@@ -74,7 +77,8 @@ public class WidgetsDialog {
         root.addView(top);
 
         TextView hint = new TextView(a);
-        hint.setText("Los widgets de tus apps (reloj, clima, calendario, música...). Se mueven tomándolos por su franja superior.");
+        hint.setText(remote ? "Pidiendo los widgets al principal…"
+                : "Widgets del principal (reloj, clima, calendario, música...). Se mueven tomándolos por su franja superior.");
         hint.setTextColor(muted);
         hint.setTextSize(12);
         hint.setPadding(4, Math.round(8 * dp), 4, Math.round(6 * dp));
@@ -109,8 +113,8 @@ public class WidgetsDialog {
                 ((ImageView) row.getChildAt(0)).setImageDrawable(w.icon);
                 LinearLayout col = (LinearLayout) row.getChildAt(1);
                 ((TextView) col.getChildAt(0)).setText(w.label);
-                int cw = Math.max(1, Math.round((w.info.minWidth / dp + 30) / 70f)), chh = Math.max(1, Math.round((w.info.minHeight / dp + 30) / 70f));
-                ((TextView) col.getChildAt(1)).setText(w.app + " · " + cw + "×" + chh);
+                int cw = Math.max(1, Math.round((w.mw + 30) / 70f)), ch = Math.max(1, Math.round((w.mh + 30) / 70f));
+                ((TextView) col.getChildAt(1)).setText(w.app + " · " + cw + "×" + ch);
                 return row;
             }
         };
@@ -118,43 +122,65 @@ public class WidgetsDialog {
         list.setOnItemClickListener((parent, view, pos, id) -> {
             W w = shown.get(pos);
             d.dismiss();
-            host.pick(w.info, w.label);
+            host.pick(w.provider, w.label, w.mw, w.mh);
         });
+        Runnable filter = () -> {
+            String q = search.getText().toString().trim().toLowerCase(Locale.ROOT);
+            shown.clear();
+            for (W w : all) if (q.isEmpty() || w.label.toLowerCase(Locale.ROOT).contains(q) || w.app.toLowerCase(Locale.ROOT).contains(q)) shown.add(w);
+            adapter.notifyDataSetChanged();
+        };
         search.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int st, int c, int af) { }
             @Override public void onTextChanged(CharSequence s, int st, int b, int c) { }
-            @Override public void afterTextChanged(Editable e) {
-                String q = e.toString().trim().toLowerCase(Locale.ROOT);
-                shown.clear();
-                for (W w : all) if (q.isEmpty() || w.label.toLowerCase(Locale.ROOT).contains(q) || w.app.toLowerCase(Locale.ROOT).contains(q)) shown.add(w);
-                adapter.notifyDataSetChanged();
-            }
+            @Override public void afterTextChanged(Editable e) { filter.run(); }
         });
 
         d.setContentView(root);
         d.show();
 
-        new Thread(() -> {
-            PackageManager pm = a.getPackageManager();
+        // la lista viene del principal: directo, o pedida por la conexión
+        final Link.Listener[] l = new Link.Listener[1];
+        java.util.function.Consumer<JSONArray> load = arr -> new Thread(() -> {
             List<W> out = new ArrayList<>();
-            for (AppWidgetProviderInfo info : AppWidgetManager.getInstance(a).getInstalledProviders()) {
+            for (int i = 0; arr != null && i < arr.length(); i++) {
+                JSONObject o = arr.optJSONObject(i);
+                if (o == null) continue;
+                W w = new W();
+                w.provider = o.optString("p"); w.label = o.optString("l"); w.app = o.optString("a");
+                w.mw = o.optInt("mw"); w.mh = o.optInt("mh");
                 try {
-                    String label = info.loadLabel(pm);
-                    ApplicationInfo ai = pm.getApplicationInfo(info.provider.getPackageName(), 0);
-                    String app = String.valueOf(pm.getApplicationLabel(ai));
-                    Drawable icon = info.loadIcon(a, a.getResources().getDisplayMetrics().densityDpi);
-                    if (icon == null) icon = pm.getApplicationIcon(ai);
-                    out.add(new W(info, label != null ? label : app, app, icon));
+                    byte[] b = Base64.decode(o.optString("i"), Base64.DEFAULT);
+                    w.icon = new BitmapDrawable(a.getResources(), BitmapFactory.decodeByteArray(b, 0, b.length));
                 } catch (Exception ignored) { }
+                out.add(w);
             }
             Collator col = Collator.getInstance(new Locale("es"));
             final String own = a.getPackageName();
             Collections.sort(out, (x, y) -> {
-                boolean ox = own.equals(x.info.provider.getPackageName()), oy = own.equals(y.info.provider.getPackageName());
+                boolean ox = x.provider.startsWith(own + "/"), oy = y.provider.startsWith(own + "/");
                 if (ox != oy) return ox ? -1 : 1;   // los de Mesa Doble primero
-                int c = col.compare(x.app, y.app); return c != 0 ? c : col.compare(x.label, y.label);
+                int c = col.compare(x.app, y.app);
+                return c != 0 ? c : col.compare(x.label, y.label);
             });
-            a.runOnUiThread(() -> { all.addAll(out); shown.addAll(out); adapter.notifyDataSetChanged(); });
+            a.runOnUiThread(() -> {
+                all.clear(); all.addAll(out);
+                filter.run();
+                hint.setText("Widgets del principal (reloj, clima, calendario, música...). Se mueven tomándolos por su franja superior.");
+            });
         }, "widgets").start();
+
+        if (!remote) {
+            new Thread(() -> { JSONArray arr = WidgetHub.providers(a); load.accept(arr); }, "widgets-locales").start();
+            return;
+        }
+        if (!hub.connected()) { hint.setText("Conecta con el principal para ver sus widgets."); return; }
+        l[0] = new Link.Listener() {
+            @Override public void onState(int s, String i) { }
+            @Override public void onMessage(JSONObject m) { if ("wListR".equals(m.optString("t"))) load.accept(m.optJSONArray("list")); }
+        };
+        hub.add(l[0]);
+        d.setOnDismissListener(x -> hub.remove(l[0]));
+        hub.send("wList");
     }
 }
