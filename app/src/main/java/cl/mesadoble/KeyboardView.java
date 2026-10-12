@@ -75,18 +75,22 @@ public class KeyboardView extends View {
 
     private final float dp;
     private final Paint keyBg = new Paint(Paint.ANTI_ALIAS_FLAG), main = new Paint(Paint.ANTI_ALIAS_FLAG),
-            sub = new Paint(Paint.ANTI_ALIAS_FLAG);
+            sub = new Paint(Paint.ANTI_ALIAS_FLAG), keyStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final int bg, keyColor, keyDark, fg, muted, accent;
 
     public KeyboardView(Context ctx, boolean night) {
         super(ctx);
         dp = ctx.getResources().getDisplayMetrics().density;
-        bg = night ? 0xFF121920 : 0xFFCDD5DC;
-        keyColor = night ? 0xFF2A3848 : 0xFFFFFFFF;
-        keyDark = night ? 0xFF1E2934 : 0xFFB7C2CC;
-        accent = night ? 0xFF5CC3CF : 0xFF1F7F8C;
-        fg = night ? 0xFFE6EDF3 : 0xFF1D2733;
-        muted = night ? 0xFF8798A9 : 0xFF5B6B7A;
+        KbTheme th = KbTheme.of(ctx, night);   // a tono con el tema elegido
+        bg = th.bg;
+        keyColor = th.key;
+        keyDark = th.keyDark;
+        accent = th.accent;
+        fg = th.fg;
+        muted = th.muted;
+        keyStroke.setStyle(Paint.Style.STROKE);
+        keyStroke.setStrokeWidth(dp);
+        keyStroke.setColor(th.stroke);
         main.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         main.setTextAlign(Paint.Align.CENTER);
         sub.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
@@ -149,6 +153,7 @@ public class KeyboardView extends View {
             keyBg.setColor(active || send ? accent : special ? keyDark : keyColor);
             float r = 7 * dp;
             cv.drawRoundRect(k.r, r, r, keyBg);
+            if (keyStroke.getColor() != 0 && !(active || send)) cv.drawRoundRect(k.r, r, r, keyStroke);   // cristal: borde de luz
             String label = k.label;
             if (isLetter(k) && (shift ^ caps)) label = label.toUpperCase();
             boolean space = k.type == CHAR && " ".equals(k.label);

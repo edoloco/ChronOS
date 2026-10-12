@@ -39,6 +39,8 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     static boolean showingMedia, showingCamera;
 
     private boolean night;
+    private KbTheme th;
+    private String themeSig = "";
     private SharedPreferences prefs;
     private Hub hub;
     private KeyboardView keyboard;
@@ -83,7 +85,9 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(night ? 0xFF121920 : 0xFFCDD5DC);
+        th = KbTheme.of(this, night);
+        themeSig = KbTheme.sig(this);
+        root.setBackgroundColor(th.bg);
 
         // barra superior: estado a la izquierda, botones de navegación SIEMPRE al centro, opciones a la derecha
         LinearLayout left = new LinearLayout(this), navRow = new LinearLayout(this), top = new LinearLayout(this);
@@ -147,10 +151,10 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
             t.setTextSize(16);
             t.setSingleLine(true);
             t.setEllipsize(TextUtils.TruncateAt.END);
-            t.setTextColor(night ? 0xFFE6EDF3 : 0xFF1D2733);
+            t.setTextColor(th.fg);
             t.setTypeface(Typeface.create("sans-serif", i == 0 ? Typeface.BOLD : Typeface.NORMAL));
             GradientDrawable g = new GradientDrawable();
-            g.setColor(night ? 0xFF1E2934 : 0xFFE6EBEF);
+            g.setColor(th.keyDark);
             g.setCornerRadius(dp(12));
             t.setBackground(g);
             t.setOnClickListener(v -> pickSuggestion(((TextView) v).getText().toString()));
@@ -191,12 +195,13 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         field.setTextSize(20);
         field.setGravity(Gravity.TOP);
         field.setPadding(dp(16), dp(14), dp(16), dp(14));
-        field.setTextColor(night ? 0xFFE6EDF3 : 0xFF1D2733);
+        field.setTextColor(th.fg);
+        field.setHintTextColor(th.muted);
         field.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
                 | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES | InputType.TYPE_TEXT_FLAG_AUTO_CORRECT);
         field.setImeOptions(EditorInfo.IME_FLAG_NO_EXTRACT_UI | EditorInfo.IME_FLAG_NO_FULLSCREEN);
         GradientDrawable fb = new GradientDrawable();
-        fb.setColor(night ? 0xFF1E2934 : 0xFFFFFFFF);
+        fb.setColor(th.key);
         fb.setCornerRadius(dp(16));
         field.setBackground(fb);
         field.addTextChangedListener(new TextWatcher() {
@@ -238,6 +243,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         super.onResume();
         auto = auto || getIntent().getBooleanExtra("auto", false);
         resumed = true;
+        if (!themeSig.equals(KbTheme.sig(this))) { recreate(); return; }   // cambió el tema: se vuelve a pintar
         hub.keyboardVisible = mode < MEDIA;
         showingMedia = mode == MEDIA;
         showingCamera = mode == CAMERA;
@@ -506,9 +512,10 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         b.setGravity(Gravity.CENTER);
         b.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         b.setPadding(dp(14), 0, dp(14), 0);
-        b.setTextColor(night ? 0xFFE6EDF3 : 0xFF1D2733);
+        b.setTextColor(th.fg);
         GradientDrawable g = new GradientDrawable();
-        g.setColor(night ? 0xFF2A3848 : 0xFFFFFFFF);
+        g.setColor(th.chip);
+        if (th.stroke != 0) g.setStroke(dp(1), th.stroke);
         g.setCornerRadius(dp(18));
         b.setBackground(g);
         b.setOnClickListener(l);
@@ -541,7 +548,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         boolean typing = mode == KB || mode == KB_PAD || mode == DICT;
         if (btMode() && !typing) {
             status.setText(btStatus.isEmpty() ? "Preparando control Bluetooth…" : btStatus);
-            status.setTextColor(btOk ? (night ? 0xFF5CC3CF : 0xFF1F7F8C) : (night ? 0xFFF0A26B : 0xFFB4541A));
+            status.setTextColor(btOk ? th.accent : th.warn);
             updateTouchpadHint();
             return;
         }
@@ -559,7 +566,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
             ok = true;
         }
         status.setText(t);
-        status.setTextColor(ok ? (night ? 0xFF5CC3CF : 0xFF1F7F8C) : (night ? 0xFFF0A26B : 0xFFB4541A));
+        status.setTextColor(ok ? th.accent : th.warn);
         updateTouchpadHint();
     }
 

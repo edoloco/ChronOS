@@ -60,12 +60,13 @@ public class GamepadView extends View {
     public GamepadView(Context c, boolean night) {
         super(c);
         dp = c.getResources().getDisplayMetrics().density;
-        bg = night ? 0xFF121920 : 0xFFCDD5DC;
-        ctlColor = night ? 0xFF2A3848 : 0xFFFFFFFF;
-        ctlDown = night ? 0xFF5CC3CF : 0xFF1F7F8C;
+        KbTheme th = KbTheme.of(c, night);
+        bg = th.bg;
+        ctlColor = th.key;
+        ctlDown = th.accent;
         accent = ctlDown;
-        fg = night ? 0xFFE6EDF3 : 0xFF1D2733;
-        muted = night ? 0xFF8798A9 : 0xFF5B6B7A;
+        fg = th.fg;
+        muted = th.muted;
         stroke.setStyle(Paint.Style.STROKE);
         stroke.setStrokeWidth(2 * dp);
         dash.setStyle(Paint.Style.STROKE);
