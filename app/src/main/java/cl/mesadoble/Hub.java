@@ -60,6 +60,7 @@ public class Hub implements Link.Listener {
         side = prefs.getInt("side", -1);
         link = new Link(c, this);
         ScreenSync.listen(c, this);
+        CallHub.listen(c, this);   // llamadas del principal → controles en el extendido
         // batería: la de este teléfono se comparte con el otro para el widget de baterías
         c.registerReceiver(new android.content.BroadcastReceiver() {
             @Override public void onReceive(Context cx, Intent i) {
@@ -243,6 +244,8 @@ public class Hub implements Link.Listener {
             return;
         }
         if ("alarms".equals(t)) { openAlarms(); return; }
+        if ("call".equals(t)) { if (!isPrincipal()) CallHub.onCall(app, this, m); }
+        if ("callCmd".equals(t)) { if (isPrincipal()) CallHub.command(app, this, m); return; }
         if ("game".equals(t)) { if (!isPrincipal()) GameBg.handle(app, this, m); return; }
         // cámara del principal, controlada desde el extendido
         if ("camCmd".equals(t)) { if (isPrincipal()) CameraActivity.command(app, m); return; }

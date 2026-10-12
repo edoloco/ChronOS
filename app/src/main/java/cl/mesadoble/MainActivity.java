@@ -726,6 +726,13 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                             if (on) main.postDelayed(() -> checkSetup(false), 300);
                         })
                 .option(Ui.PALETTE, "Color de fondo", "Elegir el color de la mesa", this::chooseColor)
+                .option(Ui.RECEIVE, -1, "Llamadas: " + (principal ? (CallHub.ready(this) ? "listo" : "falta permiso") : "contestar aquí"),
+                        principal ? "Permitir que el extendido conteste o cuelgue las llamadas de este teléfono"
+                                  : "Las llamadas del principal se contestan o cuelgan desde este teléfono", principal && CallHub.ready(this),
+                        () -> {
+                            if (principal) requestPermissions(CallHub.PERMS, 61);
+                            else Toast.makeText(this, "Actívalo en el principal: Ajustes → Llamadas", Toast.LENGTH_LONG).show();
+                        })
                 .option(Ui.IMAGE, -1, "Fondo de juegos: " + (GameBg.enabled(this) ? "sí" : "no"),
                         "Al abrir un juego en el principal, el extendido muestra una imagen del juego", GameBg.enabled(this), () -> {
                             boolean on = !GameBg.enabled(this);
