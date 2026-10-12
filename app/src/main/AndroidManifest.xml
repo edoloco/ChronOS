@@ -166,6 +166,10 @@
         </receiver>
 
         <receiver
+            android:name=".Updater$InstallReceiver"
+            android:exported="false" />
+
+        <receiver
             android:name=".LockAdmin"
             android:label="Mesa Doble: bloquear junto al principal"
             android:permission="android.permission.BIND_DEVICE_ADMIN"

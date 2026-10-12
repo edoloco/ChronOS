@@ -3,6 +3,7 @@ package cl.mesadoble;
 import android.app.Activity;
 import android.app.Dialog;
 import android.content.Context;
+import android.app.PendingIntent;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Handler;
@@ -139,6 +140,62 @@ public class Updater {
         throw new IOException("Demasiadas redirecciones");
     }
 
+    /** ¿El archivo descargado es un APK completo de Mesa Doble? (si se cortó la descarga, no lo es) */
+    static String check(Context c, File apk, long expected) {
+        if (!apk.isFile() || apk.length() == 0) return "La descarga quedó vacía";
+        if (expected > 0 && apk.length() != expected) return "La descarga quedó incompleta (" + apk.length() + " de " + expected + " bytes)";
+        android.content.pm.PackageInfo pi = c.getPackageManager().getPackageArchiveInfo(apk.getAbsolutePath(), 0);
+        if (pi == null) return "El archivo descargado no es un APK válido";
+        if (!c.getPackageName().equals(pi.packageName)) return "El archivo no es de Mesa Doble";
+        return null;
+    }
+
+    /**
+     * Instala con el instalador de paquetes de Android (más confiable que abrir el APK, sobre todo en Xiaomi):
+     * Android muestra su ventana de "¿Actualizar esta app?" y se confirma ahí.
+     */
+    static void installSession(Context c, File apk) throws IOException {
+        android.content.pm.PackageInstaller pi = c.getPackageManager().getPackageInstaller();
+        android.content.pm.PackageInstaller.SessionParams sp = new android.content.pm.PackageInstaller.SessionParams(
+                android.content.pm.PackageInstaller.SessionParams.MODE_FULL_INSTALL);
+        sp.setAppPackageName(c.getPackageName());
+        int id = pi.createSession(sp);
+        try (android.content.pm.PackageInstaller.Session s = pi.openSession(id)) {
+            try (java.io.InputStream in = new java.io.FileInputStream(apk); OutputStream out = s.openWrite("base.apk", 0, apk.length())) {
+                byte[] buf = new byte[65536];
+                int n;
+                while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                s.fsync(out);
+            }
+            Intent cb = new Intent(c, InstallReceiver.class);
+            int flags = PendingIntent.FLAG_UPDATE_CURRENT | (android.os.Build.VERSION.SDK_INT >= 31 ? 0x02000000 /* FLAG_MUTABLE */ : 0);
+            s.commit(PendingIntent.getBroadcast(c, 77, cb, flags).getIntentSender());
+        }
+    }
+
+    /** Respuesta del instalador: pedir confirmación al usuario o avisar si falló. */
+    public static class InstallReceiver extends android.content.BroadcastReceiver {
+        @Override public void onReceive(Context c, Intent i) {
+            int st = i.getIntExtra(android.content.pm.PackageInstaller.EXTRA_STATUS, -999);
+            if (st == android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION) {
+                Intent confirm = i.getParcelableExtra(Intent.EXTRA_INTENT);
+                if (confirm != null) {
+                    confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    Hub.get(c).startOrNotify(confirm, 78, "Actualizar Mesa Doble", "Toca para confirmar la actualización");
+                }
+            } else if (st != android.content.pm.PackageInstaller.STATUS_SUCCESS) {
+                String msg = i.getStringExtra(android.content.pm.PackageInstaller.EXTRA_STATUS_MESSAGE);
+                Toast.makeText(c, "No se pudo actualizar" + (msg != null ? ": " + msg : ""), Toast.LENGTH_LONG).show();
+            }
+        }
+    }
+
+    /** Instala el APK descargado: primero con el instalador de paquetes; si no se puede, abriendo el archivo. */
+    static void install(Context c, File apk) {
+        try { installSession(c, apk); }
+        catch (Exception e) { Hub.get(c).startOrNotify(installIntent(c, apk), 32, "Actualización de Mesa Doble lista", "Toca para instalarla"); }
+    }
+
     static Intent installIntent(Context c, File apk) {
         Intent i = new Intent(Intent.ACTION_VIEW);
         i.setDataAndType(FilesProvider.uriFor(c, apk), "application/vnd.android.package-archive");
@@ -229,8 +286,16 @@ public class Updater {
                 }));
                 main.post(() -> {
                     try { d.dismiss(); } catch (Exception ignored) { }
-                    try { a.startActivity(installIntent(a, f)); }
-                    catch (Exception e) { Toast.makeText(a, "No pude abrir el instalador", Toast.LENGTH_LONG).show(); }
+                    String bad = check(a, f, r.size);
+                    if (bad != null) {
+                        new Ui.Sheet(a).title("No se pudo actualizar").message(bad + ". Prueba otra vez o descárgala desde la página de versiones.")
+                                .button("Cerrar", false, null)
+                                .button("Abrir versiones", true, () -> { try { a.startActivity(new Intent(Intent.ACTION_VIEW,
+                                        Uri.parse("https://github.com/" + repo(a) + "/releases"))); } catch (Exception ignored) { } })
+                                .show();
+                        return;
+                    }
+                    install(a, f);
                 });
             } catch (IOException e) {
                 main.post(() -> {
@@ -252,7 +317,9 @@ public class Updater {
                 }
                 Release r = latest(c);
                 File f = download(c, r, null);
-                hub.startOrNotify(installIntent(c, f), 32, "Actualización de Mesa Doble lista", "Toca para instalar la versión " + clean(r.tag));
+                String bad = check(c, f, r.size);
+                if (bad != null) throw new IOException(bad);
+                install(c, f);
             } catch (IOException e) {
                 hub.startOrNotify(new Intent(c, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), 33,
                         "No se pudo actualizar", e.getMessage() != null ? e.getMessage() : "Error de descarga");
