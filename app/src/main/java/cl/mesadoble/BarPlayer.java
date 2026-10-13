@@ -31,14 +31,15 @@ public class BarPlayer extends LinearLayout {
     public BarPlayer(Context c, Hub hub, int ink) {
         super(c);
         this.hub = hub;
+        this.inkC = ink;
         setGravity(Gravity.CENTER_VERTICAL);
         setPadding(dp(8), 0, dp(8), 0);
         int bg = 0x00000000;
-        MediaIcon prev = new MediaIcon(c, MediaIcon.PREV, 34, bg, ink);
-        MediaIcon back = new MediaIcon(c, MediaIcon.BACK10, 34, bg, ink);
-        play = new MediaIcon(c, MediaIcon.PAUSE, 42, (ink & 0x00FFFFFF) | 0x26000000, ink);
-        MediaIcon fwd = new MediaIcon(c, MediaIcon.FWD10, 34, bg, ink);
-        MediaIcon next = new MediaIcon(c, MediaIcon.NEXT, 34, bg, ink);
+        MediaIcon prev = new MediaIcon(c, MediaIcon.PREV, 32, bg, ink);
+        MediaIcon back = new MediaIcon(c, MediaIcon.BACK10, 32, bg, ink);
+        play = new MediaIcon(c, MediaIcon.PAUSE, 40, (ink & 0x00FFFFFF) | 0x26000000, ink);
+        MediaIcon fwd = new MediaIcon(c, MediaIcon.FWD10, 32, bg, ink);
+        MediaIcon next = new MediaIcon(c, MediaIcon.NEXT, 32, bg, ink);
         prev.setOnClickListener(v -> act("prev", 0, "prev"));
         back.setOnClickListener(v -> act("rel", -10000, "rw"));
         play.setOnClickListener(v -> act("toggle", 0, "play"));
@@ -75,6 +76,13 @@ public class BarPlayer extends LinearLayout {
         mid.addView(sr);
         addView(mid, new LayoutParams(0, -2, 1));
 
+        MediaIcon vd = new MediaIcon(c, MediaIcon.VOL_DOWN, 30, bg, ink);
+        MediaIcon vu = new MediaIcon(c, MediaIcon.VOL_UP, 30, bg, ink);
+        vd.setOnClickListener(v -> act("vol", -1, "vdown"));
+        vu.setOnClickListener(v -> act("vol", 1, "vup"));
+        addView(vd);
+        addView(vu);
+
         boost = new TextView(c);
         boost.setText("BOOST");
         boost.setTextSize(11);
@@ -83,6 +91,12 @@ public class BarPlayer extends LinearLayout {
         boost.setGravity(Gravity.CENTER);
         boost.setPadding(dp(10), 0, dp(10), 0);
         boost.setOnClickListener(v -> {
+            if (external) {   // video de otra app: se captura su sonido en el principal y suena también aquí
+                appBoost = !appBoost;
+                if (hub.isPrincipal()) hub.boostApp(appBoost); else hub.send("boostApp", "on", appBoost);
+                paintBoost(appBoost, ink);
+                return;
+            }
             boolean on = !Boost.enabled(getContext());
             Boost.setEnabled(getContext(), hub, on);
             paintBoost(on, ink);
@@ -106,7 +120,10 @@ public class BarPlayer extends LinearLayout {
     }
 
     // ---- video de otra app (YouTube, Netflix…): sin barra de avance; los botones mandan teclas multimedia
-    private boolean external;
+    private boolean external, appBoost;
+    private int inkC;
+    /** El principal avisó si el Boost está sonando (capturado o de archivo). */
+    public void setBoostOn(boolean on) { if (external) { appBoost = on; paintBoost(on, inkC); } }
     private Runnable onClose = () -> { };
     public void setOnClose(Runnable r) { onClose = r; }
     public boolean isExternal() { return external; }
@@ -116,6 +133,7 @@ public class BarPlayer extends LinearLayout {
         if (on) {
             title.setText("▶  Video en el principal");
             seek.setVisibility(INVISIBLE);
+            paintBoost(appBoost, inkC);
             pos.setText(""); dur.setText("");
             play.setKind(MediaIcon.PAUSE);
         } else seek.setVisibility(VISIBLE);

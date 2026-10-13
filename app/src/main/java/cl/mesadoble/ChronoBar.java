@@ -100,7 +100,13 @@ public class ChronoBar extends FrameLayout {
     private android.animation.ValueAnimator rpAnim;
     public void setRecents(View v) { recents = v; addView(v, new LayoutParams(-2, -2)); }
     /** Ancho de la pestaña de apps recientes. */
-    float recW() { return recents == null ? 0 : rp * Math.min(getWidth() * 0.27f, 250 * dp); }
+    float recW() { return recWFor(getWidth()); }
+    /** Con música la pestaña de recientes se achica a solo la mira: el reproductor usa casi todo el ancho. */
+    float recWFor(float W) {
+        if (recents == null) return 0;
+        float full = Math.min(W * 0.27f, 250 * dp), mini = Math.min(full, 74 * dp);
+        return rp * (full - (full - mini) * pp);
+    }
 
     public void showRecents(boolean on) {
         if (recents == null) return;
@@ -123,7 +129,7 @@ public class ChronoBar extends FrameLayout {
         ppAnim = android.animation.ValueAnimator.ofFloat(pp, on ? 1f : 0f);
         ppAnim.setDuration(on ? 520 : 360);
         ppAnim.setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f));
-        ppAnim.addUpdateListener(a -> { pp = (float) a.getAnimatedValue(); placePlayer(); invalidate(); });
+        ppAnim.addUpdateListener(a -> { pp = (float) a.getAnimatedValue(); requestLayout(); placePlayer(); invalidate(); });
         ppAnim.addListener(new android.animation.AnimatorListenerAdapter() {
             @Override public void onAnimationEnd(android.animation.Animator a) { if (!playerOn && player != null) player.setVisibility(GONE); }
         });
@@ -151,9 +157,9 @@ public class ChronoBar extends FrameLayout {
         int W = MeasureSpec.getSize(ws), H = barHeight();
         for (int i = 0; i < getChildCount(); i++) {
             View v = getChildAt(i);
-            if (v == player) v.measure(MeasureSpec.makeMeasureSpec(Math.max(0, Math.round(W - tabW() - Math.min(W * 0.27f, 250 * dp) - diag() * 1.6f - 12 * dp)), MeasureSpec.EXACTLY),
+            if (v == player) v.measure(MeasureSpec.makeMeasureSpec(Math.max(0, Math.round(W - tabW() - recWFor(W) - diag() * 1.6f - 12 * dp)), MeasureSpec.EXACTLY),
                     MeasureSpec.makeMeasureSpec(Math.round(98 * dp - strip() - 6 * dp), MeasureSpec.EXACTLY));
-            else if (v == recents) v.measure(MeasureSpec.makeMeasureSpec(Math.max(1, Math.round(Math.min(W * 0.27f, 250 * dp) - 10 * dp)), MeasureSpec.EXACTLY),
+            else if (v == recents) v.measure(MeasureSpec.makeMeasureSpec(Math.max(1, Math.round(recWFor(W) / Math.max(0.01f, rp) - 10 * dp)), MeasureSpec.EXACTLY),
                     MeasureSpec.makeMeasureSpec(Math.round(74 * dp - 8 * dp), MeasureSpec.EXACTLY));
             else if (v == notif) v.measure(MeasureSpec.makeMeasureSpec(Math.round(Math.min(W - tabW() - diag() * 0.4f - 10 * dp, 520 * dp)), MeasureSpec.EXACTLY),
                     MeasureSpec.makeMeasureSpec(Math.round(tab() - 10 * dp), MeasureSpec.EXACTLY));

@@ -1977,10 +1977,13 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                     else if (side == 0) floatNotif.show(m);                   // el principal está en otra app: aquí, arriba a la izquierda
                 });
                 break;
+            case "boost":
+                if (barPlayer != null) main.post(() -> barPlayer.setBoostOn(m.optBoolean("on")));
+                break;
             case "mActive":   // video en otra app del principal: los controles salen en la barra
-                if (side == 0 && barPlayer != null && m.optBoolean("video") && m.optBoolean("on") && m.optBoolean("fresh"))
+                if (side == 0 && barPlayer != null && m.optBoolean("video") && m.optBoolean("fresh"))
                     main.post(() -> { boolean was = cbar.playerShown(); barPlayer.setExternal(true); cbar.showPlayer(true); if (!was) main.postDelayed(() -> layoutChrono(false), 560); });
-                else if (side == 0 && barPlayer != null && !m.optBoolean("on"))   // terminó (o se pausó largo): se recoge
+                else if (side == 0 && barPlayer != null && !m.optBoolean("on") && !m.optBoolean("app"))   // se cerró la app o terminó: se recoge
                     main.postDelayed(() -> { if (barPlayer != null && barPlayer.isExternal() && cbar.playerShown()) { cbar.showPlayer(false); main.postDelayed(() -> layoutChrono(false), 400); } }, 8000);
                 break;
             case "mState":

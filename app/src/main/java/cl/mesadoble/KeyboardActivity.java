@@ -586,7 +586,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         if ("navAck".equals(t) && !m.optBoolean("ok"))
             android.widget.Toast.makeText(this, "Recientes necesita la versión completa en el principal", android.widget.Toast.LENGTH_SHORT).show();
         if ("kbState".equals(t) || "kbAck".equals(t)) updateStatus();
-        if (mediaView != null && t.startsWith("m")) mediaView.onMessage(m);
+        if (mediaView != null && (t.startsWith("m") || "volNow".equals(t))) mediaView.onMessage(m);
         if (cameraView != null && t.startsWith("cam")) cameraView.onMessage(m);
         // abierto solo (al tocar un campo en el principal): se cierra solo cuando ya no hay dónde escribir
         if ("kbState".equals(t) && auto && (mode == KB || mode == KB_PAD || mode == DICT)) {

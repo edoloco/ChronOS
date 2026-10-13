@@ -251,6 +251,17 @@ public class Hub implements Link.Listener {
         }
         if ("boostSet".equals(t)) { if (isPrincipal()) Boost.setEnabled(app, this, m.optBoolean("on")); return; }
         if ("boostVol".equals(t)) { Boost.applyVolume(app, m.optDouble("f")); return; }
+        if ("boostApp".equals(t)) { if (isPrincipal()) boostApp(m.optBoolean("on")); return; }
+        // volumen del principal desde el extendido (barra deslizante del control de video)
+        if (("setVol".equals(t) || "volAsk".equals(t)) && isPrincipal()) {
+            AudioManager am = (AudioManager) app.getSystemService(Context.AUDIO_SERVICE);
+            if (am != null) {
+                int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+                if ("setVol".equals(t)) am.setStreamVolume(AudioManager.STREAM_MUSIC, (int) Math.round(m.optDouble("f") * max), AudioManager.FLAG_SHOW_UI);
+                send("volNow", "f", am.getStreamVolume(AudioManager.STREAM_MUSIC) / (double) Math.max(1, max));
+            }
+            return;
+        }
         if ("call".equals(t)) { if (!isPrincipal()) CallHub.onCall(app, this, m); }
         if ("callCmd".equals(t)) { if (isPrincipal()) CallHub.command(app, this, m); return; }
         if ("game".equals(t)) { if (!isPrincipal()) GameBg.handle(app, this, m); return; }
@@ -285,7 +296,7 @@ public class Hub implements Link.Listener {
         if ("mCmd".equals(t)) { if (isPrincipal()) MediaHub.command(app, m); return; }
         // un video empezó en el principal: el control de video se abre UNA vez (si se cierra, no vuelve hasta otro video)
         // (si ChronOS está a la vista, los controles salen en su action bar)
-        if ("mActive".equals(t) && !isPrincipal() && m.optBoolean("on") && m.optBoolean("video") && m.optBoolean("fresh")
+        if ("mActive".equals(t) && !isPrincipal() && m.optBoolean("video") && m.optBoolean("fresh")
                 && !KeyboardActivity.showingMedia && !foreground)
             MediaHub.openControls(app, MediaHub.VIDEO);
         if ("mOpen".equals(t)) {
@@ -550,11 +561,17 @@ public class Hub implements Link.Listener {
             if (!isPrincipal() || !connected()) return;
             RecentApps.worker.execute(() -> GameBg.poll(app, Hub.this));   // ¿empezó un juego? → fondo en el extendido
             RecentApps.worker.execute(Hub.this::pollNotifs);                // apps con notificaciones nuevas → punto rojo
+            RecentApps.worker.execute(() -> {                                 // ¿hay una app de video al frente? (YouTube, Netflix…)
+                if (RecentApps.hasAccess(app)) videoApp = isVideoApp(app, RecentApps.active(app));
+            });
             AudioManager am = (AudioManager) app.getSystemService(Context.AUDIO_SERVICE);
             boolean on = am != null && am.isMusicActive() && MediaHub.current == null;   // los visores propios ya tienen sus controles
-            boolean video = on && moviePlaying(am);
+            boolean appNow = videoApp && MediaHub.current == null;
+            boolean video = (on && moviePlaying(am)) || appNow;
             long now = SystemClock.uptimeMillis();
             boolean fresh = false;
+            if (appNow && !videoAppWas) fresh = true;   // se abrió una app de video: los controles salen ya
+            videoAppWas = appNow;
             if (video) {
                 lastVideoAt = now;
                 if (!videoSession) { videoSession = true; fresh = true; }
@@ -562,11 +579,37 @@ public class Hub implements Link.Listener {
             if (on != musicActive || video != videoActive || fresh) {
                 musicActive = on;
                 videoActive = video;
-                send("mActive", "on", on, "video", video, "fresh", fresh);
+                send("mActive", "on", on, "video", video, "fresh", fresh, "app", appNow);
             }
             main.postDelayed(this, 1500);
         }
     };
+
+    /** Boost para apps: en el principal se pide el permiso de captura (con un toque allá) o se detiene. */
+    void boostApp(boolean on) {
+        if (!on) { CaptureService.stop(app); return; }
+        if (CaptureService.running) return;
+        startOrNotify(new Intent(app, CaptureActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), 62,
+                "Boost para apps", "Toca para que el sonido salga también por el extendido");
+    }
+
+    private volatile boolean videoApp;
+    private boolean videoAppWas;
+
+    // apps de video conocidas (además de las que Android marca como "video")
+    private static final String[] VIDEO_APPS = {"com.google.android.youtube", "com.google.android.apps.youtube.kids", "app.revanced.android.youtube",
+            "com.netflix.mediaclient", "com.amazon.avod", "com.disney.disneyplus", "com.hbo.hbonow", "com.wbd.stream", "com.hbo.max",
+            "tv.twitch.android.app", "org.videolan.vlc", "com.mxtech.videoplayer", "com.google.android.videos", "com.plexapp.android",
+            "com.crunchyroll.crunchyroid", "com.star.plus", "com.paramount.android", "com.vimeo.android", "com.dailymotion.dailymotion",
+            "com.mubi", "com.pluto.tv", "tv.pluto.android", "com.viki.android", "com.iqiyi.i18n", "com.kick.mobile"};
+
+    static boolean isVideoApp(Context c, String pkg) {
+        if (pkg == null || pkg.isEmpty() || pkg.startsWith("@")) return false;
+        if (pkg.contains("youtube.music")) return false;
+        for (String v : VIDEO_APPS) if (pkg.startsWith(v)) return true;
+        try { return c.getPackageManager().getApplicationInfo(pkg, 0).category == android.content.pm.ApplicationInfo.CATEGORY_VIDEO; }
+        catch (Exception e) { return false; }
+    }
 
     /** ¿Algo suena como película (video)? */
     private static boolean moviePlaying(AudioManager am) {

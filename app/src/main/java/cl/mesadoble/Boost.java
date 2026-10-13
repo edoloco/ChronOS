@@ -189,6 +189,7 @@ final class Boost {
             AudioTrack track = null;
             int rate = 0;
             long written = 0;
+            boolean liveTrack = false;
             Socket s = null;
             final long[] clock = {Long.MIN_VALUE, Long.MAX_VALUE};   // {diferencia de relojes, mejor ida y vuelta}
             try {
@@ -232,12 +233,21 @@ final class Boost {
                     long when = in.readLong();
                     if (len > buf.length) buf = new byte[len];
                     in.readFully(buf, 0, len);
-                    if (track == null || sr != rate) {
+                    boolean live = when == 0;   // sonido capturado de otra app (YouTube…): lo antes posible, sin esperar
+                    if (track == null || sr != rate || live != liveTrack) {
                         if (track != null) track.release();
                         rate = sr;
-                        track = track(sr);
+                        liveTrack = live;
+                        track = live ? liveTrack(sr) : track(sr);
                         track.play();
                         written = 0;
+                    }
+                    if (live) {
+                        long queued = written - (track.getPlaybackHeadPosition() & 0xffffffffL);
+                        if (queued > sr / 8) continue;   // se acumuló retraso: se salta este trozo para alcanzar
+                        track.write(buf, 0, len);
+                        written += len / 2;
+                        continue;
                     }
                     int off = 0, n = len;
                     long offset;
@@ -271,6 +281,18 @@ final class Boost {
         sink = null;
         Socket s = sinkSocket;
         if (s != null) try { s.close(); } catch (Exception ignored) { }
+    }
+
+    /** Pista con el búfer más chico posible (para el sonido capturado en vivo). */
+    static AudioTrack liveTrack(int sr) {
+        int min = AudioTrack.getMinBufferSize(sr, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
+        AudioTrack.Builder b = new AudioTrack.Builder()
+                .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MOVIE).build())
+                .setAudioFormat(new AudioFormat.Builder().setSampleRate(sr).setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
+                .setBufferSizeInBytes(Math.max(min, sr / 25 * 2))
+                .setTransferMode(AudioTrack.MODE_STREAM);
+        try { AudioTrack.Builder.class.getMethod("setPerformanceMode", int.class).invoke(b, 1 /* PERFORMANCE_MODE_LOW_LATENCY */); } catch (Exception ignored) { }
+        return b.build();
     }
 
     static AudioTrack track(int sr) {

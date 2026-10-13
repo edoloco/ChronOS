@@ -27,7 +27,27 @@ public class MediaControlView extends LinearLayout {
     private final LinearLayout seekRow;
     private final SeekBar seek;
     private final MediaIcon playBtn;
-    private boolean dragging;
+    private boolean dragging, volDrag;
+    private SeekBar vol;
+    private long volSentAt;
+
+    private void sendVol(double f) {
+        long now = SystemClock.uptimeMillis();
+        if (now - volSentAt < 80 && volDrag) return;
+        volSentAt = now;
+        JSONObject m = new JSONObject();
+        try { m.put("t", "setVol"); m.put("f", f); } catch (Exception ignored) { }
+        if (hub.isPrincipal()) {
+            android.media.AudioManager am = (android.media.AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+            if (am != null) am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC,
+                    (int) Math.round(f * am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC)), android.media.AudioManager.FLAG_SHOW_UI);
+        } else if (hub.connected()) hub.send(m);
+    }
+
+    @Override protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        if (hub.connected()) hub.send("volAsk");
+    }
     private long dur, lastOwn;   // última vez que llegó el estado del reproductor propio
     private String ownKind = "";
 
@@ -84,13 +104,13 @@ public class MediaControlView extends LinearLayout {
         LinearLayout row = new LinearLayout(c);
         row.setGravity(Gravity.CENTER);
         row.setPadding(0, dp(10), 0, dp(6));
-        MediaIcon prev = new MediaIcon(c, MediaIcon.PREV, 50, CARD, Color.WHITE);
-        MediaIcon back = new MediaIcon(c, MediaIcon.BACK10, 54, CARD, Color.WHITE);
-        playBtn = new MediaIcon(c, MediaIcon.PAUSE, 74, RED, Color.WHITE);
-        MediaIcon fwd = new MediaIcon(c, MediaIcon.FWD10, 54, CARD, Color.WHITE);
-        MediaIcon next = new MediaIcon(c, MediaIcon.NEXT, 50, CARD, Color.WHITE);
-        MediaIcon vd = new MediaIcon(c, MediaIcon.VOL_DOWN, 46, CARD, Color.WHITE);
-        MediaIcon vu = new MediaIcon(c, MediaIcon.VOL_UP, 46, CARD, Color.WHITE);
+        MediaIcon prev = new MediaIcon(c, MediaIcon.PREV, 46, CARD, Color.WHITE);
+        MediaIcon back = new MediaIcon(c, MediaIcon.BACK10, 50, CARD, Color.WHITE);
+        playBtn = new MediaIcon(c, MediaIcon.PAUSE, 66, RED, Color.WHITE);
+        MediaIcon fwd = new MediaIcon(c, MediaIcon.FWD10, 50, CARD, Color.WHITE);
+        MediaIcon next = new MediaIcon(c, MediaIcon.NEXT, 46, CARD, Color.WHITE);
+        MediaIcon vd = new MediaIcon(c, MediaIcon.VOL_DOWN, 42, CARD, Color.WHITE);
+        MediaIcon vu = new MediaIcon(c, MediaIcon.VOL_UP, 42, CARD, Color.WHITE);
         prev.setOnClickListener(v -> act("prev", "prev", 0));
         back.setOnClickListener(v -> act("rel", "rw", -10000));
         playBtn.setOnClickListener(v -> act("toggle", "play", 0));
@@ -100,10 +120,30 @@ public class MediaControlView extends LinearLayout {
         vu.setOnClickListener(v -> act("vol", "vup", 1));
         for (View v : new View[]{vd, prev, back, playBtn, fwd, next, vu}) {
             LayoutParams lp = new LayoutParams(-2, -2);
-            lp.setMargins(dp(5), 0, dp(5), 0);
+            lp.setMargins(dp(3), 0, dp(3), 0);
             row.addView(v, lp);
         }
         addView(row);
+
+        // volumen del principal
+        LinearLayout vr = new LinearLayout(c);
+        vr.setGravity(Gravity.CENTER_VERTICAL);
+        vr.setPadding(0, dp(4), 0, dp(4));
+        TextView vlo = new TextView(c); vlo.setText("🔈"); vlo.setTextSize(16);
+        TextView vhi = new TextView(c); vhi.setText("🔊"); vhi.setTextSize(16);
+        vol = new SeekBar(c);
+        vol.setMax(100);
+        vol.getProgressDrawable().setColorFilter(0xFFFFFFFF, PorterDuff.Mode.SRC_IN);
+        vol.getThumb().setColorFilter(0xFFFFFFFF, PorterDuff.Mode.SRC_IN);
+        vol.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar sb, int p, boolean u) { if (u) sendVol(p / 100.0); }
+            @Override public void onStartTrackingTouch(SeekBar sb) { volDrag = true; }
+            @Override public void onStopTrackingTouch(SeekBar sb) { volDrag = false; sendVol(sb.getProgress() / 100.0); }
+        });
+        vr.addView(vlo);
+        vr.addView(vol, new LayoutParams(0, -2, 1));
+        vr.addView(vhi);
+        addView(vr, new LayoutParams(Math.round(Math.min(c.getResources().getDisplayMetrics().widthPixels * 0.8f, dp(520))), -2));
 
         note = new TextView(c);
         note.setTextColor(0xFF777777);
@@ -152,6 +192,8 @@ public class MediaControlView extends LinearLayout {
                 if (!dragging) { posText.setText(MediaHub.fmt(pos)); seek.setProgress(dur > 0 ? (int) (pos * 1000 / dur) : 0); }
                 playBtn.setKind(m.optBoolean("play") ? MediaIcon.PAUSE : MediaIcon.PLAY);
             });
+        } else if ("volNow".equals(t)) {
+            post(() -> { if (!volDrag) vol.setProgress((int) Math.round(m.optDouble("f") * 100)); });
         } else if ("mEnd".equals(t)) {
             post(() -> { lastOwn = 0; showExternal(false); });
         } else if ("mActive".equals(t) && !own()) {
