@@ -612,7 +612,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         boolean top = cbar.edgeTop();
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(-2, -2,
                 (top ? Gravity.TOP : Gravity.BOTTOM) | (cbar.kind == ChronoBar.NAV ? Gravity.END : Gravity.START));
-        int m = cbar.barHeight() + dp(6);
+        int m = cbar.visualHeight() + dp(6);
         lp.setMargins(dp(12), top ? m : 0, dp(12), top ? 0 : m);
         startPanel.setLayoutParams(lp);
         startPanel.setPivotX(cbar.kind == ChronoBar.NAV ? dp(260) : 0);
@@ -693,11 +693,12 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         float y = top ? 0 : H - bh;
         // el gestor ocupa lo que la barra deja libre
         int pTop, pBottom;
-        if (top) { pTop = bh; pBottom = 0; } else { pTop = 0; pBottom = bh; }
+        int vh = cbar.visualHeight();
+        if (top) { pTop = vh; pBottom = 0; } else { pTop = 0; pBottom = vh; }
         pane.setPadding(0, pTop, 0, pBottom);
         // la tarjeta de notificación del extendido va arriba a la izquierda, sin taparse con la barra
         FrameLayout.LayoutParams fl = (FrameLayout.LayoutParams) floatNotif.getLayoutParams();
-        fl.topMargin = top ? bh + dp(8) : dp(14);
+        fl.topMargin = top ? vh + dp(8) : dp(14);
         floatNotif.setLayoutParams(fl);
         // el gestor entra junto con la barra: en el principal desde arriba, en el extendido desde abajo
         float out = stacked() ? (side == 1 ? -H : H) : H;
@@ -1925,10 +1926,10 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 break;
             case "mState":
                 if (MediaHub.AUDIO.equals(m.optString("kind")) && barPlayer != null)
-                    main.post(() -> { cbar.showPlayer(true); barPlayer.update(m); placeStart(); });
+                    main.post(() -> { boolean was = cbar.playerShown(); cbar.showPlayer(true); barPlayer.update(m); if (!was) main.postDelayed(() -> { layoutChrono(false); }, 560); });
                 break;
             case "mEnd":
-                if (MediaHub.AUDIO.equals(m.optString("kind")) && cbar != null) main.post(() -> { cbar.showPlayer(false); placeStart(); });
+                if (MediaHub.AUDIO.equals(m.optString("kind")) && cbar != null) main.post(() -> { cbar.showPlayer(false); main.postDelayed(() -> layoutChrono(false), 400); });
                 break;
             case "notifs":
                 main.post(() -> desk.setNotified(m.optJSONArray("p")));

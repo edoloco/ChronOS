@@ -910,7 +910,8 @@ public class DeskView extends View {
 
         // puntos de los escritorios
         if (pages > 1) {
-            float r = 3.6f * dp, g = 14 * dp, y = H - 14 * dp, x0 = W / 2f - (pages - 1) * g / 2;
+            // en el extendido van arriba: abajo está la action bar con la navegación
+            float r = 3.6f * dp, g = 14 * dp, y = side == 1 ? 14 * dp : H - 14 * dp, x0 = W / 2f - (pages - 1) * g / 2;
             for (int i = 0; i < pages; i++) {
                 btn.setColor(i == page ? accent : (muted & 0x00FFFFFF) | 0x77000000);
                 c.drawCircle(x0 + i * g, y, i == page ? r * 1.25f : r, btn);

@@ -77,11 +77,16 @@ public class ChronoBar extends FrameLayout {
     // ---------------- medidas ----------------
 
     float strip() { return 26 * dp; }
-    float tab() { return (kind == NAV && playerOn ? 84 : 62) * dp; }
+    /** Avance del reproductor al abrirse (0 = cerrado, 1 = abierto): sale desde el logo hacia la izquierda. */
+    private float pp;
+    private android.animation.ValueAnimator ppAnim;
+    float tab() { return (kind == NAV ? 62 + 22 * pp : 62) * dp; }
     float diag() { return 46 * dp; }
     float tabW() { return kind == CLOCK ? Math.min(getWidth() * 0.42f, 200 * dp) : 112 * dp; }
     /** Alto de la barra (lo que ocupa en la pantalla). */
-    int barHeight() { return Math.round(tab()); }
+    int barHeight() { return Math.round((kind == NAV ? 84 : 62) * dp); }
+    /** Lo que se ve de la barra (para dejar espacio al gestor de archivos). */
+    int visualHeight() { return Math.round(tab()); }
 
     private float y(float depth) { return edgeTop ? depth : getHeight() - depth; }
 
@@ -92,9 +97,32 @@ public class ChronoBar extends FrameLayout {
     public void showPlayer(boolean on) {
         if (playerOn == on) return;
         playerOn = on;
-        if (player != null) player.setVisibility(on ? VISIBLE : GONE);
-        requestLayout();
-        invalidate();
+        if (player != null && on) player.setVisibility(VISIBLE);
+        if (ppAnim != null) ppAnim.cancel();
+        ppAnim = android.animation.ValueAnimator.ofFloat(pp, on ? 1f : 0f);
+        ppAnim.setDuration(on ? 520 : 360);
+        ppAnim.setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f));
+        ppAnim.addUpdateListener(a -> { pp = (float) a.getAnimatedValue(); placePlayer(); invalidate(); });
+        ppAnim.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(android.animation.Animator a) { if (!playerOn && player != null) player.setVisibility(GONE); }
+        });
+        ppAnim.start();
+    }
+
+    /** Borde izquierdo de la parte alta (donde está el reproductor). */
+    private float tallLeft() {
+        float lmax = getWidth() - tabW(), lmin = diag() + 6 * dp;
+        return lmax - pp * (lmax - lmin);
+    }
+
+    /** El reproductor se descubre de derecha a izquierda, junto con la parte alta de la barra. */
+    private void placePlayer() {
+        if (player == null || getWidth() == 0) return;
+        float lmin = diag() + 6 * dp, L = tallLeft();
+        player.setTranslationX(L - lmin);
+        int vis = Math.max(0, Math.round(getWidth() - tabW() - L - 6 * dp));
+        player.setClipBounds(new android.graphics.Rect(0, 0, vis, player.getHeight()));
+        player.setAlpha(Math.min(1f, pp * 1.4f));
     }
     public boolean playerShown() { return playerOn; }
 
@@ -102,8 +130,8 @@ public class ChronoBar extends FrameLayout {
         int W = MeasureSpec.getSize(ws), H = barHeight();
         for (int i = 0; i < getChildCount(); i++) {
             View v = getChildAt(i);
-            if (v == player) v.measure(MeasureSpec.makeMeasureSpec(Math.max(0, Math.round(W - tabW() - diag() - 14 * dp)), MeasureSpec.EXACTLY),
-                    MeasureSpec.makeMeasureSpec(Math.round(tab() - strip() - 4 * dp), MeasureSpec.EXACTLY));
+            if (v == player) v.measure(MeasureSpec.makeMeasureSpec(Math.max(0, Math.round(W - tabW() - diag() - 12 * dp)), MeasureSpec.EXACTLY),
+                    MeasureSpec.makeMeasureSpec(Math.round(22 * dp + 62 * dp - strip() - 6 * dp), MeasureSpec.EXACTLY));
             else if (v == notif) v.measure(MeasureSpec.makeMeasureSpec(Math.round(Math.min(W - tabW() - diag() * 0.4f - 10 * dp, 520 * dp)), MeasureSpec.EXACTLY),
                     MeasureSpec.makeMeasureSpec(Math.round(tab() - 10 * dp), MeasureSpec.EXACTLY));
             else v.measure(MeasureSpec.makeMeasureSpec(W, MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(Math.round(strip()), MeasureSpec.AT_MOST));
@@ -118,9 +146,10 @@ public class ChronoBar extends FrameLayout {
             navRow.layout(x, cy - navRow.getMeasuredHeight() / 2, x + navRow.getMeasuredWidth(), cy + navRow.getMeasuredHeight() / 2);
         }
         if (player != null) {
-            int x = Math.round(8 * dp), h = player.getMeasuredHeight();
+            int x = Math.round(diag() + 6 * dp), h = player.getMeasuredHeight();
             int top = Math.round(edgeTop ? strip() + 2 * dp : H - strip() - 2 * dp - h);
             player.layout(x, top, x + player.getMeasuredWidth(), top + h);
+            placePlayer();
         }
         if (notif != null) {
             int x = Math.round(tabW() + diag() * 0.4f), h = notif.getMeasuredHeight();
@@ -142,14 +171,16 @@ public class ChronoBar extends FrameLayout {
             shape.lineTo(TW + D, y(S));
             shape.lineTo(TW, y(T));
             shape.lineTo(0, y(T));
-        } else if (playerOn) {
-            // con música: toda la barra es alta (reproductor a la izquierda, logo a la derecha)
+        } else if (pp > 0.001f) {
+            // con música: la parte alta crece desde el logo hacia la izquierda, con su diagonal
+            float L = tallLeft();
             shape.moveTo(0, y(0));
             shape.lineTo(W, y(0));
             shape.lineTo(W, y(T - rr));
             shape.quadTo(W, y(T), W - rr, y(T));
-            shape.lineTo(rr, y(T));
-            shape.quadTo(0, y(T), 0, y(T - rr));
+            shape.lineTo(L, y(T));
+            shape.lineTo(L - D * 0.6f, y(S));
+            shape.lineTo(0, y(S));
         } else {
             // franja; diagonal y pestaña a la derecha (logo)
             shape.moveTo(0, y(0));

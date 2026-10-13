@@ -215,7 +215,7 @@ public class FilePane extends FrameLayout implements Link.Listener {
                 String root = FileServer.root().getAbsolutePath();
                 return path.equals(root) ? "Almacenamiento" : new File(path).getName();
             }
-            default: return "Archivos del principal";
+            default: return "Archivos del teléfono principal";
         }
     }
 
@@ -298,6 +298,14 @@ public class FilePane extends FrameLayout implements Link.Listener {
 
     private void buildHome(JSONObject res, String err) {
         home.removeAllViews();
+        // siempre se ve de qué teléfono son los archivos: del principal
+        TextView who = new TextView(a);
+        String model = res == null ? "" : res.optString("model");
+        who.setText("📱  Teléfono principal" + (model.isEmpty() ? "" : "  ·  " + model) + (remote() ? "  (visto desde el extendido)" : ""));
+        who.setTextSize(12.5f);
+        who.setTextColor(th.muted);
+        who.setPadding(dp(8), dp(6), dp(8), dp(2));
+        home.addView(who);
         List<View> tiles = new ArrayList<>();
         JSONArray st = res == null ? null : res.optJSONArray("storages");
         for (int i = 0; st != null && i < st.length(); i++) {

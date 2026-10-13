@@ -258,6 +258,7 @@ public class FileServer {
         switch (cat) {
             case "home": {
                 r.put("storages", storages(c));
+                r.put("model", android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL);
                 r.put("downloads", Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).getAbsolutePath());
                 r.put("dlSize", dirSize(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), 3));
                 for (String k : new String[]{"images", "audio", "video", "docs"}) r.put(k + "N", media(c, k, null));

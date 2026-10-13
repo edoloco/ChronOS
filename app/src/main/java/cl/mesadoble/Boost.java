@@ -26,8 +26,8 @@ import java.util.concurrent.LinkedBlockingQueue;
 final class Boost {
 
     static final int PORT = 47822;
-    /** Lo que el principal adelanta su propio sonido para quedar a la par con el extendido (la red y su búfer). */
-    private static final int PREROLL_MS = 140;
+    /** Silencio con que parte el principal: le da tiempo al extendido para recibir y quedar a la par. */
+    private static final int PREROLL_MS = 260;
 
     private Boost() { }
 
@@ -40,10 +40,29 @@ final class Boost {
         else if (hub.connected()) hub.send("boostSet", "on", on);
     }
 
+    // ---------------- reloj y sincronía ----------------
+    // Cada trozo viaja con la HORA (reloj del principal) en que su primer sonido sale por el parlante del principal.
+    // El extendido conoce la diferencia entre los dos relojes (pings ida y vuelta, se queda con el más rápido) y
+    // ajusta su propio sonido: si va atrasado salta un poco, si va adelantado espera con silencio.
+
+    static final byte AUDIO = 1, FLUSH = 2, PONG = 3, PING = 4;
+
+    /** Hora (System.nanoTime) en que se oirá el cuadro 'frame' de esta pista. */
+    static long timeOf(AudioTrack t, long frame, int sr) {
+        android.media.AudioTimestamp ts = new android.media.AudioTimestamp();
+        try {
+            if (t.getTimestamp(ts) && ts.framePosition > 0) return ts.nanoTime + (frame - ts.framePosition) * 1_000_000_000L / sr;
+        } catch (Exception ignored) { }
+        long head = t.getPlaybackHeadPosition() & 0xffffffffL;
+        return System.nanoTime() + (frame - head) * 1_000_000_000L / sr + 40_000_000L;   // aún sin hora exacta: se estima
+    }
+
     // ---------------- principal: servidor del canal izquierdo ----------------
 
     private static ServerSocket server;
     private static volatile Socket client;
+    private static volatile java.io.DataOutputStream clientOut;
+    private static final Object lock = new Object();
     private static final LinkedBlockingQueue<byte[]> out = new LinkedBlockingQueue<>();
 
     static synchronized void serve() {
@@ -60,9 +79,28 @@ final class Boost {
                     Socket s = server.accept();
                     s.setTcpNoDelay(true);
                     Socket old = client;
-                    client = s;
+                    synchronized (lock) {
+                        client = s;
+                        clientOut = new java.io.DataOutputStream(new java.io.BufferedOutputStream(s.getOutputStream(), 16384));
+                    }
                     if (old != null) try { old.close(); } catch (Exception ignored) { }
                     out.clear();
+                    // pings del extendido: se contestan al tiro con la hora de aquí
+                    new Thread(() -> {
+                        try {
+                            DataInputStream in = new DataInputStream(new BufferedInputStream(s.getInputStream()));
+                            while (true) {
+                                byte t = in.readByte();
+                                long t0 = in.readLong();
+                                if (t != PING) continue;
+                                synchronized (lock) {
+                                    if (client != s) return;
+                                    clientOut.writeByte(PONG); clientOut.writeLong(t0); clientOut.writeLong(System.nanoTime());
+                                    clientOut.flush();
+                                }
+                            }
+                        } catch (Exception ignored) { }
+                    }, "boost-ping").start();
                 } catch (Exception e) { break; }
             }
         }, "boost-server").start();
@@ -70,25 +108,34 @@ final class Boost {
             while (true) {
                 try {
                     byte[] b = out.take();
-                    Socket s = client;
-                    if (s == null) continue;
-                    try { s.getOutputStream().write(b); } catch (Exception e) { try { s.close(); } catch (Exception ignored) { } client = null; }
+                    synchronized (lock) {
+                        if (clientOut == null) continue;
+                        try { clientOut.write(b); clientOut.flush(); }
+                        catch (Exception e) { try { client.close(); } catch (Exception ignored) { } client = null; clientOut = null; }
+                    }
                 } catch (InterruptedException e) { return; }
             }
         }, "boost-send").start();
     }
 
-    /** Un trozo del canal izquierdo (sampleRate -1 = vaciar el búfer del extendido, tras saltar o pausar). */
-    static void send(int sampleRate, byte[] pcm, int len) {
+    /** Un trozo del canal izquierdo, con la hora en que suena en el principal. */
+    static void send(int sampleRate, byte[] pcm, int len, long when) {
         if (client == null) return;
-        if (out.size() > 60) out.clear();   // el extendido no alcanza: mejor saltar que atrasarse
-        ByteBuffer b = ByteBuffer.allocate(8 + len).order(ByteOrder.BIG_ENDIAN);
-        b.putInt(sampleRate).putInt(len);
-        if (len > 0) b.put(pcm, 0, len);
+        if (out.size() > 80) out.clear();   // el extendido no alcanza: mejor saltar que atrasarse
+        ByteBuffer b = ByteBuffer.allocate(1 + 4 + 4 + 8 + len).order(ByteOrder.BIG_ENDIAN);
+        b.put(AUDIO).putInt(sampleRate).putInt(len).putLong(when);
+        b.put(pcm, 0, len);
         out.offer(b.array());
     }
 
-    // ---------------- extendido: recibe y toca el canal izquierdo ----------------
+    /** Vaciar el búfer del extendido (al saltar o pausar). */
+    static void flush() {
+        if (client == null) return;
+        out.clear();
+        out.offer(new byte[]{FLUSH});
+    }
+
+    // ---------------- extendido: recibe y toca el canal izquierdo, a la par del principal ----------------
 
     private static volatile Thread sink;
     private static volatile Socket sinkSocket;
@@ -103,7 +150,9 @@ final class Boost {
         Thread t = new Thread(() -> {
             AudioTrack track = null;
             int rate = 0;
+            long written = 0;
             Socket s = null;
+            final long[] clock = {Long.MIN_VALUE, Long.MAX_VALUE};   // {diferencia de relojes, mejor ida y vuelta}
             try {
                 for (int k = 0; ; k++) {   // el principal puede estar recién abriendo el canal
                     s = new Socket();
@@ -112,20 +161,63 @@ final class Boost {
                     catch (Exception e) { try { s.close(); } catch (Exception ignored) { } if (k >= 4 || sink != Thread.currentThread()) throw e; Thread.sleep(400); }
                 }
                 s.setTcpNoDelay(true);
-                DataInputStream in = new DataInputStream(new BufferedInputStream(s.getInputStream(), 32768));
-                byte[] buf = new byte[0];
-                while (sink == Thread.currentThread()) {
+                final Socket fs = s;
+                final java.io.DataOutputStream po = new java.io.DataOutputStream(s.getOutputStream());
+                final Thread me = Thread.currentThread();
+                new Thread(() -> {   // pings: muchos al principio, después uno cada 2 s (los relojes se separan de a poco)
+                    try {
+                        for (int i = 0; sink == me && !fs.isClosed(); i++) {
+                            synchronized (po) { po.writeByte(PING); po.writeLong(System.nanoTime()); po.flush(); }
+                            Thread.sleep(i < 20 ? 150 : 2000);
+                            if (i == 60) synchronized (clock) { clock[1] = Long.MAX_VALUE; }   // cada tanto se vuelve a medir desde cero
+                            if (i > 60 && i % 60 == 0) synchronized (clock) { clock[1] += clock[1] / 2; }
+                        }
+                    } catch (Exception ignored) { }
+                }, "boost-pings").start();
+                DataInputStream in = new DataInputStream(new BufferedInputStream(s.getInputStream(), 65536));
+                byte[] buf = new byte[0], silence = new byte[0];
+                while (sink == me) {
+                    byte type = in.readByte();
+                    if (type == PONG) {
+                        long t0 = in.readLong(), tp = in.readLong(), t1 = System.nanoTime(), rtt = t1 - t0;
+                        synchronized (clock) {
+                            if (rtt <= clock[1]) { clock[1] = rtt; clock[0] = tp - (t0 + t1) / 2; }
+                        }
+                        continue;
+                    }
+                    if (type == FLUSH) {
+                        if (track != null) { track.pause(); track.flush(); track.play(); }
+                        written = 0;
+                        continue;
+                    }
                     int sr = in.readInt(), len = in.readInt();
+                    long when = in.readLong();
                     if (len > buf.length) buf = new byte[len];
                     in.readFully(buf, 0, len);
-                    if (sr < 0) { if (track != null) { track.pause(); track.flush(); track.play(); } continue; }
                     if (track == null || sr != rate) {
                         if (track != null) track.release();
                         rate = sr;
                         track = track(sr);
                         track.play();
+                        written = 0;
                     }
-                    track.write(buf, 0, len);
+                    int off = 0, n = len;
+                    long offset;
+                    synchronized (clock) { offset = clock[0]; }
+                    if (offset != Long.MIN_VALUE) {
+                        long target = when - offset;                       // cuándo debe sonar aquí
+                        long err = timeOf(track, written, sr) - target;    // > 0: vamos atrasados
+                        if (err > 12_000_000L) {
+                            int skip = (int) Math.min(n / 2, err * sr / 1_000_000_000L) * 2;
+                            off += skip; n -= skip;
+                        } else if (err < -12_000_000L) {
+                            int pad = (int) Math.min(sr, -err * sr / 1_000_000_000L) * 2;
+                            if (silence.length < pad) silence = new byte[pad];
+                            track.write(silence, 0, pad);
+                            written += pad / 2;
+                        }
+                    }
+                    if (n > 0) { track.write(buf, off, n); written += n / 2; }
                 }
             } catch (Exception ignored) {
             } finally {
@@ -151,6 +243,13 @@ final class Boost {
                 .setBufferSizeInBytes(Math.max(min * 2, sr / 5 * 2))
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build();
+    }
+
+    /** Escribe el silencio inicial y devuelve cuántos cuadros lleva la pista. */
+    private static long preroll(AudioTrack t, int sr) {
+        int n = sr / 1000 * PREROLL_MS;
+        t.write(new byte[n * 2], 0, n * 2);
+        return n;
     }
 
     // ---------------- principal: reproductor que separa los canales ----------------
@@ -203,7 +302,7 @@ final class Boost {
                 codec.start();
                 track = track(sr);
                 track.play();
-                track.write(new byte[sr / 1000 * PREROLL_MS * 2], 0, sr / 1000 * PREROLL_MS * 2);   // a la par con el extendido
+                long written = preroll(track, sr);
                 MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
                 boolean inEos = false, wasPlaying = true;
                 byte[] right = new byte[0], left = new byte[0];
@@ -212,17 +311,18 @@ final class Boost {
                         ex.seekTo(seekMs * 1000, MediaExtractor.SEEK_TO_CLOSEST_SYNC);
                         codec.flush();
                         track.pause(); track.flush(); track.play();
-                        send(-1, null, 0);
+                        flush();
+                        written = preroll(track, sr);
                         posMs = seekMs;
                         seekMs = -1;
                         inEos = false;
                     }
                     if (!playing) {
-                        if (wasPlaying) { track.pause(); send(-1, null, 0); wasPlaying = false; }
+                        if (wasPlaying) { track.pause(); track.flush(); flush(); wasPlaying = false; }
                         Thread.sleep(40);
                         continue;
                     }
-                    if (!wasPlaying) { track.play(); wasPlaying = true; }
+                    if (!wasPlaying) { track.play(); written = preroll(track, sr); wasPlaying = true; }
                     if (!inEos) {
                         int ii = codec.dequeueInputBuffer(5000);
                         if (ii >= 0) {
@@ -237,7 +337,7 @@ final class Boost {
                         MediaFormat of = codec.getOutputFormat();
                         int nsr = of.getInteger(MediaFormat.KEY_SAMPLE_RATE);
                         ch = of.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
-                        if (nsr != sr) { sr = nsr; track.release(); track = track(sr); track.play(); }
+                        if (nsr != sr) { sr = nsr; track.release(); track = track(sr); track.play(); written = preroll(track, sr); }
                     } else if (oi >= 0) {
                         ByteBuffer ob = codec.getOutputBuffer(oi);
                         if (ob != null && info.size > 0) {
@@ -252,8 +352,9 @@ final class Boost {
                                 left[f * 2] = (byte) l; left[f * 2 + 1] = (byte) (l >> 8);
                                 right[f * 2] = (byte) r; right[f * 2 + 1] = (byte) (r >> 8);
                             }
-                            send(sr, left, frames * 2);
+                            send(sr, left, frames * 2, timeOf(track, written, sr));   // con la hora en que suena aquí
                             track.write(right, 0, frames * 2);   // marca el ritmo
+                            written += frames;
                             posMs = info.presentationTimeUs / 1000;
                         }
                         codec.releaseOutputBuffer(oi, false);
