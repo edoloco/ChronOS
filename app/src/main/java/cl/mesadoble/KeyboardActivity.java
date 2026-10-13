@@ -129,17 +129,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         content = new LinearLayout(this);
         root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
 
-        // Modo APP: la app del principal que quedó de lado se ve derecha a la derecha del teclado
-        android.widget.FrameLayout outer = new android.widget.FrameLayout(this);
-        outer.setBackgroundColor(th.bg);
-        outer.addView(root, new android.widget.FrameLayout.LayoutParams(-1, -1));
-        appCast = new AppCastView(this, Hub.get(this));
-        outer.addView(appCast, new android.widget.FrameLayout.LayoutParams(0, 0));
-        kbRoot = root;
-        outer.addOnLayoutChangeListener((v, l, t2, r, b2, ol, ot, or, ob) -> {
-            if (r - l != or - ol || b2 - t2 != ob - ot) h.post(this::placeAppCast);
-        });
-        setContentView(outer);
+        setContentView(root);
 
         hub = Hub.get(this);
         hub.ensureStarted();
@@ -255,7 +245,6 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         resumed = true;
         if (!themeSig.equals(KbTheme.sig(this))) { recreate(); return; }   // cambió el tema: se vuelve a pintar
         hub.keyboardVisible = mode < MEDIA;
-        h.post(this::placeAppCast);
         showingMedia = mode == MEDIA;
         showingCamera = mode == CAMERA;
         hub.add(this);
@@ -592,23 +581,8 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         updateStatus();
     }
 
-    private AppCastView appCast;
-    private LinearLayout kbRoot;
-
-    /** La columna del Modo APP a la derecha; el teclado usa lo que queda. */
-    private void placeAppCast() {
-        if (appCast == null) return;
-        View outer = (View) appCast.getParent();
-        appCast.place(outer.getWidth(), outer.getHeight(), dp(6), dp(6), dp(6));
-        boolean on = appCast.getVisibility() == View.VISIBLE;
-        int w = on ? appCast.getLayoutParams().width + dp(12) : 0;
-        if (kbRoot.getPaddingRight() != w) kbRoot.setPadding(0, 0, w, 0);
-    }
-
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
-        if ("appCast".equals(t) || "appState".equals(t)) h.post(this::placeAppCast);
-        if ("appNoTouch".equals(t)) h.post(() -> AppCastView.noTouch(this));
         if ("navAck".equals(t) && !m.optBoolean("ok"))
             android.widget.Toast.makeText(this, "Recientes necesita la versión completa en el principal", android.widget.Toast.LENGTH_SHORT).show();
         if ("kbState".equals(t) || "kbAck".equals(t)) updateStatus();

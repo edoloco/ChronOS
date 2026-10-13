@@ -214,7 +214,6 @@ public class Hub implements Link.Listener {
             videoActive = false;
             videoAppWas = false;
             main.postDelayed(musicPoll, 1500);
-            appHinted = false;
             sendImeState();
             sendBattery();
             FileServer fs = FileServer.get(app);
@@ -225,7 +224,6 @@ public class Hub implements Link.Listener {
             else if (isPrincipal() && !imeSelected(app)) notifySwitch();   // versión liviana: un toque en el aviso
         } else {
             remoteImeReady = false;
-            if (isPrincipal()) CaptureService.want(app, "video", false); else { ScreenCast.stopReceive(); appModeOn = false; }
             // sin el extendido no hay teclado: si la conexión no vuelve pronto, devolver el teclado normal
             if (isPrincipal()) { main.removeCallbacks(restoreIme); main.postDelayed(restoreIme, 6000); }
         }
@@ -256,17 +254,6 @@ public class Hub implements Link.Listener {
         if ("boostSet".equals(t)) { if (isPrincipal()) Boost.setEnabled(app, this, m.optBoolean("on")); return; }
         if ("boostVol".equals(t)) { Boost.applyVolume(app, m.optDouble("f")); return; }
         if ("boostApp".equals(t)) { if (isPrincipal()) boostApp(m.optBoolean("on")); return; }
-        // Modo APP: apps que no giran (Instagram…) se ven derechas en el extendido
-        if ("appMode".equals(t)) { if (isPrincipal()) appMode(m.optBoolean("on")); return; }
-        if ("appKey".equals(t)) { if (isPrincipal()) ScreenCast.keyReq = true; return; }
-        if ("appTouch".equals(t)) {
-            if (!isPrincipal()) return;
-            if (MesaAccess.instance != null) MesaAccess.instance.appGesture(m.optJSONArray("p") != null ? m.optJSONArray("p") : new org.json.JSONArray(), m.optLong("ms", 60));
-            else send("appNoTouch");
-            return;
-        }
-        if ("appCast".equals(t) && !isPrincipal()) ScreenCast.onCast(this, m.optBoolean("on"), m.optInt("w"), m.optInt("h"));
-        if ("appState".equals(t) && !isPrincipal()) { appModeOn = m.optBoolean("on"); if (!appModeOn) ScreenCast.stopReceive(); }
         // volumen del principal desde el extendido (barra deslizante del control de video)
         if (("setVol".equals(t) || "volAsk".equals(t)) && isPrincipal()) {
             AudioManager am = (AudioManager) app.getSystemService(Context.AUDIO_SERVICE);
@@ -580,7 +567,6 @@ public class Hub implements Link.Listener {
             RecentApps.worker.execute(() -> {                                 // ¿hay una app de video al frente? (YouTube, Netflix…)
                 if (RecentApps.hasAccess(app)) videoApp = isVideoApp(app, RecentApps.active(app));
             });
-            pollAppMode();
             // audífonos o Bluetooth conectados/desconectados: la música y el video cambian de modo (Boost no aplica)
             boolean hp = Boost.headphones(app);
             if (hp != lastHeadphones) {
@@ -614,36 +600,12 @@ public class Hub implements Link.Listener {
 
     /** Boost para apps: en el principal se pide el permiso de captura (con un toque allá) o se detiene. */
     void boostApp(boolean on) {
-        if (!on) { CaptureService.want(app, "audio", false); return; }
-        if (CaptureService.audioOn) { send("boost", "on", true); return; }
-        int r = startOrNotify(new Intent(app, CaptureActivity.class).putExtra("want", "audio").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), 62,
+        if (!on) { CaptureService.stop(app); return; }
+        if (CaptureService.running) { send("boost", "on", true); return; }
+        int r = startOrNotify(new Intent(app, CaptureActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), 62,
                 "Boost: toca aquí", "Para que el sonido salga también por el extendido");
         send("boostMsg", "msg", r == LAUNCHED ? "Acepta en el principal la captura de sonido"
                 : "Toca en el principal el aviso \"Boost: toca aquí\" y acepta la captura de sonido");
-    }
-
-    /** Modo APP (en el principal): se pide compartir la pantalla una vez; después la columna aparece sola. */
-    void appMode(boolean on) {
-        if (!on) { CaptureService.want(app, "video", false); send("appState", "on", false); return; }
-        if (CaptureService.running) { CaptureService.want(app, "video", true); return; }
-        int r = startOrNotify(new Intent(app, CaptureActivity.class).putExtra("want", "video").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), 63,
-                "Modo APP: toca aquí", "Para ver en el extendido las apps que no giran");
-        send("boostMsg", "msg", r == LAUNCHED ? "Modo APP: en el principal elige \"Pantalla completa\" y toca Iniciar"
-                : "Toca en el principal el aviso \"Modo APP: toca aquí\"");
-    }
-
-    /** Extendido: ¿el principal tiene el Modo APP encendido? */
-    public volatile boolean appModeOn;
-    private boolean appHinted;
-
-    /** Principal: ¿quedó una app de lado? (pantalla en vertical con la mesa en horizontal, o al revés) */
-    private void pollAppMode() {
-        android.graphics.Point sc = ScreenCast.screen(app);
-        boolean portrait = sc.y > sc.x;
-        boolean layoutH = app.getSharedPreferences("mesa", Context.MODE_PRIVATE).getBoolean("orientH", true);
-        boolean sideways = portrait == layoutH && !foreground;
-        if (ScreenCast.running()) ScreenCast.setActive(sideways);
-        else if (sideways && !appHinted) { appHinted = true; send("appHint"); }
     }
 
     private volatile boolean videoApp;

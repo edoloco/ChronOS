@@ -18,7 +18,7 @@ import android.view.View;
 public class SquareButton extends View {
 
     public static final int NOTE = 0, IMAGE = 1, APPS = 2, KEYBOARD = 3, SETTINGS = 4, STATUS = 5,
-            BACK = 6, HOME = 7, RECENTS = 8, MENU = 9, DESKS = 10, WIDGET = 11, FILES = 12, TOOLS = 13, APPMODE = 14;
+            BACK = 6, HOME = 7, RECENTS = 8, MENU = 9, DESKS = 10, WIDGET = 11, FILES = 12, TOOLS = 13;
 
     private final int kind;
     public int kind() { return kind; }
@@ -150,7 +150,6 @@ public class SquareButton extends View {
         c.rotate(rot, w / 2, h / 2);
         float cx = w / 2, cy = compact ? h / 2 : h * 0.42f, u = (compact ? 5 : 7) * dp;   // u: unidad del ícono
         int ink = fgColor;
-        if (kind == APPMODE && open) ink = accent;   // Modo APP encendido
         if (kind == STATUS && !info) ink = statusLevel == 2 ? accent : statusLevel == 1 ? warn : 0xFF8798A9;
         stroke.setColor(ink);
         fill.setColor(ink);
@@ -232,11 +231,6 @@ public class SquareButton extends View {
                 c.drawLine(cx, cy - u * 1.2f, cx, cy + u * 0.3f, stroke);
                 c.drawRoundRect(new RectF(cx - u * 0.28f, cy + u * 0.3f, cx + u * 0.28f, cy + u * 1.25f), 2 * dp, 2 * dp, fill);
                 c.restore();
-                break;
-            }
-            case APPMODE: {   // pantalla acostada con una app parada a la derecha
-                c.drawRoundRect(new RectF(cx - u * 1.3f, cy - u * 0.85f, cx + u * 1.3f, cy + u * 0.85f), 2 * dp, 2 * dp, stroke);
-                c.drawRoundRect(new RectF(cx + u * 0.3f, cy - u * 0.85f, cx + u * 1.3f, cy + u * 0.85f), 2 * dp, 2 * dp, fill);
                 break;
             }
             case WIDGET:
