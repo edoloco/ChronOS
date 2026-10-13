@@ -94,7 +94,7 @@ public class MediaService extends Service implements MediaHub.Controller {
             if (a != null) artist = a.trim();
             r.release();
         } catch (Exception ignored) { }
-        if (Boost.enabled(this)) {
+        if (Boost.effective(this)) {
             prepared = true;
             Boost.serve();
             Hub.get(this).send("boost", "on", true);

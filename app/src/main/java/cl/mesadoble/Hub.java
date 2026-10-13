@@ -567,6 +567,16 @@ public class Hub implements Link.Listener {
             RecentApps.worker.execute(() -> {                                 // ¿hay una app de video al frente? (YouTube, Netflix…)
                 if (RecentApps.hasAccess(app)) videoApp = isVideoApp(app, RecentApps.active(app));
             });
+            // audífonos o Bluetooth conectados/desconectados: la música y el video cambian de modo (Boost no aplica)
+            boolean hp = Boost.headphones(app);
+            if (hp != lastHeadphones) {
+                lastHeadphones = hp;
+                if (Boost.enabled(app)) {
+                    MediaService.boostChanged(app);
+                    VideoActivity.boostChanged(app);
+                    send("boostMsg", "msg", hp ? "Boost en pausa: el principal está con audífonos o Bluetooth" : "Boost activo otra vez");
+                }
+            }
             AudioManager am = (AudioManager) app.getSystemService(Context.AUDIO_SERVICE);
             boolean on = am != null && am.isMusicActive() && MediaHub.current == null;   // los visores propios ya tienen sus controles
             boolean appNow = videoApp && MediaHub.current == null;
@@ -599,6 +609,7 @@ public class Hub implements Link.Listener {
     }
 
     private volatile boolean videoApp;
+    private boolean lastHeadphones;
     private boolean videoAppWas;
 
     // apps de video conocidas (además de las que Android marca como "video")

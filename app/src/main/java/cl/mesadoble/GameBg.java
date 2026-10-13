@@ -65,6 +65,7 @@ final class GameBg {
         if (!RecentApps.hasAccess(c)) return;
         String act = RecentApps.active(c);
         boolean game = isGame(c, act);
+        Boost.gameInFront = game;
         long now = System.currentTimeMillis();
         if (game) {
             nonGameSince = 0;

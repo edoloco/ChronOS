@@ -24,7 +24,8 @@ public class CaptureService extends Service {
     private static final int RATE = 48000;
     private MediaProjection projection;
     private AudioRecord rec;
-    private volatile boolean stop;
+    private volatile boolean stop, quiet;
+    private long btCheck;
 
     static void stop(Context c) { c.stopService(new Intent(c, CaptureService.class)); }
 
@@ -63,7 +64,7 @@ public class CaptureService extends Service {
     private AudioRecord build(MediaProjection mp) throws Exception {
         Class<?> cb = Class.forName("android.media.AudioPlaybackCaptureConfiguration$Builder");
         Object b = cb.getConstructor(MediaProjection.class).newInstance(mp);
-        for (int usage : new int[]{1 /* MEDIA */, 14 /* GAME */, 0 /* UNKNOWN */})
+        for (int usage : new int[]{1 /* MEDIA: música y video; los juegos (GAME) quedan fuera */})
             cb.getMethod("addMatchingUsage", int.class).invoke(b, usage);
         Object conf = cb.getMethod("build").invoke(b);
         AudioRecord.Builder rb = new AudioRecord.Builder()
@@ -88,7 +89,9 @@ public class CaptureService extends Service {
                     int m = (l + r) / 2;
                     mono[k * 2] = (byte) m; mono[k * 2 + 1] = (byte) (m >> 8);
                 }
-                Boost.send(RATE, mono, f * 2, 0L);
+                long now = System.currentTimeMillis();
+                if (now - btCheck > 1000) { btCheck = now; quiet = Boost.headphones(this) || Boost.gameInFront; }
+                if (!quiet) Boost.send(RATE, mono, f * 2, 0L);   // con audífonos o en un juego no se manda
             }
         } catch (Exception ignored) { }
     }

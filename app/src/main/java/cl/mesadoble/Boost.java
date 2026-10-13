@@ -33,6 +33,28 @@ final class Boost {
 
     static boolean enabled(Context c) { return c.getSharedPreferences("mesa", Context.MODE_PRIVATE).getBoolean("boost", false); }
 
+    /** ¿Boost suena ahora? No con audífonos o parlante Bluetooth (ni con cable) conectados al principal. */
+    static boolean effective(Context c) { return enabled(c) && !headphones(c); }
+
+    /** ¿El sonido del principal sale por Bluetooth o audífonos? */
+    static boolean headphones(Context c) {
+        try {
+            android.media.AudioManager am = (android.media.AudioManager) c.getSystemService(Context.AUDIO_SERVICE);
+            if (am == null) return false;
+            for (android.media.AudioDeviceInfo d : am.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS)) {
+                int t = d.getType();
+                if (t == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || t == android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+                        || t == 26 /* BLE_HEADSET */ || t == 27 /* BLE_SPEAKER */ || t == 30 /* BLE_BROADCAST */
+                        || t == android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES || t == android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET
+                        || t == android.media.AudioDeviceInfo.TYPE_USB_HEADSET) return true;
+            }
+        } catch (Exception ignored) { }
+        return false;
+    }
+
+    /** El principal está en un juego: Boost no se usa con juegos (solo música y video). */
+    static volatile boolean gameInFront;
+
     /** Desde cualquiera de los dos: se guarda en el principal y la música en curso cambia de modo. */
     static void setEnabled(Context c, Hub hub, boolean on) {
         c.getSharedPreferences("mesa", Context.MODE_PRIVATE).edit().putBoolean("boost", on).apply();

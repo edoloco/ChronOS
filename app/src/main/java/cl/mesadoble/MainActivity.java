@@ -224,6 +224,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         hub.foreground = true;
         resumed = true;
         Updater.checkQuiet(this, false, this::showUpdateBadge);
+        // el principal quedó esperando el permiso de instalar: si ya lo tiene, sigue la actualización
+        if (side == 1 && prefs.getBoolean("pendingUpdate", false) && Updater.canInstall(this)) Updater.updateFromRemote(this, hub);
         main.removeCallbacks(updatePoll);
         main.postDelayed(updatePoll, 10 * 60_000L);
         main.postDelayed(pollRecents, 300);
@@ -1991,6 +1993,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                     else if (side == 0) floatNotif.show(m);                   // el principal está en otra app: aquí, arriba a la izquierda
                 });
                 break;
+            case "updMsg":
             case "boostMsg":
                 main.post(() -> Toast.makeText(this, m.optString("msg"), Toast.LENGTH_LONG).show());
                 break;

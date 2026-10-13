@@ -390,16 +390,23 @@ public class Updater {
         new Thread(() -> {
             try {
                 if (!canInstall(c)) {
+                    // falta el permiso: al volver a ChronOS después de darlo, la actualización sigue sola
+                    c.getSharedPreferences("mesa", Context.MODE_PRIVATE).edit().putBoolean("pendingUpdate", true).apply();
                     hub.startOrNotify(allowInstallIntent(c), 31, "ChronOS quiere actualizarse",
-                            "Toca y permite instalar apps; después actualiza desde Herramientas");
+                            "Toca y permite instalar apps; después vuelve a ChronOS y sigue sola");
+                    hub.send("updMsg", "msg", "El principal necesita permiso para instalar: toca el aviso allá");
                     return;
                 }
+                c.getSharedPreferences("mesa", Context.MODE_PRIVATE).edit().putBoolean("pendingUpdate", false).apply();
+                hub.send("updMsg", "msg", "Descargando la actualización en el principal…");
                 Release r = latest(c);
                 File f = download(c, r, null);
                 String bad = check(c, f, r.size);
                 if (bad != null) throw new IOException(bad);
                 install(c, f);
+                hub.send("updMsg", "msg", "Confirma la actualización en el principal (\"Actualizar\")");
             } catch (IOException e) {
+                hub.send("updMsg", "msg", "El principal no pudo actualizarse: " + (e.getMessage() != null ? e.getMessage() : "error de descarga"));
                 hub.startOrNotify(new Intent(c, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), 33,
                         "No se pudo actualizar", e.getMessage() != null ? e.getMessage() : "Error de descarga");
             }

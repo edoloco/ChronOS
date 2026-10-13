@@ -154,7 +154,7 @@ public class VideoActivity extends Activity implements MediaHub.Controller {
 
     private void startBoost(long fromMs) {
         stopBoost();
-        if (!Boost.enabled(this) || player == null) return;
+        if (!Boost.effective(this) || player == null) return;
         try { player.setVolume(0f, 0f); } catch (Exception ignored) { }
         Boost.serve();
         Hub hub = Hub.get(this);
@@ -181,7 +181,7 @@ public class VideoActivity extends Activity implements MediaHub.Controller {
         VideoActivity v = instance;
         if (v == null) return;
         v.h.post(() -> {
-            if (Boost.enabled(v)) v.startBoost(v.video.getCurrentPosition());
+            if (Boost.effective(v)) v.startBoost(v.video.getCurrentPosition());
             else {
                 v.stopBoost();
                 Hub hub = Hub.get(v);
