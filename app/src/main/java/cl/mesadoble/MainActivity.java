@@ -74,6 +74,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private FilePane pane;
     private NotifCard barNotif, floatNotif;
     private BarPlayer barPlayer;
+    private RecentsBar recentsBar;
     private LinearLayout navRow, startPanel;
     private boolean fileMode;
     // widgets de Android
@@ -159,6 +160,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         FrameLayout.LayoutParams fl = new FrameLayout.LayoutParams(dp(360), dp(64), Gravity.TOP | Gravity.START);
         fl.setMargins(dp(12), dp(36), dp(12), dp(12));
         root.addView(floatNotif, fl);
+        root.addOnLayoutChangeListener((v, l, t, r2, b2, ol, ot, or, ob) -> {
+            if (b2 - t != ob - ot || r2 - l != or - ol) main.post(() -> layoutChrono(false));   // al ocultarse las barras de Android
+        });
         startOverlay = new FrameLayout(this);
         startOverlay.setVisibility(View.GONE);
         startOverlay.setOnClickListener(v -> showStart(false));
@@ -216,6 +220,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     @Override protected void onResume() {
         super.onResume();
+        immersive();
         hub.foreground = true;
         resumed = true;
         Updater.checkQuiet(this, false, this::showUpdateBadge);
@@ -261,8 +266,17 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     static void applyOrientation(Activity a) {
         SharedPreferences p = a.getSharedPreferences("mesa", MODE_PRIVATE);
         boolean h = p.getBoolean("orientH", true), lock = p.getBoolean("viewLock", true), principal = p.getInt("side", -1) == 1;
+        boolean flip = p.getBoolean(principal ? "flipP" : "flipE", false);   // teléfono puesto al revés
         if (principal && !lock) a.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR);
+        else if (flip) a.setRequestedOrientation(h ? ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE : ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT);
         else a.setRequestedOrientation(h ? ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE : ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+    }
+
+    /** Cada teléfono puede ir al revés (girado 180°); se guarda en los dos. */
+    private void setFlip(boolean p, boolean e, boolean fromRemote) {
+        prefs.edit().putBoolean("flipP", p).putBoolean("flipE", e).apply();
+        applyOrientation(this);
+        if (!fromRemote) hub.send("flip", "p", p, "e", e);
     }
 
     /** Elige orientación y bloqueo (en el principal) y los comparte con el extendido. */
@@ -290,6 +304,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         hub.send("view", "h", h, "lock", locked());
         hub.send("bg", "c", prefs.getInt("deskColor", 0));
         hub.send("cardTheme", "c", CardTheme.color, "g", CardTheme.glass);
+        hub.send("flip", "p", prefs.getBoolean("flipP", false), "e", prefs.getBoolean("flipE", false));
         hub.send("pages", "n", desk.pages(), "cur", desk.page());
         hub.send("apps", "lock", prefs.getBoolean("appsLock", false), "auto", prefs.getBoolean("appsAuto", false));
         hub.send("snap", "on", prefs.getBoolean("snapGrid", false));
@@ -363,7 +378,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             row.setGravity(Gravity.CENTER);
             for (int i = r * 6; i < r * 6 + 6; i++) {
                 final int col = COLORS[i];
-                row.addView(swatch(col, col == cur, () -> { setDeskColor(col, false); if (dlg[0] != null) dlg[0].dismiss(); }), swatchLp());
+                row.addView(swatch(col, col == cur, () -> { setDeskColor(col, false); if (dlg[0] != null) dlg[0].dismiss(); main.postDelayed(this::chooseColor, 260); }), swatchLp());
             }
             grid.addView(row);
         }
@@ -374,7 +389,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .title("Color de fondo")
                 .message("Se aplica en ambos teléfonos. El primero sigue el modo claro u oscuro del sistema.")
                 .view(sc)
-                .option(Ui.PALETTE, "Color personalizado", "Elegir tono, intensidad y brillo", () -> customColor(cur, col -> setDeskColor(col, false)))
+                .option(Ui.PALETTE, "Color personalizado", "Elegir tono, intensidad y brillo", () -> customColor(cur, col -> { setDeskColor(col, false); main.postDelayed(this::chooseColor, 260); }))
                 .button("Cerrar", false, null)
                 .show();
     }
@@ -461,7 +476,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             for (int i = r * 6; i < r * 6 + 6; i++) {
                 final int col = CARD_COLORS[i];
                 row.addView(swatch(col, !CardTheme.isGlass() && CardTheme.color == col,
-                        () -> { setCardTheme(col, CardTheme.NONE, false); if (dlg[0] != null) dlg[0].dismiss(); }), swatchLp());
+                        () -> { setCardTheme(col, CardTheme.NONE, false); if (dlg[0] != null) dlg[0].dismiss(); main.postDelayed(this::chooseCardColor, 260); }), swatchLp());
             }
             grid.addView(row);
         }
@@ -469,18 +484,18 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .title("Tarjetas y menús")
                 .message("Color de las tarjetas de apps y elementos, de la barra de opciones y de estos menús. Se aplica en ambos teléfonos.")
                 .option(Ui.PALETTE, -1, "Cristal intenso", "Vidrio esmerilado realista: fondo borroso, sombras profundas y brillo",
-                        CardTheme.isIntense(), () -> setCardTheme(0, CardTheme.GLASS_INTENSE, false))
+                        CardTheme.isIntense(), () -> { setCardTheme(0, CardTheme.GLASS_INTENSE, false); main.postDelayed(this::chooseCardColor, 260); })
                 .option(Ui.PALETTE, -1, "Cristal Aero (Windows 7)", "Vidrio de color con brillo y vetas de luz",
                         CardTheme.isAero(), this::chooseAeroTint)
                 .option(Ui.PALETTE, -1, "Cristal claro", "Translúcido, como vidrio esmerilado", CardTheme.glass == CardTheme.GLASS_LIGHT,
-                        () -> setCardTheme(0, CardTheme.GLASS_LIGHT, false))
+                        () -> { setCardTheme(0, CardTheme.GLASS_LIGHT, false); main.postDelayed(this::chooseCardColor, 260); })
                 .option(Ui.PALETTE, -1, "Cristal oscuro", "Vidrio ahumado, para fondos claros u oscuros", CardTheme.glass == CardTheme.GLASS_DARK,
-                        () -> setCardTheme(0, CardTheme.GLASS_DARK, false))
+                        () -> { setCardTheme(0, CardTheme.GLASS_DARK, false); main.postDelayed(this::chooseCardColor, 260); })
                 .option(Ui.AUTO, -1, "Automático", "Según el modo claro u oscuro del teléfono", !CardTheme.isGlass() && CardTheme.color == 0,
-                        () -> setCardTheme(0, CardTheme.NONE, false))
+                        () -> { setCardTheme(0, CardTheme.NONE, false); main.postDelayed(this::chooseCardColor, 260); })
                 .view(grid)
                 .option(Ui.PALETTE, "Color personalizado", "Elegir tono, intensidad y brillo",
-                        () -> customColor(CardTheme.color == 0 ? 0xFF223040 : CardTheme.color, col -> setCardTheme(col, CardTheme.NONE, false)))
+                        () -> customColor(CardTheme.color == 0 ? 0xFF223040 : CardTheme.color, col -> { setCardTheme(col, CardTheme.NONE, false); main.postDelayed(this::chooseCardColor, 260); }))
                 .button("Cerrar", false, null)
                 .show();
     }
@@ -499,7 +514,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 cell.setOrientation(LinearLayout.VERTICAL);
                 cell.setGravity(Gravity.CENTER_HORIZONTAL);
                 cell.addView(swatch(col, CardTheme.isAero() && CardTheme.aeroTint() == col,
-                        () -> { setCardTheme(col, CardTheme.GLASS_AERO, false); if (dlg[0] != null) dlg[0].dismiss(); }), swatchLp());
+                        () -> { setCardTheme(col, CardTheme.GLASS_AERO, false); if (dlg[0] != null) dlg[0].dismiss(); main.postDelayed(this::chooseAeroTint, 260); }), swatchLp());
                 TextView t = new TextView(this);
                 t.setText(Aero.TINT_NAMES[i]);
                 t.setTextSize(11);
@@ -514,7 +529,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .message("Elige el color del vidrio, como en Windows 7.")
                 .view(grid)
                 .option(Ui.PALETTE, "Otro color", "Elegir tono, intensidad y brillo",
-                        () -> customColor(CardTheme.aeroTint(), col -> setCardTheme(col, CardTheme.GLASS_AERO, false)))
+                        () -> customColor(CardTheme.aeroTint(), col -> { setCardTheme(col, CardTheme.GLASS_AERO, false); main.postDelayed(this::chooseAeroTint, 260); }))
                 .button("Cerrar", false, null)
                 .show();
     }
@@ -664,7 +679,12 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             cbar.setNavRow(navRow);
             barPlayer = new BarPlayer(this, hub, ChronoBar.ink(night));
             cbar.setPlayer(barPlayer);
+            recentsBar = new RecentsBar(this, ChronoBar.ink(night));
+            recentsBar.setPick(this::onRecent);
+            cbar.setRecents(recentsBar);
         } else {
+            recentsBar = null;
+            barPlayer = null;
             if (navRow != null) {   // vuelve a ser principal: los botones vuelven a su lugar
                 while (navRow.getChildCount() > 0) { View v = navRow.getChildAt(0); navRow.removeViewAt(0); navPill.addView(v); }
             }
@@ -729,6 +749,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (fileMode == on) return;
         fileMode = on;
         if (on) pane.start(); else pane.stop();
+        if (cbar != null) cbar.showRecents(!on);   // las apps recientes se esconden con el gestor
+        if (!on) main.postDelayed(pollRecents, 300);
         layoutChrono(true);
         if (!fromRemote && hub.connected()) hub.send("fileMode", "on", on);
     }
@@ -879,6 +901,11 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         } else {
             sh.option(layoutIcon(), deskSide(), "Orientación: la del principal", layoutName(), false, null);
         }
+        boolean fp = prefs.getBoolean("flipP", false), fe = prefs.getBoolean("flipE", false);
+        sh.option(Ui.LAYOUT_STACK, 0, "Principal: " + (fp ? "al revés" : "normal"), "Gira la pantalla del principal 180° (si lo pones al revés)", fp,
+                () -> setFlip(!fp, fe, false));
+        sh.option(Ui.LAYOUT_STACK, 1, "Extendido: " + (fe ? "al revés" : "normal"), "Gira la pantalla del extendido 180° (si lo pones al revés)", fe,
+                () -> setFlip(fp, !fe, false));
         sh.option(layoutIcon(), deskSide(), "Este teléfono es el " + (principal ? "principal" : "extendido"),
                         principal ? "Aquí corren las apps" : "Pantalla extra y teclado", false, this::chooseSide)
                 .option(Ui.AUTO, -1, "Teclado automático: " + (auto ? "sí" : "no"),
@@ -894,7 +921,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                             Toast.makeText(this, on ? "Pantalla unida activada" : "Pantalla unida desactivada", Toast.LENGTH_SHORT).show();
                             if (on) main.postDelayed(() -> checkSetup(false), 300);
                         })
-                .option(Ui.PALETTE, "Color de fondo", "Elegir el color de la mesa", this::chooseColor)
+                .option(Ui.PALETTE, "Personalizar", "Color de fondo, tarjetas y menús, fondo de juegos", this::personalize)
                 .option(Ui.NOTE, -1, "Notificaciones en la barra: " + (principal ? (NotifService.enabled(this) ? "sí" : "no") : "del principal"),
                         principal ? "Muestra las notificaciones animadas en la barra del reloj (o en el extendido)"
                                   : "Se activa en el principal", principal && NotifService.enabled(this),
@@ -910,15 +937,6 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                             if (principal) requestPermissions(CallHub.PERMS, 61);
                             else Toast.makeText(this, "Actívalo en el principal: Ajustes → Llamadas", Toast.LENGTH_LONG).show();
                         })
-                .option(Ui.IMAGE, -1, "Fondo de juegos: " + (GameBg.enabled(this) ? "sí" : "no"),
-                        "Al abrir un juego en el principal, el extendido muestra una imagen del juego", GameBg.enabled(this), () -> {
-                            boolean on = !GameBg.enabled(this);
-                            prefs.edit().putBoolean("gameBg", on).apply();
-                            if (!on) { GameBg.current = null; GameBg.currentPkg = ""; desk.setBgImage(null); }
-                        })
-                .option(Ui.PALETTE, "Color de tarjetas y menús", CardTheme.glass == CardTheme.GLASS_LIGHT ? "Cristal claro"
-                        : CardTheme.glass == CardTheme.GLASS_DARK ? "Cristal oscuro" : CardTheme.isIntense() ? "Cristal intenso"
-                        : CardTheme.isAero() ? "Cristal Aero" : CardTheme.color == 0 ? "Automático" : "Color propio", this::chooseCardColor)
                 .option(Ui.HOME, isLauncher() ? "Pantalla de inicio: sí" : "Pantalla de inicio: no",
                         isLauncher() ? "ChronOS es tu launcher (tocar para dejar de usarla)" : "Usar ChronOS como launcher de este teléfono", this::toggleLauncher)
                 .option(Ui.GEAR, "Revisar configuración", principal ? "Permisos del principal" : "Permisos del extendido", () -> checkSetup(true))
@@ -998,6 +1016,25 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                     .show();
         };
         Updater.checkQuiet(this, true, () -> { if (!isFinishing()) { show.run(); showUpdateBadge(); } });
+    }
+
+    /** Personalizar: los colores de la mesa y de las tarjetas y menús, juntos. */
+    private void personalize() {
+        new Ui.Sheet(this)
+                .title("Personalizar")
+                .option(Ui.PALETTE, "Color de fondo", "El color de la mesa", this::chooseColor)
+                .option(Ui.PALETTE, "Tarjetas y menús", CardTheme.glass == CardTheme.GLASS_LIGHT ? "Cristal claro"
+                        : CardTheme.glass == CardTheme.GLASS_DARK ? "Cristal oscuro" : CardTheme.isIntense() ? "Cristal intenso"
+                        : CardTheme.isAero() ? "Cristal Aero" : CardTheme.color == 0 ? "Automático" : "Color propio", this::chooseCardColor)
+                .option(Ui.IMAGE, -1, "Fondo de juegos: " + (GameBg.enabled(this) ? "sí" : "no"),
+                        "Al abrir un juego en el principal, el extendido muestra una imagen del juego", GameBg.enabled(this), () -> {
+                            boolean on = !GameBg.enabled(this);
+                            prefs.edit().putBoolean("gameBg", on).apply();
+                            if (!on) { GameBg.current = null; GameBg.currentPkg = ""; desk.setBgImage(null); }
+                            main.postDelayed(this::personalize, 200);
+                        })
+                .button("Cerrar", false, null)
+                .show();
     }
 
     /** Horizontal o vertical, con dibujos de cómo van los teléfonos. */
@@ -1257,13 +1294,18 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         @Override public void run() {
             main.removeCallbacks(this);
             if (!resumed) return;
-            if (!desk.hasRecentsWidget()) { /* nada que mostrar */ }
+            boolean barRec = recentsBar != null && !fileMode;
+            if (!desk.hasRecentsWidget() && !barRec) { /* nada que mostrar */ }
             else if (hub.isPrincipal()) {
                 RecentApps.worker.execute(() -> {
                     org.json.JSONObject m = RecentApps.message(getApplicationContext());
                     main.post(() -> desk.setRecents(m));
                 });
-            } else if (hub.connected()) hub.send("recReq", "sig", desk.recentsSig());
+            } else if (hub.connected()) {
+                String have = barRec ? recentsBar.sig() : desk.recentsSig();
+                if (barRec && desk.hasRecentsWidget() && !have.equals(desk.recentsSig())) have = "?";
+                hub.send("recReq", "sig", have);
+            }
             main.postDelayed(this, 2000);
         }
     };
@@ -1280,15 +1322,18 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             @Override public void openHere(String pkg) { openOnPrincipal(pkg, ""); }
             @Override public void openThere(String pkg, String label) { openOnPrincipal(pkg, label); }
             @Override public void uninstall(String pkg, String label) { uninstallOnPrincipal(pkg, label); }
-            @Override public void putOnDesk(String pkg, String label, String iconPng) {
+            @Override public void putOnDesk(String pkg, String label, String iconPng, int screen) {
                 Item it = new Item();
                 it.kind = Item.APP; it.pkg = pkg; it.title = label; it.w = sized(0.24);
                 it.setImage(iconPng);
-                double[] p = desk.spot(it.w);
+                double[] p = desk.spotOn(it.w, screen);
                 it.x = p[0]; it.y = p[1];
+                it.page = desk.page();
                 addItem(it);
                 sendImage(it);
-                if (prefs.getBoolean("appsAuto", false)) desk.post(desk::arrangeApps);
+                // queda en modo edición en la pantalla donde se puso, para ubicarla a gusto
+                if (screen == deskSide()) main.postDelayed(() -> desk.startEditing(it.id), 200);
+                else if (hub.connected()) main.postDelayed(() -> hub.send("editItem", "id", it.id), 400);
             }
         });
     }
@@ -1894,6 +1939,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         linkState = state;
         linkInfo = state == Link.CONNECTED ? null : info;
         if (state == Link.WAITING && info == null) waitingSince = System.currentTimeMillis();
+        if (state == Link.CONNECTED && side == 0) main.postDelayed(() -> AppsDialog.prefetch(this, hub), 1500);   // menú de apps al instante
         if (state == Link.CONNECTED) {
             JSONObject hello = new JSONObject();
             JSONObject full = new JSONObject();
@@ -1915,6 +1961,12 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
         switch (t) {
+            case "editItem":
+                main.post(() -> desk.startEditing(m.optString("id")));
+                break;
+            case "appsList":
+                if (side == 0) AppsDialog.received(this, m);
+                break;
             case "fileMode":
                 main.post(() -> setFileMode(m.optBoolean("on"), true));
                 break;
@@ -1932,7 +1984,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 if (MediaHub.AUDIO.equals(m.optString("kind")) && cbar != null) main.post(() -> { cbar.showPlayer(false); main.postDelayed(() -> layoutChrono(false), 400); });
                 break;
             case "notifs":
-                main.post(() -> desk.setNotified(m.optJSONArray("p")));
+                main.post(() -> { desk.setNotified(m.optJSONArray("p")); if (recentsBar != null) recentsBar.setNotified(m.optJSONArray("p")); });
                 break;
             case "gameBg":
                 main.post(() -> desk.setBgImage(GameBg.current));
@@ -1954,7 +2006,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 main.post(() -> Toast.makeText(this, "El principal no encontró la app de alarmas", Toast.LENGTH_SHORT).show());
                 break;
             case "recList":
-                main.post(() -> desk.setRecents(m));
+                main.post(() -> { desk.setRecents(m); if (recentsBar != null) recentsBar.set(m); });
                 break;
             case "hello":
                 otherSide = m.optInt("side", -1);
@@ -1975,6 +2027,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 break;
             case "bg":
                 if (m.optInt("c") != prefs.getInt("deskColor", 0)) setDeskColor(m.optInt("c"), true);
+                break;
+            case "flip":
+                main.post(() -> setFlip(m.optBoolean("p"), m.optBoolean("e"), true));
                 break;
             case "view":   // el extendido sigue la orientación del principal
                 if (side != 1 && m.has("h")) {

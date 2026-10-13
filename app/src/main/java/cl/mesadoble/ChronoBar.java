@@ -94,6 +94,27 @@ public class ChronoBar extends FrameLayout {
     public void setPlayer(View v) { player = v; addView(v, new LayoutParams(-1, -2)); v.setVisibility(GONE); }
     public void setNotif(View v) { notif = v; addView(v, new LayoutParams(-2, -2)); }
 
+    // ---- apps recientes: pestaña a la izquierda de la barra del extendido (se esconde con el gestor de archivos)
+    private View recents;
+    private float rp = 1f;   // 0 = escondida, 1 = visible
+    private android.animation.ValueAnimator rpAnim;
+    public void setRecents(View v) { recents = v; addView(v, new LayoutParams(-2, -2)); }
+    /** Ancho de la pestaña de apps recientes. */
+    float recW() { return recents == null ? 0 : rp * Math.min(getWidth() * 0.27f, 250 * dp); }
+
+    public void showRecents(boolean on) {
+        if (recents == null) return;
+        if (rpAnim != null) rpAnim.cancel();
+        if (on) recents.setVisibility(VISIBLE);
+        rpAnim = android.animation.ValueAnimator.ofFloat(rp, on ? 1f : 0f);
+        rpAnim.setDuration(300);
+        rpAnim.addUpdateListener(a -> { rp = (float) a.getAnimatedValue(); recents.setAlpha(rp); requestLayout(); invalidate(); placePlayer(); });
+        rpAnim.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(android.animation.Animator a) { if (rp < 0.01f) recents.setVisibility(GONE); }
+        });
+        rpAnim.start();
+    }
+
     public void showPlayer(boolean on) {
         if (playerOn == on) return;
         playerOn = on;
@@ -111,14 +132,14 @@ public class ChronoBar extends FrameLayout {
 
     /** Borde izquierdo de la parte alta (donde está el reproductor). */
     private float tallLeft() {
-        float lmax = getWidth() - tabW(), lmin = diag() + 6 * dp;
+        float lmax = getWidth() - tabW(), lmin = recW() + diag() * 1.6f + 6 * dp;
         return lmax - pp * (lmax - lmin);
     }
 
     /** El reproductor se descubre de derecha a izquierda, junto con la parte alta de la barra. */
     private void placePlayer() {
         if (player == null || getWidth() == 0) return;
-        float lmin = diag() + 6 * dp, L = tallLeft();
+        float lmin = player.getLeft(), L = tallLeft();
         player.setTranslationX(L - lmin);
         int vis = Math.max(0, Math.round(getWidth() - tabW() - L - 6 * dp));
         player.setClipBounds(new android.graphics.Rect(0, 0, vis, player.getHeight()));
@@ -130,8 +151,10 @@ public class ChronoBar extends FrameLayout {
         int W = MeasureSpec.getSize(ws), H = barHeight();
         for (int i = 0; i < getChildCount(); i++) {
             View v = getChildAt(i);
-            if (v == player) v.measure(MeasureSpec.makeMeasureSpec(Math.max(0, Math.round(W - tabW() - diag() - 12 * dp)), MeasureSpec.EXACTLY),
+            if (v == player) v.measure(MeasureSpec.makeMeasureSpec(Math.max(0, Math.round(W - tabW() - Math.min(W * 0.27f, 250 * dp) - diag() * 1.6f - 12 * dp)), MeasureSpec.EXACTLY),
                     MeasureSpec.makeMeasureSpec(Math.round(22 * dp + 62 * dp - strip() - 6 * dp), MeasureSpec.EXACTLY));
+            else if (v == recents) v.measure(MeasureSpec.makeMeasureSpec(Math.max(1, Math.round(Math.min(W * 0.27f, 250 * dp) - 10 * dp)), MeasureSpec.EXACTLY),
+                    MeasureSpec.makeMeasureSpec(Math.round(62 * dp - 8 * dp), MeasureSpec.EXACTLY));
             else if (v == notif) v.measure(MeasureSpec.makeMeasureSpec(Math.round(Math.min(W - tabW() - diag() * 0.4f - 10 * dp, 520 * dp)), MeasureSpec.EXACTLY),
                     MeasureSpec.makeMeasureSpec(Math.round(tab() - 10 * dp), MeasureSpec.EXACTLY));
             else v.measure(MeasureSpec.makeMeasureSpec(W, MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(Math.round(strip()), MeasureSpec.AT_MOST));
@@ -146,10 +169,15 @@ public class ChronoBar extends FrameLayout {
             navRow.layout(x, cy - navRow.getMeasuredHeight() / 2, x + navRow.getMeasuredWidth(), cy + navRow.getMeasuredHeight() / 2);
         }
         if (player != null) {
-            int x = Math.round(diag() + 6 * dp), h = player.getMeasuredHeight();
+            int x = Math.round(W - tabW() - 6 * dp - player.getMeasuredWidth()), h = player.getMeasuredHeight();
             int top = Math.round(edgeTop ? strip() + 2 * dp : H - strip() - 2 * dp - h);
             player.layout(x, top, x + player.getMeasuredWidth(), top + h);
             placePlayer();
+        }
+        if (recents != null) {
+            int x = Math.round(4 * dp), h = recents.getMeasuredHeight();
+            int top = Math.round(edgeTop ? 4 * dp : H - 4 * dp - h);
+            recents.layout(x, top, x + recents.getMeasuredWidth(), top + h);
         }
         if (notif != null) {
             int x = Math.round(tabW() + diag() * 0.4f), h = notif.getMeasuredHeight();
@@ -180,7 +208,7 @@ public class ChronoBar extends FrameLayout {
             shape.quadTo(W, y(T), W - rr, y(T));
             shape.lineTo(L, y(T));
             shape.lineTo(L - D * 0.6f, y(S));
-            shape.lineTo(0, y(S));
+            recentsEdge(S, D);
         } else {
             // franja; diagonal y pestaña a la derecha (logo)
             shape.moveTo(0, y(0));
@@ -189,10 +217,19 @@ public class ChronoBar extends FrameLayout {
             shape.quadTo(W, y(T), W - rr, y(T));
             shape.lineTo(W - TW, y(T));
             shape.lineTo(W - TW - D, y(S));
-            shape.lineTo(0, y(S));
+            recentsEdge(S, D);
         }
         shape.close();
         region.setPath(shape, new Region(0, 0, Math.max(1, (int) W), Math.max(1, getHeight())));
+    }
+
+    /** Pestaña de apps recientes a la izquierda (de la franja sube en diagonal). */
+    private void recentsEdge(float S, float D) {
+        float RW = recW(), T0 = 62 * dp;
+        if (RW < 1) { shape.lineTo(0, y(S)); return; }
+        shape.lineTo(RW + D * 0.8f * rp, y(S));
+        shape.lineTo(RW, y(T0));
+        shape.lineTo(0, y(T0));
     }
 
     // ---------------- dibujo ----------------
@@ -327,7 +364,7 @@ public class ChronoBar extends FrameLayout {
     @Override public boolean dispatchTouchEvent(MotionEvent e) {
         if (e.getActionMasked() == MotionEvent.ACTION_DOWN && !region.contains((int) e.getX(), (int) e.getY())) {
             boolean onChild = false;
-            for (View v : new View[]{notif, player})
+            for (View v : new View[]{notif, player, recents})
                 if (v != null && v.getVisibility() == VISIBLE && v.getAlpha() > 0.1f && e.getX() >= v.getLeft() && e.getX() <= v.getRight()
                         && e.getY() >= v.getTop() && e.getY() <= v.getBottom()) onChild = true;
             if (!onChild) return false;

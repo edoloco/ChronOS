@@ -713,6 +713,23 @@ public class DeskView extends View {
         return new double[]{side + 0.08 + Math.random() * Math.max(0.01, 0.84 - w), 0.14 + Math.random() * 0.4};
     }
 
+    /** Un lugar libre en la pantalla indicada (0 = principal, 1 = extendido). */
+    public double[] spotOn(double w, int screen) {
+        if (vertical) return new double[]{0.06 + Math.random() * Math.max(0.01, 0.86 - w), screen + 0.12 + Math.random() * 0.3};
+        return new double[]{screen + 0.08 + Math.random() * Math.max(0.01, 0.84 - w), 0.14 + Math.random() * 0.4};
+    }
+
+    /** Deja el elemento en modo edición (para moverlo, girarlo o cambiarle el tamaño). */
+    public void startEditing(String id) {
+        for (Item it : items) if (it.id.equals(id)) {
+            editing = it;
+            it.z = System.currentTimeMillis();
+            performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+            invalidate();
+            return;
+        }
+    }
+
     public void sendAcross(Item it) {
         double sz = alongSize(it);
         double a = onFirst(it) ? 1.04 + Math.random() * 0.08 : 1 - 0.04 - sz - Math.random() * 0.08;

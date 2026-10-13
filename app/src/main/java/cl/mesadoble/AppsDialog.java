@@ -28,6 +28,8 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.File;
+
 import java.io.ByteArrayOutputStream;
 import java.text.Collator;
 import java.util.ArrayList;
@@ -44,7 +46,8 @@ public class AppsDialog {
     public interface Host {
         void openHere(String pkg);
         void openThere(String pkg, String label);
-        void putOnDesk(String pkg, String label, String iconPng);
+        /** screen: 0 = principal, 1 = extendido. La app queda en modo edición para ubicarla. */
+        void putOnDesk(String pkg, String label, String iconPng, int screen);
         void uninstall(String pkg, String label);
     }
 
@@ -58,27 +61,103 @@ public class AppsDialog {
     /** Última lista recibida del principal (se muestra al tiro mientras llega la nueva). */
     private static final List<App> remoteCache = new ArrayList<>();
 
-    /** Principal: manda su lista de apps con íconos chicos. */
-    static void sendList(Context c, Hub hub) {
+    // ---------------- caché: la lista con íconos se arma una vez y solo viaja si cambió ----------------
+
+    private static final java.util.Map<String, String> pngCache = new java.util.concurrent.ConcurrentHashMap<>();   // pkg@versión → ícono
+    private static volatile JSONArray builtArr;
+    private static volatile String builtSig = "";
+    private static String remoteSig = "";
+
+    /** Huella de las apps instaladas (paquete y fecha de actualización): si no cambió, no se reenvía nada. */
+    private static String signature(Context c, List<ResolveInfo> l) {
+        StringBuilder sb = new StringBuilder();
+        PackageManager pm = c.getPackageManager();
+        for (ResolveInfo ri : l) {
+            sb.append(ri.activityInfo.packageName).append(':');
+            try { sb.append(pm.getPackageInfo(ri.activityInfo.packageName, 0).lastUpdateTime); } catch (Exception ignored) { }
+            sb.append(';');
+        }
+        return Integer.toHexString(sb.toString().hashCode()) + "-" + l.size();
+    }
+
+    /** Principal: arma (o reutiliza) la lista de apps con íconos chicos. */
+    static synchronized JSONArray build(Context c) {
+        PackageManager pm = c.getPackageManager();
+        List<ResolveInfo> l = pm.queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0);
+        String sig = signature(c, l);
+        if (sig.equals(builtSig) && builtArr != null) return builtArr;
+        JSONArray arr = new JSONArray();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        int size = Math.min(144, Math.round(64 * c.getResources().getDisplayMetrics().density));
+        for (ResolveInfo ri : l) {
+            String pkg = ri.activityInfo.packageName;
+            if (pkg.equals(c.getPackageName()) || !seen.add(pkg)) continue;
+            String key = pkg;
+            try { key = pkg + "@" + pm.getPackageInfo(pkg, 0).lastUpdateTime; } catch (Exception ignored) { }
+            String png = pngCache.get(key);
+            if (png == null) { png = iconPng(ri.loadIcon(pm), size); pngCache.put(key, png); }
+            JSONObject o = new JSONObject();
+            try { o.put("p", pkg); o.put("l", String.valueOf(ri.loadLabel(pm))); o.put("i", png); } catch (JSONException ignored) { }
+            arr.put(o);
+        }
+        builtArr = arr;
+        builtSig = sig;
+        return arr;
+    }
+
+    /** Principal: manda su lista (solo si la del extendido es distinta). */
+    static void sendList(Context c, Hub hub) { sendList(c, hub, ""); }
+
+    static void sendList(Context c, Hub hub, String have) {
         new Thread(() -> {
-            PackageManager pm = c.getPackageManager();
-            Intent i = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
-            JSONArray arr = new JSONArray();
-            java.util.Set<String> seen = new java.util.HashSet<>();
-            int size = Math.round(64 * c.getResources().getDisplayMetrics().density / 2.5f * 2.5f);
-            for (ResolveInfo ri : pm.queryIntentActivities(i, 0)) {
-                String pkg = ri.activityInfo.packageName;
-                if (pkg.equals(c.getPackageName()) || !seen.add(pkg)) continue;
-                JSONObject o = new JSONObject();
-                try { o.put("p", pkg); o.put("l", String.valueOf(ri.loadLabel(pm))); o.put("i", iconPng(ri.loadIcon(pm), Math.min(144, size))); }
-                catch (JSONException ignored) { }
-                arr.put(o);
-            }
+            JSONArray arr = build(c);
             JSONObject m = new JSONObject();
-            try { m.put("t", "appsList"); m.put("apps", arr); } catch (JSONException ignored) { }
+            try {
+                if (builtSig.equals(have)) { m.put("t", "appsSame"); m.put("sig", have); }
+                else { m.put("t", "appsList"); m.put("apps", arr); m.put("sig", builtSig); }
+            } catch (JSONException ignored) { }
             hub.send(m);
         }, "lista-apps").start();
     }
+
+    /** Extendido: la última lista recibida, guardada en el teléfono (se muestra al tiro, aunque se haya cerrado la app). */
+    private static File cacheFile(Context c) { return new File(c.getFilesDir(), "apps_principal.json"); }
+
+    static void loadCache(Activity a) {
+        synchronized (remoteCache) { if (!remoteCache.isEmpty()) return; }
+        try {
+            byte[] b = java.nio.file.Files.readAllBytes(cacheFile(a).toPath());
+            JSONObject o = new JSONObject(new String(b, java.nio.charset.StandardCharsets.UTF_8));
+            List<App> list = parse(a, o.optJSONArray("apps"));
+            synchronized (remoteCache) { remoteCache.clear(); remoteCache.addAll(list); remoteSig = o.optString("sig"); }
+        } catch (Exception ignored) { }
+    }
+
+    private static void saveCache(Context c, JSONArray arr, String sig) {
+        try {
+            JSONObject o = new JSONObject();
+            o.put("sig", sig); o.put("apps", arr);
+            java.nio.file.Files.write(cacheFile(c).toPath(), o.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (Exception ignored) { }
+    }
+
+    private static List<App> parse(Activity a, JSONArray arr) {
+        List<App> list = new ArrayList<>();
+        for (int k = 0; arr != null && k < arr.length(); k++) {
+            JSONObject o = arr.optJSONObject(k);
+            if (o == null) continue;
+            App ap = new App(o.optString("p"), o.optString("l"), fromPng(a, o.optString("i")));
+            ap.png = o.optString("i");
+            list.add(ap);
+        }
+        Collator col = Collator.getInstance(new Locale("es"));
+        Collections.sort(list, (x, y) -> col.compare(x.label, y.label));
+        return list;
+    }
+
+    /** Principal: lista local (con íconos de Android), guardada mientras la app esté abierta. */
+    private static final List<App> localCache = new ArrayList<>();
+    private static String localSig = "";
 
     private static Drawable fromPng(Activity a, String b64) {
         try {
@@ -124,8 +203,7 @@ public class AppsDialog {
         TextView hint = new TextView(a);
         final Hub hub = Hub.get(a);
         final boolean remote = !hub.isPrincipal();
-        hint.setText((remote ? "Apps del principal. " : "") + "Toca una app para dejarla en la mesa o abrirla en el principal. "
-                + "Mantén presionado para desinstalarla.");
+        hint.setText((remote ? "Apps del principal. " : "") + "Toca una app para abrirla. Mantén presionado para ponerla en una mesa o desinstalarla.");
         hint.setTextColor(night ? 0xFF93A4B5 : 0xFF5B6B7A);
         hint.setTextSize(12);
         hint.setPadding(4, Math.round(8 * dp), 4, Math.round(6 * dp));
@@ -168,23 +246,27 @@ public class AppsDialog {
             }
         };
         grid.setAdapter(adapter);
+        // un toque: abrir la app en el principal; mantener presionado: ponerla en una mesa o desinstalarla
         grid.setOnItemClickListener((parent, view, pos, id) -> {
             App app = shown.get(pos);
-            new Ui.Sheet(a)
-                    .title(app.label)
-                    .option(Ui.PIN, "Poner acceso directo en la mesa", "Al tocarlo se abre en el principal", () -> {
-                        d.dismiss();
-                        host.putOnDesk(app.pkg, app.label, app.png != null ? app.png : iconPng(app.icon, Math.round(96 * dp)));
-                    })
-                    .option(Ui.OPEN, "Abrir ahora en el principal", null, () -> { d.dismiss(); host.openThere(app.pkg, app.label); })
-                    .option(Ui.TRASH, "Desinstalar", remote ? "Se confirma en el principal" : null, () -> host.uninstall(app.pkg, app.label))
-                    .button("Cerrar", false, null)
-                    .show();
+            d.dismiss();
+            host.openThere(app.pkg, app.label);
         });
         grid.setOnItemLongClickListener((parent, view, pos, id) -> {
             App app = shown.get(pos);
             view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
-            host.uninstall(app.pkg, app.label);
+            String png = app.png != null ? app.png : iconPng(app.icon, Math.round(96 * dp));
+            new Ui.Sheet(a)
+                    .title(app.label)
+                    .option(Ui.PIN, 0, "Poner en el principal", "Queda en la mesa de arriba, lista para ubicarla", false, () -> {
+                        d.dismiss(); host.putOnDesk(app.pkg, app.label, png, 0);
+                    })
+                    .option(Ui.PIN, 1, "Poner en el extendido", "Queda en la mesa de abajo, lista para ubicarla", false, () -> {
+                        d.dismiss(); host.putOnDesk(app.pkg, app.label, png, 1);
+                    })
+                    .option(Ui.TRASH, "Desinstalar", remote ? "Se confirma en el principal" : null, () -> host.uninstall(app.pkg, app.label))
+                    .button("Cerrar", false, null)
+                    .show();
             return true;
         });
         search.addTextChangedListener(new TextWatcher() {
@@ -216,24 +298,19 @@ public class AppsDialog {
                 } else if ("appsList".equals(t) && remote) {
                     JSONArray arr = m.optJSONArray("apps");
                     if (arr == null) return;
+                    String sig = m.optString("sig");
                     new Thread(() -> {
-                        List<App> list = new ArrayList<>();
-                        for (int k = 0; k < arr.length(); k++) {
-                            JSONObject o = arr.optJSONObject(k);
-                            if (o == null) continue;
-                            App ap = new App(o.optString("p"), o.optString("l"), fromPng(a, o.optString("i")));
-                            ap.png = o.optString("i");
-                            list.add(ap);
-                        }
-                        Collator col = Collator.getInstance(new Locale("es"));
-                        Collections.sort(list, (x, y) -> col.compare(x.label, y.label));
+                        List<App> list = parse(a, arr);
+                        saveCache(a, arr, sig);
                         a.runOnUiThread(() -> {
-                            synchronized (remoteCache) { remoteCache.clear(); remoteCache.addAll(list); }
+                            synchronized (remoteCache) { remoteCache.clear(); remoteCache.addAll(list); remoteSig = sig; }
                             all.clear(); all.addAll(list);
                             search.setText(search.getText());   // vuelve a filtrar
-                            hint.setText("Apps del principal. Toca una para dejarla en la mesa o abrirla allá. Mantén presionado para desinstalarla.");
+                            hint.setText("Apps del principal. Toca una para abrirla. Mantén presionado para ponerla en una mesa o desinstalarla.");
                         });
                     }, "apps-principal").start();
+                } else if ("appsSame".equals(t) && remote) {
+                    a.runOnUiThread(() -> hint.setText("Apps del principal. Toca una para abrirla. Mantén presionado para ponerla en una mesa o desinstalarla."));
                 }
             }
         };
@@ -241,10 +318,11 @@ public class AppsDialog {
         d.setOnDismissListener(x -> hub.remove(updates));
 
         if (remote) {
+            loadCache(a);
             synchronized (remoteCache) { all.addAll(remoteCache); shown.addAll(remoteCache); }
             adapter.notifyDataSetChanged();
             if (hub.connected()) {
-                hub.send("appsReq");
+                hub.send("appsReq", "sig", remoteSig);
                 if (remoteCache.isEmpty()) hint.setText("Pidiendo la lista de apps al principal…");
             } else {
                 hint.setText(remoteCache.isEmpty() ? "Conecta con el principal para ver sus apps."
@@ -253,23 +331,47 @@ public class AppsDialog {
             return;
         }
 
-        // cargar la lista sin trabar la pantalla
+        // la lista queda guardada: se muestra al tiro y se revisa en segundo plano por si cambió
+        synchronized (localCache) { all.addAll(localCache); shown.addAll(localCache); }
+        adapter.notifyDataSetChanged();
         new Thread(() -> {
             PackageManager pm = a.getPackageManager();
-            Intent i = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+            List<ResolveInfo> ris = pm.queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0);
+            String sig = signature(a, ris);
+            synchronized (localCache) { if (sig.equals(localSig) && !localCache.isEmpty()) return; }
             List<App> list = new ArrayList<>();
-            for (ResolveInfo ri : pm.queryIntentActivities(i, 0)) {
+            java.util.Set<String> seen = new java.util.HashSet<>();
+            for (ResolveInfo ri : ris) {
                 String pkg = ri.activityInfo.packageName;
-                if (pkg.equals(a.getPackageName())) continue;
-                boolean dup = false;
-                for (App x : list) if (x.pkg.equals(pkg)) { dup = true; break; }
-                if (dup) continue;
+                if (pkg.equals(a.getPackageName()) || !seen.add(pkg)) continue;
                 list.add(new App(pkg, String.valueOf(ri.loadLabel(pm)), ri.loadIcon(pm)));
             }
             Collator col = Collator.getInstance(new Locale("es"));
             Collections.sort(list, (x, y) -> col.compare(x.label, y.label));
-            a.runOnUiThread(() -> { all.addAll(list); shown.addAll(list); adapter.notifyDataSetChanged(); });
+            synchronized (localCache) { localCache.clear(); localCache.addAll(list); localSig = sig; }
+            a.runOnUiThread(() -> { all.clear(); all.addAll(list); search.setText(search.getText()); });
         }, "apps").start();
+    }
+
+    /** Extendido: al conectarse pide la lista (si cambió) para que el menú de apps abra al instante. */
+    static void prefetch(Activity a, Hub hub) {
+        new Thread(() -> {
+            loadCache(a);
+            if (hub.connected()) hub.send("appsReq", "sig", remoteSig);
+        }, "apps-pre").start();
+    }
+
+    /** Extendido: guarda la lista que llegó aunque el menú de apps esté cerrado. */
+    static void received(Activity a, JSONObject m) {
+        if (!"appsList".equals(m.optString("t"))) return;
+        JSONArray arr = m.optJSONArray("apps");
+        String sig = m.optString("sig");
+        if (arr == null) return;
+        new Thread(() -> {
+            List<App> list = parse(a, arr);
+            saveCache(a, arr, sig);
+            synchronized (remoteCache) { remoteCache.clear(); remoteCache.addAll(list); remoteSig = sig; }
+        }, "apps-guardar").start();
     }
 
     static String iconPng(Drawable d, int size) {

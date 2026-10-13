@@ -300,7 +300,7 @@ public class Hub implements Link.Listener {
         if ("fmJob".equals(t)) { if (isPrincipal()) FileServer.get(app).runJob(m, this); return; }
         if ("fmOpenFile".equals(t)) { if (isPrincipal()) FileServer.openHere(app, this, m.optString("path")); return; }
         if ("fmCancel".equals(t)) { FileServer.get(app).cancelJob(); return; }
-        if ("appsReq".equals(t)) { AppsDialog.sendList(app, this); return; }
+        if ("appsReq".equals(t)) { AppsDialog.sendList(app, this, m.optString("sig")); return; }
         if (t.startsWith("fs") && !t.endsWith("R") && !"fsTok".equals(t)) { FileServer.get(app).handle(m, this); return; }
         if ("fsTok".equals(t)) FileServer.get(app).setRemote(m.optString("k"), m.optInt("port"));
         if ("kbAsk".equals(t)) { sendImeState(); if (!imeSelected(app)) notifySwitch(); return; }

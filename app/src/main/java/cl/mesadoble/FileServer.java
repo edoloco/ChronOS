@@ -358,7 +358,9 @@ public class FileServer {
                         r.put("img", android.util.Base64.encodeToString(bos.toByteArray(), android.util.Base64.NO_WRAP));
                     }
                 }
-            } catch (JSONException ignored) { }
+            } catch (Exception e) {   // nunca dejar al otro teléfono esperando
+                try { r.put("err", e.getMessage() == null ? "No pude leer en el principal" : e.getMessage()); } catch (JSONException ignored) { }
+            }
             try { r.put("t", t + "R"); } catch (JSONException ignored) { }
             hub.send(r);
         });

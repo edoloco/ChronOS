@@ -226,6 +226,7 @@ public class FilePane extends FrameLayout implements Link.Listener {
         crumb.setText("dir".equals(m) ? "/ RAÍZ" + (p.startsWith(root) ? p.substring(root.length()) : p).replace("/", " / ").replace(" /  / ", " / ")
                 : "home".equals(m) ? "Inicio" : "/ " + catTitle().toUpperCase(Locale.ROOT));
         if (hub.connected()) hub.send("fpPath", "path", "dir".equals(m) ? p : "");
+        if (remote()) showStatus(hub.connected() ? "Leyendo el teléfono principal…" : "El principal no está conectado");
         homeScroll.setVisibility("home".equals(m) ? VISIBLE : GONE);
         list.setVisibility("home".equals(m) ? GONE : VISIBLE);
         work.execute(() -> {
