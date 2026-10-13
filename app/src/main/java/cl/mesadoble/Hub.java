@@ -591,9 +591,11 @@ public class Hub implements Link.Listener {
     /** Boost para apps: en el principal se pide el permiso de captura (con un toque allá) o se detiene. */
     void boostApp(boolean on) {
         if (!on) { CaptureService.stop(app); return; }
-        if (CaptureService.running) return;
-        startOrNotify(new Intent(app, CaptureActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), 62,
-                "Boost para apps", "Toca para que el sonido salga también por el extendido");
+        if (CaptureService.running) { send("boost", "on", true); return; }
+        int r = startOrNotify(new Intent(app, CaptureActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), 62,
+                "Boost: toca aquí", "Para que el sonido salga también por el extendido");
+        send("boostMsg", "msg", r == LAUNCHED ? "Acepta en el principal la captura de sonido"
+                : "Toca en el principal el aviso \"Boost: toca aquí\" y acepta la captura de sonido");
     }
 
     private volatile boolean videoApp;

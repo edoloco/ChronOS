@@ -1991,6 +1991,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                     else if (side == 0) floatNotif.show(m);                   // el principal está en otra app: aquí, arriba a la izquierda
                 });
                 break;
+            case "boostMsg":
+                main.post(() -> Toast.makeText(this, m.optString("msg"), Toast.LENGTH_LONG).show());
+                break;
             case "boost":
                 if (barPlayer != null) main.post(() -> barPlayer.setBoostOn(m.optBoolean("on")));
                 break;

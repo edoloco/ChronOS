@@ -38,18 +38,25 @@ public class CaptureService extends Service {
         Intent data = i.getParcelableExtra("data");
         MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
         try { projection = mpm.getMediaProjection(code, data); } catch (Exception e) { projection = null; }
-        if (projection == null) { stopSelf(); return START_NOT_STICKY; }
+        if (projection == null) { fail("No se pudo capturar el sonido (Android no dio el permiso)"); return START_NOT_STICKY; }
         try {
             rec = build(projection);
         } catch (Exception e) { rec = null; }
-        if (rec == null || rec.getState() != AudioRecord.STATE_INITIALIZED) { stopSelf(); return START_NOT_STICKY; }
+        if (rec == null || rec.getState() != AudioRecord.STATE_INITIALIZED) { fail("Este teléfono no deja capturar el sonido de las apps"); return START_NOT_STICKY; }
         running = true;
         Hub hub = Hub.get(this);
         Boost.serve();
         hub.send("boost", "on", true);
         Boost.syncVolume(this, hub, true);
+        if (hub.connected()) hub.send("boostMsg", "msg", "Boost activo: el sonido sale por los dos teléfonos");
         new Thread(this::loop, "captura").start();
         return START_NOT_STICKY;
+    }
+
+    private void fail(String msg) {
+        Hub hub = Hub.get(this);
+        if (hub.connected()) hub.send("boostMsg", "msg", msg);
+        stopSelf();
     }
 
     /** AudioRecord que escucha lo que suenan las otras apps (no ChronOS). Por reflexión: es de Android 10+. */

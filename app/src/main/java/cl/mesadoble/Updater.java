@@ -302,12 +302,18 @@ public class Updater {
                     a.getSharedPreferences("mesa", Context.MODE_PRIVATE).edit().putString("latestTag", fr.tag).putLong("latestAt", System.currentTimeMillis()).apply();
                     sh.message("Instalada: " + cur + "\nÚltima: " + clean(fr.tag) + " (" + fr.name + ")\n\n"
                             + (nw ? "Hay una versión nueva." : "Ya tienes la última versión. Puedes reinstalarla igual."));
-                    sh.option(Ui.RECEIVE, -1, nw ? "Actualizar este teléfono" : "Reinstalar en este teléfono", null, nw, () -> install(a, fr));
-                    if (hub.connected())
-                        sh.option(Ui.OPEN, "Actualizar también el otro teléfono", "Allá se descarga y aparece el instalador (o un aviso)", () -> {
-                            hub.send("update");
-                            install(a, fr);
-                        });
+                    // siempre los dos: el principal no tiene cómo actualizarse solo desde su pantalla
+                    if (hub.connected()) {
+                        sh.option(Ui.RECEIVE, -1, nw ? "Actualizar los dos teléfonos" : "Reinstalar en los dos teléfonos",
+                                "En el otro teléfono se descarga solo y aparece el instalador (o un aviso para tocar)", nw, () -> {
+                                    hub.send("update");
+                                    install(a, fr);
+                                });
+                        sh.option(Ui.OPEN, "Solo este teléfono", null, () -> install(a, fr));
+                    } else {
+                        sh.option(Ui.RECEIVE, -1, nw ? "Actualizar este teléfono" : "Reinstalar en este teléfono",
+                                "El otro teléfono no está conectado: actualízalo después", nw, () -> install(a, fr));
+                    }
                 }
                 sh.option(Ui.GEAR, "Repositorio: " + (repo(a).isEmpty() ? "(sin definir)" : repo(a)), "Cambiar de dónde se descargan las versiones", () -> editRepo(a, hub))
                   .button("Cerrar", false, null)
