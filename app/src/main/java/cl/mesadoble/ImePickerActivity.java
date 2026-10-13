@@ -23,7 +23,7 @@ public class ImePickerActivity extends Activity {
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
         if (!Hub.imeEnabled(this)) {
-            Toast.makeText(this, "Activa \"Mesa Doble\" en la lista de teclados y vuelve", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Activa \"ChronOS\" en la lista de teclados y vuelve", Toast.LENGTH_LONG).show();
             try { startActivity(new Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)); } catch (Exception ignored) { }
             finish();
         }

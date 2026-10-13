@@ -30,7 +30,7 @@ public class LinkService extends Service {
         int icon = getResources().getIdentifier("ic_stat", "drawable", getPackageName());
         Notification n = new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(icon != 0 ? icon : android.R.drawable.stat_notify_sync)
-                .setContentTitle("Mesa Doble")
+                .setContentTitle("ChronOS")
                 .setContentText("Manteniendo unidos los dos teléfonos")
                 .setContentIntent(open)
                 .setOngoing(true)

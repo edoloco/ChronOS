@@ -23,7 +23,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 /**
- * Diálogos de Mesa Doble: tarjetas redondeadas, opciones con íconos de línea y botones tipo píldora.
+ * Diálogos de ChronOS: tarjetas redondeadas, opciones con íconos de línea y botones tipo píldora.
  * Siguen la orientación de la pantalla de la mesa.
  */
 public class Ui {

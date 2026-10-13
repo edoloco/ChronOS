@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Logo de ChronOS: cubo isométrico con una C que es un reloj -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#A5D8BC" android:pathData="M54,22L82,38L54,54L26,38Z" />
+    <path android:fillColor="#7CC1A6" android:pathData="M26,38L54,54L54,86L26,70Z" />
+    <path android:fillColor="#00917A" android:pathData="M54,54L82,38L82,70L54,86Z" />
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="6.5" android:strokeLineCap="round"
+        android:pathData="M70.5,42.5A19,19 0 1,0 70.5,65.5" />
+    <path android:fillColor="#FFFFFF" android:pathData="M54.9,51L53.1,51L53.6,36.5L54.4,36.5Z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M59,51.6L65.5,54L59,56.4Z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M54,50.6a3.4,3.4 0 1,0 0.01,0Z" />
+</vector>

@@ -52,7 +52,7 @@ import java.util.Arrays;
 import java.util.Locale;
 
 /**
- * Cámara de Mesa Doble, en el PRINCIPAL. Se controla desde el extendido (modo "Cámara" del teclado):
+ * Cámara de ChronOS, en el PRINCIPAL. Se controla desde el extendido (modo "Cámara" del teclado):
  * cambiar entre trasera y delantera, sacar foto, flash y zoom; el extendido ve lo que ve la cámara.
  *   camCmd   (extendido → principal) {a: open|switch|shot|flash|zoom(v)|close|stream(v)}
  *   camState (principal → extendido) {open, front, flash, zoom, max}
@@ -386,7 +386,7 @@ public class CameraActivity extends Activity implements TextureView.SurfaceTextu
         } catch (Exception e) { Toast.makeText(this, "No pude sacar la foto", Toast.LENGTH_SHORT).show(); }
     }
 
-    /** Guarda la foto en Imágenes/Mesa Doble y avisa al extendido. */
+    /** Guarda la foto en Imágenes/ChronOS y avisa al extendido. */
     private void saved(ImageReader r) {
         Image img = null;
         String name = "MesaDoble_" + new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", Locale.ROOT).format(new java.util.Date()) + ".jpg";
@@ -400,14 +400,14 @@ public class CameraActivity extends Activity implements TextureView.SurfaceTextu
             ContentValues cv = new ContentValues();
             cv.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
             cv.put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg");
-            if (android.os.Build.VERSION.SDK_INT >= 29) cv.put("relative_path", "Pictures/Mesa Doble");
+            if (android.os.Build.VERSION.SDK_INT >= 29) cv.put("relative_path", "Pictures/ChronOS");
             Uri u = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cv);
             if (u != null) try (OutputStream o = getContentResolver().openOutputStream(u)) { if (o != null) { o.write(bytes); ok = true; } }
         } catch (Exception ignored) {
         } finally { if (img != null) img.close(); }
         final boolean fok = ok;
         main.post(() -> {
-            Toast.makeText(this, fok ? "Foto guardada en Imágenes › Mesa Doble" : "No pude guardar la foto", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, fok ? "Foto guardada en Imágenes › ChronOS" : "No pude guardar la foto", Toast.LENGTH_SHORT).show();
             JSONObject m = new JSONObject();
             try { m.put("t", "camShot"); m.put("ok", fok); m.put("name", name); } catch (JSONException ignored) { }
             if (hub.connected()) hub.send(m);

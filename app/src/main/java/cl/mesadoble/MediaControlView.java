@@ -16,7 +16,7 @@ import org.json.JSONObject;
 
 /**
  * Controlador de video (y música) del principal, como modo del teclado en el extendido.
- * Con el reproductor de Mesa Doble muestra título y barra de avance; con otras apps (YouTube, Netflix…)
+ * Con el reproductor de ChronOS muestra título y barra de avance; con otras apps (YouTube, Netflix…)
  * envía las teclas de reproducción.
  */
 public class MediaControlView extends LinearLayout {
@@ -109,7 +109,7 @@ public class MediaControlView extends LinearLayout {
         note.setTextColor(0xFF777777);
         note.setTextSize(11.5f);
         note.setGravity(Gravity.CENTER);
-        note.setText("La barra de avance aparece con los videos que abres desde Archivos (reproductor de Mesa Doble).");
+        note.setText("La barra de avance aparece con los videos que abres desde Archivos (reproductor de ChronOS).");
         addView(note);
         showExternal(false);
     }

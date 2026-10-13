@@ -159,7 +159,7 @@ public class WidgetsDialog {
             final String own = a.getPackageName();
             Collections.sort(out, (x, y) -> {
                 boolean ox = x.provider.startsWith(own + "/"), oy = y.provider.startsWith(own + "/");
-                if (ox != oy) return ox ? -1 : 1;   // los de Mesa Doble primero
+                if (ox != oy) return ox ? -1 : 1;   // los de ChronOS primero
                 int c = col.compare(x.app, y.app);
                 return c != 0 ? c : col.compare(x.label, y.label);
             });

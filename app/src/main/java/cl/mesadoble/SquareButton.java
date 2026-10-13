@@ -21,6 +21,7 @@ public class SquareButton extends View {
             BACK = 6, HOME = 7, RECENTS = 8, MENU = 9, DESKS = 10, WIDGET = 11, FILES = 12, TOOLS = 13;
 
     private final int kind;
+    public int kind() { return kind; }
     private final String text;
     private final float dp;
     private final Paint bg = new Paint(Paint.ANTI_ALIAS_FLAG), stroke = new Paint(Paint.ANTI_ALIAS_FLAG),

@@ -1,0 +1,350 @@
+package cl.mesadoble;
+
+import android.content.Context;
+import android.graphics.Canvas;
+import android.graphics.LinearGradient;
+import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.Region;
+import android.graphics.Shader;
+import android.graphics.Typeface;
+import android.view.MotionEvent;
+import android.view.View;
+import android.view.ViewConfiguration;
+import android.widget.FrameLayout;
+
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
+
+/**
+ * Action bar de ChronOS. Una franja delgada pegada a un borde de la pantalla y una "pestaña" más alta con un
+ * corte en diagonal:
+ *   CLOCK (principal): la pestaña a la izquierda tiene el reloj con la fecha; a su derecha salen las notificaciones.
+ *   NAV   (extendido): botones de navegación al centro de la franja; la pestaña a la derecha tiene el logo
+ *                      (menú inicio). Cuando suena música, el reproductor aparece a la izquierda.
+ * edgeTop: la franja va pegada al borde de arriba (la pestaña cuelga hacia abajo) o al de abajo (sube).
+ * Deslizar la barra hacia el centro de la pantalla abre el gestor de archivos; al revés, lo cierra.
+ */
+public class ChronoBar extends FrameLayout {
+
+    static final int CLOCK = 0, NAV = 1;
+
+    public interface Listener {
+        void onBarSwipe(ChronoBar bar, boolean down);
+        void onClockTap();
+        void onLogoTap();
+        void onLogoLong();
+    }
+
+    final int kind;
+    private final float dp;
+    private boolean edgeTop, night, playerOn;
+    private Listener listener;
+    private final Path shape = new Path();
+    private final Region region = new Region();
+    private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG), stroke = new Paint(Paint.ANTI_ALIAS_FLAG),
+            shadow = new Paint(Paint.ANTI_ALIAS_FLAG), gloss = new Paint(Paint.ANTI_ALIAS_FLAG),
+            clockBox = new Paint(Paint.ANTI_ALIAS_FLAG), timeP = new Paint(Paint.ANTI_ALIAS_FLAG), dateP = new Paint(Paint.ANTI_ALIAS_FLAG),
+            logoBox = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final int[] me = new int[2], other = new int[2];
+    private View navRow, logo, player, notif;
+    private final android.graphics.drawable.Drawable logoDrawable;
+
+    public ChronoBar(Context c, int kind, boolean night) {
+        super(c);
+        this.kind = kind;
+        this.night = night;
+        dp = c.getResources().getDisplayMetrics().density;
+        setWillNotDraw(false);
+        setClipChildren(false);
+        stroke.setStyle(Paint.Style.STROKE);
+        stroke.setStrokeWidth(1.2f * dp);
+        timeP.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        dateP.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+        logoDrawable = c.getDrawable(R.drawable.chronos);
+        setLayerType(LAYER_TYPE_HARDWARE, null);
+    }
+
+    public void setListener(Listener l) { listener = l; }
+    private boolean badge;
+    /** Círculo rojo sobre el logo (por ejemplo: hay una actualización). */
+    public void setBadge(boolean b) { if (badge != b) { badge = b; invalidate(); } }
+    public boolean edgeTop() { return edgeTop; }
+    public void setEdgeTop(boolean t) { if (edgeTop != t) { edgeTop = t; requestLayout(); invalidate(); } }
+    public void setNight(boolean n) { night = n; invalidate(); }
+
+    // ---------------- medidas ----------------
+
+    float strip() { return 26 * dp; }
+    float tab() { return (kind == NAV && playerOn ? 84 : 62) * dp; }
+    float diag() { return 46 * dp; }
+    float tabW() { return kind == CLOCK ? Math.min(getWidth() * 0.42f, 200 * dp) : 112 * dp; }
+    /** Alto de la barra (lo que ocupa en la pantalla). */
+    int barHeight() { return Math.round(tab()); }
+
+    private float y(float depth) { return edgeTop ? depth : getHeight() - depth; }
+
+    public void setNavRow(View v) { navRow = v; addView(v, new LayoutParams(-2, -2)); }
+    public void setPlayer(View v) { player = v; addView(v, new LayoutParams(-1, -2)); v.setVisibility(GONE); }
+    public void setNotif(View v) { notif = v; addView(v, new LayoutParams(-2, -2)); }
+
+    public void showPlayer(boolean on) {
+        if (playerOn == on) return;
+        playerOn = on;
+        if (player != null) player.setVisibility(on ? VISIBLE : GONE);
+        requestLayout();
+        invalidate();
+    }
+    public boolean playerShown() { return playerOn; }
+
+    @Override protected void onMeasure(int ws, int hs) {
+        int W = MeasureSpec.getSize(ws), H = barHeight();
+        for (int i = 0; i < getChildCount(); i++) {
+            View v = getChildAt(i);
+            if (v == player) v.measure(MeasureSpec.makeMeasureSpec(Math.max(0, Math.round(W - tabW() - diag() - 14 * dp)), MeasureSpec.EXACTLY),
+                    MeasureSpec.makeMeasureSpec(Math.round(tab() - strip() - 4 * dp), MeasureSpec.EXACTLY));
+            else if (v == notif) v.measure(MeasureSpec.makeMeasureSpec(Math.round(Math.min(W - tabW() - diag() * 0.4f - 10 * dp, 520 * dp)), MeasureSpec.EXACTLY),
+                    MeasureSpec.makeMeasureSpec(Math.round(tab() - 10 * dp), MeasureSpec.EXACTLY));
+            else v.measure(MeasureSpec.makeMeasureSpec(W, MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(Math.round(strip()), MeasureSpec.AT_MOST));
+        }
+        setMeasuredDimension(W, H);
+    }
+
+    @Override protected void onLayout(boolean ch, int l, int t, int r, int b) {
+        int W = r - l, H = b - t;
+        if (navRow != null) {
+            int x = (W - navRow.getMeasuredWidth()) / 2, cy = Math.round(edgeTop ? strip() / 2 : H - strip() / 2);
+            navRow.layout(x, cy - navRow.getMeasuredHeight() / 2, x + navRow.getMeasuredWidth(), cy + navRow.getMeasuredHeight() / 2);
+        }
+        if (player != null) {
+            int x = Math.round(8 * dp), h = player.getMeasuredHeight();
+            int top = Math.round(edgeTop ? strip() + 2 * dp : H - strip() - 2 * dp - h);
+            player.layout(x, top, x + player.getMeasuredWidth(), top + h);
+        }
+        if (notif != null) {
+            int x = Math.round(tabW() + diag() * 0.4f), h = notif.getMeasuredHeight();
+            int top = Math.round(edgeTop ? 4 * dp : H - 4 * dp - h);
+            notif.layout(x, top, x + notif.getMeasuredWidth(), top + h);
+        }
+    }
+
+    @Override protected void onSizeChanged(int w, int h, int ow, int oh) { super.onSizeChanged(w, h, ow, oh); buildShape(); }
+
+    private void buildShape() {
+        float W = getWidth(), S = strip(), T = tab(), D = diag(), TW = tabW(), rr = 14 * dp;
+        shape.reset();
+        if (kind == CLOCK) {
+            // pestaña a la izquierda (reloj), diagonal, franja hacia la derecha
+            shape.moveTo(0, y(0));
+            shape.lineTo(W, y(0));
+            shape.lineTo(W, y(S));
+            shape.lineTo(TW + D, y(S));
+            shape.lineTo(TW, y(T));
+            shape.lineTo(0, y(T));
+        } else if (playerOn) {
+            // con música: toda la barra es alta (reproductor a la izquierda, logo a la derecha)
+            shape.moveTo(0, y(0));
+            shape.lineTo(W, y(0));
+            shape.lineTo(W, y(T - rr));
+            shape.quadTo(W, y(T), W - rr, y(T));
+            shape.lineTo(rr, y(T));
+            shape.quadTo(0, y(T), 0, y(T - rr));
+        } else {
+            // franja; diagonal y pestaña a la derecha (logo)
+            shape.moveTo(0, y(0));
+            shape.lineTo(W, y(0));
+            shape.lineTo(W, y(T - rr));
+            shape.quadTo(W, y(T), W - rr, y(T));
+            shape.lineTo(W - TW, y(T));
+            shape.lineTo(W - TW - D, y(S));
+            shape.lineTo(0, y(S));
+        }
+        shape.close();
+        region.setPath(shape, new Region(0, 0, Math.max(1, (int) W), Math.max(1, getHeight())));
+    }
+
+    // ---------------- dibujo ----------------
+
+    @Override protected void onDraw(Canvas c) {
+        buildShape();
+        float W = getWidth(), H = getHeight();
+        // sombra suave hacia el centro de la pantalla
+        c.save();
+        c.clipOutPath(shape);
+        shadow.setColor(0x01000000);
+        shadow.setShadowLayer(12 * dp, 0, (edgeTop ? 4 : -4) * dp, night ? 0x88000000 : 0x55000000);
+        c.drawPath(shape, shadow);
+        c.restore();
+        c.save();
+        c.clipPath(shape);
+        if (CardTheme.isIntense() && Glass.blur != null && Glass.desk.get() != null) {
+            View d = Glass.desk.get();
+            getLocationInWindow(me);
+            d.getLocationInWindow(other);
+            c.save();
+            c.translate(other[0] - me[0], other[1] - me[1]);
+            Glass.drawBlur(c, d.getWidth(), d.getHeight());
+            c.restore();
+            fill.setShader(null);
+            fill.setColor(Glass.darkDesk() ? 0x33FFFFFF : 0x66FFFFFF);
+            c.drawRect(0, 0, W, H, fill);
+        } else if (CardTheme.isAero()) {
+            int tint = CardTheme.aeroTint();
+            fill.setShader(new LinearGradient(0, 0, 0, H, (tint & 0x00FFFFFF) | 0x90000000,
+                    (CardTheme.shade(tint, -0.25f) & 0x00FFFFFF) | 0xA8000000, Shader.TileMode.CLAMP));
+            c.drawRect(0, 0, W, H, fill);
+        } else {
+            fill.setShader(null);
+            int f = CardTheme.barFill(night);
+            fill.setColor(CardTheme.isGlass() ? f : (f | 0xFF000000));
+            c.drawRect(0, 0, W, H, fill);
+        }
+        // brillo desde el borde de la pantalla
+        gloss.setShader(new LinearGradient(0, y(0), 0, y(tab()), 0x40FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
+        c.drawRect(0, 0, W, H, gloss);
+        c.restore();
+        int st = CardTheme.stroke();
+        stroke.setColor(st != 0 ? st : (CardTheme.dark(CardTheme.barFill(night) | 0xFF000000) ? 0x33FFFFFF : 0x22000000));
+        c.drawPath(shape, stroke);
+
+        if (kind == CLOCK) drawClock(c);
+        else drawLogo(c);
+        super.onDraw(c);
+    }
+
+    private boolean lightText() {
+        if (CardTheme.isAero()) return false;
+        if (CardTheme.isGlass()) return Glass.darkDesk() || CardTheme.glass == CardTheme.GLASS_DARK;
+        return CardTheme.dark(CardTheme.barFill(night) | 0xFF000000);
+    }
+
+    private void drawClock(Canvas c) {
+        float T = tab(), TW = tabW(), pad = 8 * dp;
+        float top = edgeTop ? pad : getHeight() - T + pad, bottom = edgeTop ? T - pad : getHeight() - pad;
+        float right = TW - 6 * dp;
+        boolean lt = lightText();
+        // caja del reloj (más clara/oscura que la barra)
+        clockBox.setColor(lt ? 0x26FFFFFF : 0xCCFFFFFF);
+        Path box = new Path();
+        float cut = (bottom - top) * 0.75f;
+        if (edgeTop) {
+            box.moveTo(pad + 4 * dp, top); box.lineTo(right, top); box.lineTo(right - cut, bottom); box.lineTo(pad + 4 * dp, bottom);
+        } else {
+            box.moveTo(pad + 4 * dp, top); box.lineTo(right - cut, top); box.lineTo(right, bottom); box.lineTo(pad + 4 * dp, bottom);
+        }
+        box.close();
+        c.drawPath(box, clockBox);
+        int ink = lt ? 0xFFF5F8FA : 0xFF1D2733;
+        Date now = new Date();
+        boolean is24 = android.text.format.DateFormat.is24HourFormat(getContext());
+        String time = new SimpleDateFormat(is24 ? "HH:mm" : "h:mm", Locale.getDefault()).format(now);
+        String day = new SimpleDateFormat("EEEE", new Locale("es")).format(now);
+        String date = new SimpleDateFormat("d MMM yyyy", new Locale("es")).format(now).replace(".", "");
+        float h = bottom - top;
+        timeP.setColor(ink);
+        timeP.setTextSize(h * 0.62f);
+        if (CardTheme.isAero()) Aero.glowText(timeP, dp); else timeP.clearShadowLayer();
+        float tx = pad + 12 * dp, ty = top + h * 0.5f + timeP.getTextSize() * 0.36f;
+        c.drawText(time, tx, ty, timeP);
+        float dx = tx + timeP.measureText(time) + 10 * dp;
+        dateP.setColor((ink & 0x00FFFFFF) | 0xCC000000);
+        dateP.setTextSize(Math.min(12.5f * dp, h * 0.3f));
+        float maxW = right - cut * 0.5f - dx - 4 * dp;
+        if (maxW > 30 * dp) {
+            c.drawText(Character.toUpperCase(day.charAt(0)) + day.substring(1), dx, top + h * 0.44f, dateP);
+            c.drawText(date, dx, top + h * 0.44f + dateP.getTextSize() * 1.25f, dateP);
+        }
+        // el minuto siguiente
+        postInvalidateDelayed(60_000 - System.currentTimeMillis() % 60_000 + 50);
+    }
+
+    private void drawLogo(Canvas c) {
+        float T = tab(), TW = tabW(), W = getWidth();
+        float s = Math.min(T - 18 * dp, 52 * dp);
+        float cx = W - TW / 2 + 4 * dp, cy = edgeTop ? T / 2 + 2 * dp : getHeight() - T / 2 - 2 * dp;
+        logoBox.setColor(lightText() ? 0x26FFFFFF : 0x99FFFFFF);
+        c.drawRoundRect(cx - s * 0.9f, cy - s / 2 - 3 * dp, cx + s * 0.9f, cy + s / 2 + 3 * dp, 14 * dp, 14 * dp, logoBox);
+        if (logoDrawable != null) {
+            logoDrawable.setBounds(Math.round(cx - s / 2), Math.round(cy - s / 2), Math.round(cx + s / 2), Math.round(cy + s / 2));
+            logoDrawable.draw(c);
+        }
+        if (badge) {
+            float bx = cx + s * 0.85f, by = cy - s / 2;
+            logoBox.setColor(0xFFFFFFFF);
+            c.drawCircle(bx, by, 7.5f * dp, logoBox);
+            logoBox.setColor(0xFFE53935);
+            c.drawCircle(bx, by, 6 * dp, logoBox);
+        }
+    }
+
+    boolean onLogo(float x, float y) {
+        float T = tab(), TW = tabW();
+        return kind == NAV && x > getWidth() - TW && (edgeTop ? y < T : y > getHeight() - T);
+    }
+
+    boolean onClock(float x, float y) {
+        return kind == CLOCK && x < tabW() && (edgeTop ? y < tab() : y > getHeight() - tab());
+    }
+
+    // ---------------- toques: lo transparente deja pasar; deslizar abre/cierra el gestor ----------------
+
+    private float downX, downY;
+    private boolean swiping, longFired;
+    private final Runnable longPress = () -> { longFired = true; if (listener != null) { performHapticFeedback(0); listener.onLogoLong(); } };
+
+    @Override public boolean dispatchTouchEvent(MotionEvent e) {
+        if (e.getActionMasked() == MotionEvent.ACTION_DOWN && !region.contains((int) e.getX(), (int) e.getY())) {
+            boolean onChild = false;
+            for (View v : new View[]{notif, player})
+                if (v != null && v.getVisibility() == VISIBLE && v.getAlpha() > 0.1f && e.getX() >= v.getLeft() && e.getX() <= v.getRight()
+                        && e.getY() >= v.getTop() && e.getY() <= v.getBottom()) onChild = true;
+            if (!onChild) return false;
+        }
+        return super.dispatchTouchEvent(e);
+    }
+
+    @Override public boolean onInterceptTouchEvent(MotionEvent e) {
+        switch (e.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN: downX = e.getX(); downY = e.getY(); swiping = false; return false;
+            case MotionEvent.ACTION_MOVE:
+                float dy = e.getY() - downY, dx = e.getX() - downX;
+                if (Math.abs(dy) > ViewConfiguration.get(getContext()).getScaledTouchSlop() * 1.5f && Math.abs(dy) > Math.abs(dx)) {
+                    swiping = true;
+                    return true;
+                }
+        }
+        return false;
+    }
+
+    @Override public boolean onTouchEvent(MotionEvent e) {
+        switch (e.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                downX = e.getX(); downY = e.getY(); swiping = false; longFired = false;
+                if (onLogo(downX, downY) || onClock(downX, downY)) postDelayed(longPress, 500);
+                return true;
+            case MotionEvent.ACTION_MOVE:
+                float dy = e.getY() - downY;
+                if (Math.abs(dy) > ViewConfiguration.get(getContext()).getScaledTouchSlop() * 1.5f) { swiping = true; removeCallbacks(longPress); }
+                return true;
+            case MotionEvent.ACTION_UP: {
+                removeCallbacks(longPress);
+                float dy2 = e.getY() - downY;
+                if (swiping && Math.abs(dy2) > 24 * dp) { if (listener != null) listener.onBarSwipe(this, dy2 > 0); }
+                else if (!swiping && !longFired && listener != null) {
+                    if (onLogo(e.getX(), e.getY())) listener.onLogoTap();
+                    else if (onClock(e.getX(), e.getY())) listener.onClockTap();
+                }
+                return true;
+            }
+            case MotionEvent.ACTION_CANCEL: removeCallbacks(longPress); return true;
+        }
+        return true;
+    }
+
+    static int ink(boolean night) {
+        if (CardTheme.isAero()) return 0xFF0B1A2A;
+        if (CardTheme.isGlass()) return Glass.darkDesk() || CardTheme.glass == CardTheme.GLASS_DARK ? 0xFFF5F8FA : 0xFF1D2733;
+        return CardTheme.dark(CardTheme.barFill(night) | 0xFF000000) ? 0xFFF5F8FA : 0xFF1D2733;
+    }
+}

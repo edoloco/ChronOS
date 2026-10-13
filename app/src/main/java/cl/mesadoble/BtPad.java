@@ -106,7 +106,7 @@ public class BtPad {
 
     private void register() {
         BluetoothHidDeviceAppSdpSettings sdp = new BluetoothHidDeviceAppSdpSettings(
-                "Mesa Doble Control", "Gamepad y mouse", "Mesa Doble", BluetoothHidDevice.SUBCLASS2_GAMEPAD, DESCRIPTOR);
+                "ChronOS Control", "Gamepad y mouse", "ChronOS", BluetoothHidDevice.SUBCLASS2_GAMEPAD, DESCRIPTOR);
         try {
             hid.registerApp(sdp, null, null, exec, new BluetoothHidDevice.Callback() {
                 @Override public void onAppStatusChanged(BluetoothDevice plugged, boolean reg) {

@@ -224,7 +224,7 @@ public class FilesActivity extends Activity implements Link.Listener {
         new Ui.Sheet(this)
                 .title("Acceso a los archivos")
                 .message("Para administrar los archivos del principal, Android pide activar \"Permitir acceso a todos los archivos\" "
-                        + "para Mesa Doble en este teléfono (solo en el principal).")
+                        + "para ChronOS en este teléfono (solo en el principal).")
                 .button("Después", false, this::load)
                 .button("Activar", true, () -> {
                     try { startActivity(FileServer.accessIntent(this)); } catch (Exception e) { Toast.makeText(this, "No pude abrir ese permiso", Toast.LENGTH_SHORT).show(); }

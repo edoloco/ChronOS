@@ -528,7 +528,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     private void help() {
         new Ui.Sheet(this)
                 .title("Controlar el principal")
-                .message("Teclado y dictado escriben donde tocas en el principal, si ahí está elegido el teclado Mesa Doble "
+                .message("Teclado y dictado escriben donde tocas en el principal, si ahí está elegido el teclado ChronOS "
                         + "(barra delgada en vez del teclado). Si no, en el principal aparece un aviso para elegirlo con un toque.\n\n"
                         + "Touchpad y gamepad: con la versión completa (accesibilidad activa en el principal) mueven un puntero y "
                         + "tocan la pantalla. Con la versión liviana el touchpad mueve el cursor del texto.\n\n"
@@ -553,12 +553,12 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
             return;
         }
         if (!hub.connected()) {
-            t = "Sin conexión. Abre Mesa Doble en ambos teléfonos";
+            t = "Sin conexión. Abre ChronOS en ambos teléfonos";
         } else if (!typing) {
             t = hub.remotePointer() ? "● Conectado al principal" : "● Conectado · versión liviana: sin puntero";
             ok = hub.remotePointer();
         } else if (!hub.remoteImeSelected()) {
-            t = "En el principal toca el aviso para elegir el teclado Mesa Doble";
+            t = "En el principal toca el aviso para elegir el teclado ChronOS";
         } else if (!hub.remoteImeReady()) {
             t = "Toca donde se escribe en el principal";
         } else {

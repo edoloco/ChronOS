@@ -14,7 +14,7 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 
-/** Widget propio de Mesa Doble: hora y fecha; al tocarlo abre las alarmas. Muestra la próxima alarma. */
+/** Widget propio de ChronOS: hora y fecha; al tocarlo abre las alarmas. Muestra la próxima alarma. */
 public class ClockWidget extends AppWidgetProvider {
 
     @Override public void onUpdate(Context c, AppWidgetManager m, int[] ids) {

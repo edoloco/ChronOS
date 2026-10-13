@@ -29,7 +29,7 @@ import java.util.Set;
 
 /**
  * Servicio de accesibilidad del teléfono PRINCIPAL (versión completa):
- * 1) cambia el método de entrada a Mesa Doble (y lo devuelve al anterior al desconectarse);
+ * 1) cambia el método de entrada a ChronOS (y lo devuelve al anterior al desconectarse);
  * 2) avisa al extendido cuando se abre una app de chat, para mostrar el teclado allá;
  * 3) ejecuta el touchpad (puntero, clic, desplazar, atrás/inicio) y el gamepad (toques en pantalla).
  * No lee el contenido de las pantallas.
@@ -293,7 +293,7 @@ public class MesaAccess extends AccessibilityService {
         return null;
     }
 
-    /** Cambia al teclado Mesa Doble, recordando cuál estaba antes. */
+    /** Cambia al teclado ChronOS, recordando cuál estaba antes. */
     public boolean switchToMesa() {
         String id = mesaImeId(this);
         if (id == null) return false;

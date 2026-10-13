@@ -17,7 +17,7 @@ import android.widget.TextView;
 import org.json.JSONObject;
 
 /**
- * Teclado "Mesa Doble" del teléfono que RECIBE: en vez de un teclado grande muestra
+ * Teclado "ChronOS" del teléfono que RECIBE: en vez de un teclado grande muestra
  * una barra delgada y escribe en la app abierta lo que llega desde el otro teléfono.
  */
 public class RemoteIme extends InputMethodService implements Link.Listener {

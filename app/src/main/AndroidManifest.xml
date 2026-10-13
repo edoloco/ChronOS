@@ -68,17 +68,27 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <intent-filter android:label="Poner en Mesa Doble">
+            <intent-filter android:label="Poner en ChronOS">
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
             </intent-filter>
-            <intent-filter android:label="Poner en Mesa Doble">
+            <intent-filter android:label="Poner en ChronOS">
                 <action android:name="android.intent.action.SEND" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="image/*" />
             </intent-filter>
         </activity>
+        <!-- notificaciones del principal en la barra de ChronOS (se activa en Ajustes → Notificaciones) -->
+        <service
+            android:name=".NotifService"
+            android:label="ChronOS"
+            android:exported="true"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
         <activity
             android:name=".CallActivity"
             android:exported="false"
@@ -99,7 +109,7 @@
             android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize" />
 
-        <!-- Mesa Doble como pantalla de inicio: desactivado hasta que se active en Ajustes -->
+        <!-- ChronOS como pantalla de inicio: desactivado hasta que se active en Ajustes -->
         <activity-alias
             android:name=".Escritorio"
             android:targetActivity=".MainActivity"
@@ -186,7 +196,7 @@
         <!-- widget propio: reloj y fecha, abre las alarmas -->
         <receiver
             android:name=".ClockWidget"
-            android:label="Mesa Doble · Reloj"
+            android:label="ChronOS · Reloj"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
@@ -201,7 +211,7 @@
 
         <receiver
             android:name=".LockAdmin"
-            android:label="Mesa Doble: bloquear junto al principal"
+            android:label="ChronOS: bloquear junto al principal"
             android:permission="android.permission.BIND_DEVICE_ADMIN"
             android:exported="true">
             <meta-data android:name="android.app.device_admin" android:resource="@xml/admin" />
@@ -217,7 +227,7 @@
 
         <service
             android:name=".MesaAccess"
-            android:label="Mesa Doble"
+            android:label="ChronOS"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:exported="true">
             <intent-filter>
@@ -228,7 +238,7 @@
 
         <service
             android:name=".RemoteIme"
-            android:label="Mesa Doble (teclado remoto)"
+            android:label="ChronOS (teclado remoto)"
             android:permission="android.permission.BIND_INPUT_METHOD"
             android:exported="true">
             <intent-filter>

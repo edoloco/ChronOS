@@ -176,7 +176,7 @@ public class CameraControlView extends LinearLayout {
         for (int i = 0; i < controls.getChildCount(); i++) controls.getChildAt(i).setEnabled(o);
         controls.setAlpha(o ? 1f : 0.4f);
         if (!o) { view.setImageBitmap(null); status.setText("Cámara del principal: cerrada"); }
-        note.setText("Las fotos quedan en el principal: Imágenes › Mesa Doble");
+        note.setText("Las fotos quedan en el principal: Imágenes › ChronOS");
     }
 
     @Override protected void onAttachedToWindow() {

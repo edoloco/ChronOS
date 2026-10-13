@@ -147,13 +147,13 @@ public class Updater {
         throw new IOException("Demasiadas redirecciones");
     }
 
-    /** ¿El archivo descargado es un APK completo de Mesa Doble? (si se cortó la descarga, no lo es) */
+    /** ¿El archivo descargado es un APK completo de ChronOS? (si se cortó la descarga, no lo es) */
     static String check(Context c, File apk, long expected) {
         if (!apk.isFile() || apk.length() == 0) return "La descarga quedó vacía";
         if (expected > 0 && apk.length() != expected) return "La descarga quedó incompleta (" + apk.length() + " de " + expected + " bytes)";
         android.content.pm.PackageInfo pi = c.getPackageManager().getPackageArchiveInfo(apk.getAbsolutePath(), 0);
         if (pi == null) return "El archivo descargado no es un APK válido";
-        if (!c.getPackageName().equals(pi.packageName)) return "El archivo no es de Mesa Doble";
+        if (!c.getPackageName().equals(pi.packageName)) return "El archivo no es de ChronOS";
         return null;
     }
 
@@ -188,7 +188,7 @@ public class Updater {
                 Intent confirm = i.getParcelableExtra(Intent.EXTRA_INTENT);
                 if (confirm != null) {
                     confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    Hub.get(c).startOrNotify(confirm, 78, "Actualizar Mesa Doble", "Toca para confirmar la actualización");
+                    Hub.get(c).startOrNotify(confirm, 78, "Actualizar ChronOS", "Toca para confirmar la actualización");
                 }
             } else if (st != android.content.pm.PackageInstaller.STATUS_SUCCESS) {
                 String msg = i.getStringExtra(android.content.pm.PackageInstaller.EXTRA_STATUS_MESSAGE);
@@ -200,7 +200,7 @@ public class Updater {
     /** Instala el APK descargado: primero con el instalador de paquetes; si no se puede, abriendo el archivo. */
     static void install(Context c, File apk) {
         try { installSession(c, apk); }
-        catch (Exception e) { Hub.get(c).startOrNotify(installIntent(c, apk), 32, "Actualización de Mesa Doble lista", "Toca para instalarla"); }
+        catch (Exception e) { Hub.get(c).startOrNotify(installIntent(c, apk), 32, "Actualización de ChronOS lista", "Toca para instalarla"); }
     }
 
     static Intent installIntent(Context c, File apk) {
@@ -294,7 +294,7 @@ public class Updater {
                 try { wait.dismiss(); } catch (Exception ignored) { }
                 if (a.isFinishing()) return;
                 String cur = clean(installedVersion(a));
-                Ui.Sheet sh = new Ui.Sheet(a).title("Actualizar Mesa Doble");
+                Ui.Sheet sh = new Ui.Sheet(a).title("Actualizar ChronOS");
                 if (fe != null) {
                     sh.message("Instalada: " + cur + "\n\n" + fe);
                 } else {
@@ -333,7 +333,7 @@ public class Updater {
     private static void install(Activity a, Release r) {
         if (!canInstall(a)) {
             new Ui.Sheet(a).title("Permitir instalar")
-                    .message("Android pide permitir que Mesa Doble instale apps (solo para instalar sus propias actualizaciones). "
+                    .message("Android pide permitir que ChronOS instale apps (solo para instalar sus propias actualizaciones). "
                             + "Actívalo, vuelve y toca Actualizar otra vez.")
                     .button("Cancelar", false, null)
                     .button("Abrir ajustes", true, () -> { try { a.startActivity(allowInstallIntent(a)); } catch (Exception ignored) { } })
@@ -384,7 +384,7 @@ public class Updater {
         new Thread(() -> {
             try {
                 if (!canInstall(c)) {
-                    hub.startOrNotify(allowInstallIntent(c), 31, "Mesa Doble quiere actualizarse",
+                    hub.startOrNotify(allowInstallIntent(c), 31, "ChronOS quiere actualizarse",
                             "Toca y permite instalar apps; después actualiza desde Herramientas");
                     return;
                 }

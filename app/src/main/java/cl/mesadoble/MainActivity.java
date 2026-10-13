@@ -67,7 +67,15 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private boolean barOpen = true;
     private String otherVersion = "";
     private SquareButton settingsBtn;
-    private LinearLayout dock, navPill;   // dock = barra de opciones + botones de navegación del principal
+    private LinearLayout dock, navPill;
+    // ---- ChronOS
+    private FrameLayout rootView, startOverlay;
+    private ChronoBar cbar;
+    private FilePane pane;
+    private NotifCard barNotif, floatNotif;
+    private BarPlayer barPlayer;
+    private LinearLayout navRow, startPanel;
+    private boolean fileMode;
     // widgets de Android
     private static final int REQ_BIND = 31, REQ_CONF = 32;
     private FrameLayout widgetLayer;
@@ -141,12 +149,20 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         }
         dock = new LinearLayout(this);
         dock.addView(bar);
-        root.addView(dock, new FrameLayout.LayoutParams(-2, -2));
-        root.addView(navPill, new FrameLayout.LayoutParams(-2, -2));
-        // la navegación va al centro; si la barra abierta llega hasta ahí, se corre lo justo para no taparla
-        View.OnLayoutChangeListener avoid = (v1, l1, t1, r1, b1, l2, t2, r2, b2) -> main.post(this::avoidBar);
-        dock.addOnLayoutChangeListener(avoid);
-        navPill.addOnLayoutChangeListener(avoid);
+        // ChronOS: gestor de archivos (detrás de las barras), action bars y menú inicio
+        rootView = root;
+        pane = new FilePane(this, hub(), night);
+        pane.setVisibility(View.GONE);
+        root.addView(pane, new FrameLayout.LayoutParams(-1, -1));
+        floatNotif = new NotifCard(this, night, true);
+        floatNotif.setTap(this::onNotifTap);
+        FrameLayout.LayoutParams fl = new FrameLayout.LayoutParams(dp(360), dp(64), Gravity.TOP | Gravity.START);
+        fl.setMargins(dp(12), dp(36), dp(12), dp(12));
+        root.addView(floatNotif, fl);
+        startOverlay = new FrameLayout(this);
+        startOverlay.setVisibility(View.GONE);
+        startOverlay.setOnClickListener(v -> showStart(false));
+        root.addView(startOverlay, new FrameLayout.LayoutParams(-1, -1));
         rebuildBar();
 
 
@@ -300,11 +316,13 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     @SuppressWarnings("deprecation")
     @Override public void onBackPressed() {
+        if (startOverlay != null && startOverlay.getVisibility() == View.VISIBLE) { showStart(false); return; }
+        if (fileMode) { setFileMode(false, false); return; }
         if (isLauncher()) return;
         super.onBackPressed();
     }
 
-    /** Activa o desactiva Mesa Doble como pantalla de inicio (launcher). No necesita permisos especiales. */
+    /** Activa o desactiva ChronOS como pantalla de inicio (launcher). No necesita permisos especiales. */
     private void toggleLauncher() {
         boolean on = !isLauncher();
         getPackageManager().setComponentEnabledSetting(new android.content.ComponentName(this, getPackageName() + ".Escritorio"),
@@ -312,14 +330,14 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 android.content.pm.PackageManager.DONT_KILL_APP);
         if (on) {
             new Ui.Sheet(this)
-                    .title("Elige Mesa Doble como inicio")
-                    .message("Se abrirá la lista de apps de inicio: elige Mesa Doble. Desde ahí el botón Inicio te trae a la mesa "
+                    .title("Elige ChronOS como inicio")
+                    .message("Se abrirá la lista de apps de inicio: elige ChronOS. Desde ahí el botón Inicio te trae a la mesa "
                             + "y las apps se abren desde el botón Apps.\n\nEn Xiaomi, si la navegación por gestos deja de funcionar con "
                             + "otro inicio, usa los botones de navegación.")
-                    .button("Abrir ajustes", true, () -> openSettings(android.provider.Settings.ACTION_HOME_SETTINGS, null, "Elige Mesa Doble"))
+                    .button("Abrir ajustes", true, () -> openSettings(android.provider.Settings.ACTION_HOME_SETTINGS, null, "Elige ChronOS"))
                     .show();
         } else {
-            Toast.makeText(this, "Mesa Doble ya no es la pantalla de inicio", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "ChronOS ya no es la pantalla de inicio", Toast.LENGTH_SHORT).show();
             try { startActivity(new Intent(android.provider.Settings.ACTION_HOME_SETTINGS)); } catch (Exception ignored) { }
         }
     }
@@ -505,10 +523,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         CardTheme.save(this, color, glass);
         desk.setCardTheme();
         for (SquareButton b : squares) b.applyTheme();
-        bar.setBackground(barBg());
-        navPill.setBackground(barBg());
-        bar.setElevation(dp(CardTheme.isIntense() ? 16 : 6));
-        navPill.setElevation(dp(CardTheme.isIntense() ? 16 : 6));
+        if (cbar != null) cbar.invalidate();
+        rebuildBar();
         if (!fromRemote) hub.send("cardTheme", "c", color, "g", glass);
     }
 
@@ -526,50 +542,202 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         return b;
     }
 
-    /**
-     * Barra plegable: el botón Menú despliega o esconde los demás.
-     * En horizontal es una fila que se abre hacia el lado; en vertical, una columna que crece hacia arriba.
-     */
+    /** Menú inicio (el logo de la barra): una cuadrícula de 4 × 3; los espacios sin nada quedan para lo que venga. */
     private void rebuildBar() {
-        boolean column = !stacked();
-        bar.removeAllViews();
-        bar.setOrientation(column ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
-        List<SquareButton> order = new ArrayList<>();
-        order.add(menuBtn);
-        order.addAll(tools);
-        if (column) java.util.Collections.reverse(order);   // el menú queda abajo, junto al borde
-        for (SquareButton b : order) {
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
-            if (b != menuBtn) { if (column) lp.bottomMargin = dp(6); else lp.setMarginStart(dp(6)); }
-            bar.addView(b, lp);
+        for (SquareButton b : tools) { b.setVisibility(View.VISIBLE); if (b.getParent() instanceof android.view.ViewGroup) ((android.view.ViewGroup) b.getParent()).removeView(b); }
+        if (filesBtn == null) filesBtn = addSquare(SquareButton.FILES, "Archivos", false, v -> { showStart(false); setFileMode(!fileMode, false); });
+        startPanel = new LinearLayout(this);
+        startPanel.setOrientation(LinearLayout.VERTICAL);
+        startPanel.setPadding(dp(14), dp(12), dp(14), dp(14));
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(CardTheme.sheetFill(night));
+        g.setCornerRadius(dp(22));
+        if (CardTheme.isGlass()) g.setStroke(dp(1), CardTheme.stroke());
+        startPanel.setBackground(CardTheme.isAero() ? new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[]{g,
+                new Aero.Bg(CardTheme.aeroTint(), dp(22), getResources().getDisplayMetrics().density)}) : g);
+        startPanel.setElevation(dp(16));
+        startPanel.setClickable(true);
+        LinearLayout head = new LinearLayout(this);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        android.widget.ImageView logo = new android.widget.ImageView(this);
+        logo.setImageResource(R.drawable.chronos);
+        head.addView(logo, new LinearLayout.LayoutParams(dp(30), dp(30)));
+        TextView name = new TextView(this);
+        name.setText("ChronOS");
+        name.setTextSize(17);
+        name.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
+        name.setTextColor(Ui.fg(CardTheme.sheetNight(night)));
+        name.setPadding(dp(8), 0, 0, 0);
+        head.addView(name);
+        startPanel.addView(head);
+        // orden: lo más usado arriba
+        SquareButton[] order = {byKind(SquareButton.APPS), settingsBtn, byKind(SquareButton.DESKS), statusBtn,
+                byKind(SquareButton.TOOLS), byKind(SquareButton.KEYBOARD), filesBtn, null, null, null, null, null};
+        LinearLayout row = null;
+        for (int i = 0; i < order.length; i++) {
+            if (i % 4 == 0) {
+                row = new LinearLayout(this);
+                LinearLayout.LayoutParams rl = new LinearLayout.LayoutParams(-2, -2);
+                rl.topMargin = dp(8);
+                startPanel.addView(row, rl);
+            }
+            View v = order[i];
+            if (v == null) {   // espacio disponible
+                View e = new View(this);
+                GradientDrawable eg = new GradientDrawable();
+                eg.setCornerRadius(dp(12));
+                eg.setStroke(dp(1), (Ui.fg(CardTheme.sheetNight(night)) & 0x00FFFFFF) | 0x33000000, dp(5), dp(4));
+                e.setBackground(eg);
+                v = e;
+            }
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(52), dp(52));
+            if (i % 4 > 0) lp.setMarginStart(dp(10));
+            row.addView(v, lp);
         }
-        for (SquareButton b : tools) b.setVisibility(barOpen ? View.VISIBLE : View.GONE);
-        menuBtn.setOpen(barOpen);
-        // navegación: una fila pequeña, centrada en el borde exterior
-        navPill.setOrientation(LinearLayout.HORIZONTAL);
-        navPill.setPadding(dp(5), dp(5), dp(5), dp(5));
-        for (int i = 0; i < navPill.getChildCount(); i++) {
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
-            if (i > 0) lp.setMarginStart(dp(8));
-            navPill.getChildAt(i).setLayoutParams(lp);
-        }
-        dock.setOrientation(LinearLayout.HORIZONTAL);
-        dock.setGravity(column ? Gravity.BOTTOM : Gravity.CENTER_VERTICAL);
-        navPill.setVisibility(side == 0 ? View.VISIBLE : View.GONE);   // solo el extendido controla al principal
+        startOverlay.removeAllViews();
+        startOverlay.addView(startPanel, new FrameLayout.LayoutParams(-2, -2));
+        placeStart();
     }
 
-    /** Si la barra abierta toca la navegación centrada, la navegación se corre al lado de la barra. */
-    private void avoidBar() {
-        if (navPill.getVisibility() != View.VISIBLE || navPill.getWidth() == 0) return;
-        float gap = dp(10), shift = 0;
-        float nl = navPill.getLeft(), nr = navPill.getRight();
-        boolean sameRow = dock.getTop() < navPill.getBottom() && navPill.getTop() < dock.getBottom();
-        if (sameRow) {
-            if (dock.getLeft() < nl && dock.getRight() + gap > nl) shift = dock.getRight() + gap - nl;
-            else if (dock.getRight() > nr && dock.getLeft() - gap < nr) shift = dock.getLeft() - gap - nr;
-        }
-        if (Math.abs(navPill.getTranslationX() - shift) > 1) navPill.animate().translationX(shift).setDuration(180).start();
+    private SquareButton byKind(int k) {
+        for (SquareButton b : tools) if (b.kind() == k) return b;
+        return null;
     }
+
+    private SquareButton filesBtn;
+
+    /** El menú inicio aparece junto al logo (o junto al reloj en el principal). */
+    private void placeStart() {
+        if (startPanel == null || cbar == null) return;
+        boolean top = cbar.edgeTop();
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(-2, -2,
+                (top ? Gravity.TOP : Gravity.BOTTOM) | (cbar.kind == ChronoBar.NAV ? Gravity.END : Gravity.START));
+        int m = cbar.barHeight() + dp(6);
+        lp.setMargins(dp(12), top ? m : 0, dp(12), top ? 0 : m);
+        startPanel.setLayoutParams(lp);
+        startPanel.setPivotX(cbar.kind == ChronoBar.NAV ? dp(260) : 0);
+        startPanel.setPivotY(top ? 0 : dp(240));
+    }
+
+    private void showStart(boolean on) {
+        if (on == (startOverlay.getVisibility() == View.VISIBLE)) return;
+        if (on) {
+            placeStart();
+            startOverlay.setVisibility(View.VISIBLE);
+            startPanel.setScaleX(0.85f); startPanel.setScaleY(0.85f); startPanel.setAlpha(0f);
+            startPanel.animate().scaleX(1).scaleY(1).alpha(1).setDuration(180).setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+        } else {
+            startPanel.animate().scaleX(0.9f).scaleY(0.9f).alpha(0).setDuration(130)
+                    .withEndAction(() -> startOverlay.setVisibility(View.GONE)).start();
+        }
+    }
+
+    // ---------------- ChronOS: action bars ----------------
+
+    private Hub hub() { return hub != null ? hub : Hub.get(this); }
+
+    /** Una barra por teléfono: reloj en el principal, navegación y logo en el extendido. */
+    private void buildChronoBar() {
+        int kind = side == 1 ? ChronoBar.CLOCK : ChronoBar.NAV;
+        if (cbar != null && cbar.kind == kind) return;
+        if (cbar != null) rootView.removeView(cbar);
+        cbar = new ChronoBar(this, kind, night);
+        cbar.setListener(new ChronoBar.Listener() {
+            @Override public void onBarSwipe(ChronoBar b, boolean down) {
+                boolean toggle = !stacked() || (b.edgeTop() == down);   // se lleva la barra al otro extremo
+                if (toggle) setFileMode(!fileMode, false);
+            }
+            @Override public void onClockTap() { hub.openAlarms(); }
+            @Override public void onLogoTap() { showStart(startOverlay.getVisibility() != View.VISIBLE); }
+            @Override public void onLogoLong() { showStart(true); }
+        });
+        if (kind == ChronoBar.NAV) {
+            navRow = new LinearLayout(this);
+            navRow.setGravity(Gravity.CENTER);
+            while (navPill.getChildCount() > 0) {
+                View v = navPill.getChildAt(0);
+                navPill.removeViewAt(0);
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(26), dp(26));
+                lp.setMargins(dp(10), 0, dp(10), 0);
+                navRow.addView(v, lp);
+            }
+            cbar.setNavRow(navRow);
+            barPlayer = new BarPlayer(this, hub, ChronoBar.ink(night));
+            cbar.setPlayer(barPlayer);
+        } else {
+            if (navRow != null) {   // vuelve a ser principal: los botones vuelven a su lugar
+                while (navRow.getChildCount() > 0) { View v = navRow.getChildAt(0); navRow.removeViewAt(0); navPill.addView(v); }
+            }
+            barNotif = new NotifCard(this, night, false);
+            barNotif.setTap(this::onNotifTap);
+            cbar.setNotif(barNotif);
+        }
+        int at = rootView.indexOfChild(startOverlay);
+        rootView.addView(cbar, at, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
+    }
+
+    /** Dónde va la barra: reloj arriba y navegación abajo; con el gestor abierto (en horizontal), las dos junto a la unión. */
+    private boolean barAtTop() {
+        boolean principal = side == 1;
+        boolean atTop = principal;
+        if (fileMode && stacked()) atTop = !atTop;
+        return atTop;
+    }
+
+    private void layoutChrono(boolean animate) {
+        if (cbar == null) return;
+        int H = rootView.getHeight();
+        if (H == 0) { rootView.post(() -> layoutChrono(false)); return; }
+        boolean top = barAtTop();
+        int bh = cbar.barHeight();
+        float y = top ? 0 : H - bh;
+        // el gestor ocupa lo que la barra deja libre
+        int pTop, pBottom;
+        if (top) { pTop = bh; pBottom = 0; } else { pTop = 0; pBottom = bh; }
+        pane.setPadding(0, pTop, 0, pBottom);
+        // la tarjeta de notificación del extendido va arriba a la izquierda, sin taparse con la barra
+        FrameLayout.LayoutParams fl = (FrameLayout.LayoutParams) floatNotif.getLayoutParams();
+        fl.topMargin = top ? bh + dp(8) : dp(14);
+        floatNotif.setLayoutParams(fl);
+        // el gestor entra junto con la barra: en el principal desde arriba, en el extendido desde abajo
+        float out = stacked() ? (side == 1 ? -H : H) : H;
+        if (!animate) {
+            cbar.setEdgeTop(top);
+            cbar.setTranslationY(y);
+            pane.setVisibility(fileMode ? View.VISIBLE : View.GONE);
+            pane.setTranslationY(0);
+            placeStart();
+            return;
+        }
+        android.view.animation.Interpolator in = new android.view.animation.DecelerateInterpolator(1.4f);
+        cbar.setEdgeTop(top);
+        cbar.animate().translationY(y).setDuration(380).setInterpolator(in).start();
+        if (fileMode) {
+            pane.setVisibility(View.VISIBLE);
+            pane.setTranslationY(out);
+            pane.animate().translationY(0).setDuration(380).setInterpolator(in).start();
+        } else {
+            pane.animate().translationY(out).setDuration(320).setInterpolator(in)
+                    .withEndAction(() -> { if (!fileMode) pane.setVisibility(View.GONE); }).start();
+        }
+        placeStart();
+    }
+
+    /** Abre o cierra el gestor de archivos en los dos teléfonos. */
+    private void setFileMode(boolean on, boolean fromRemote) {
+        if (fileMode == on) return;
+        fileMode = on;
+        if (on) pane.start(); else pane.stop();
+        layoutChrono(true);
+        if (!fromRemote && hub.connected()) hub.send("fileMode", "on", on);
+    }
+
+    private void onNotifTap(String pkg) {
+        if (pkg == null || pkg.isEmpty()) return;
+        openOnPrincipal(pkg, "");
+    }
+
+    private void avoidBar() { }
 
     private void toggleBar() {
         barOpen = !barOpen;
@@ -726,6 +894,14 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                             if (on) main.postDelayed(() -> checkSetup(false), 300);
                         })
                 .option(Ui.PALETTE, "Color de fondo", "Elegir el color de la mesa", this::chooseColor)
+                .option(Ui.NOTE, -1, "Notificaciones en la barra: " + (principal ? (NotifService.enabled(this) ? "sí" : "no") : "del principal"),
+                        principal ? "Muestra las notificaciones animadas en la barra del reloj (o en el extendido)"
+                                  : "Se activa en el principal", principal && NotifService.enabled(this),
+                        () -> {
+                            if (!principal) { Toast.makeText(this, "Actívalo en el principal: Ajustes → Notificaciones", Toast.LENGTH_LONG).show(); return; }
+                            openSettings("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS", null,
+                                    "Activa ChronOS en \"Acceso a notificaciones\" y vuelve.");
+                        })
                 .option(Ui.RECEIVE, -1, "Llamadas: " + (principal ? (CallHub.ready(this) ? "listo" : "falta permiso") : "contestar aquí"),
                         principal ? "Permitir que el extendido conteste o cuelgue las llamadas de este teléfono"
                                   : "Las llamadas del principal se contestan o cuelgan desde este teléfono", principal && CallHub.ready(this),
@@ -743,7 +919,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                         : CardTheme.glass == CardTheme.GLASS_DARK ? "Cristal oscuro" : CardTheme.isIntense() ? "Cristal intenso"
                         : CardTheme.isAero() ? "Cristal Aero" : CardTheme.color == 0 ? "Automático" : "Color propio", this::chooseCardColor)
                 .option(Ui.HOME, isLauncher() ? "Pantalla de inicio: sí" : "Pantalla de inicio: no",
-                        isLauncher() ? "Mesa Doble es tu launcher (tocar para dejar de usarla)" : "Usar Mesa Doble como launcher de este teléfono", this::toggleLauncher)
+                        isLauncher() ? "ChronOS es tu launcher (tocar para dejar de usarla)" : "Usar ChronOS como launcher de este teléfono", this::toggleLauncher)
                 .option(Ui.GEAR, "Revisar configuración", principal ? "Permisos del principal" : "Permisos del extendido", () -> checkSetup(true))
                 .option(Ui.WIFI, "Conexión", statusText, this::showConnection)
                 .option(Ui.NOTE, "Acerca de la app", Updater.updateAvailable(this)
@@ -764,7 +940,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     /** Círculo rojo en Ajustes cuando hay una versión nueva publicada. */
     private void showUpdateBadge() {
         if (settingsBtn != null) settingsBtn.setBadge(Updater.updateAvailable(this));
-        if (menuBtn != null) menuBtn.setBadge(Updater.updateAvailable(this) && !barOpen);
+        if (cbar != null) cbar.setBadge(Updater.updateAvailable(this));
     }
 
     /** Acerca de: versión de este teléfono y del otro, para saber si los dos están al día. */
@@ -797,10 +973,10 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             for (String ch : Updater.changes(o.optString("body"))) sb.append("  – ").append(ch).append("\n");
             sb.append("\n");
         }
-        sb.append("Mesa Doble une dos teléfonos como si fueran uno: mesa compartida, teclado, touchpad, gamepad y archivos.\n");
+        sb.append("ChronOS une dos teléfonos como si fueran uno: mesa compartida, teclado, touchpad, gamepad y archivos.\n");
         sb.append("Diccionario: FrequencyWords (MIT).");
         new Ui.Sheet(this)
-                .title("Acerca de Mesa Doble")
+                .title("Acerca de ChronOS")
                 .message(sb.toString())
                 .option(Ui.RECEIVE, Updater.updateAvailable(this) ? "Actualizar a la versión " + Updater.latestKnown(this) : "Buscar actualización",
                         null, () -> Updater.check(this, hub))
@@ -843,7 +1019,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private boolean canOverlay() { return android.provider.Settings.canDrawOverlays(this); }
 
     /**
-     * Revisa lo que cada teléfono necesita. Principal: teclado Mesa Doble activado, cambio automático
+     * Revisa lo que cada teléfono necesita. Principal: teclado ChronOS activado, cambio automático
      * de teclado (accesibilidad) y permiso para abrir apps pedidas desde el extendido.
      * Extendido: permiso para abrir el teclado solo aunque la mesa esté de fondo.
      */
@@ -852,13 +1028,13 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         final List<Runnable> fixes = new ArrayList<>();
         if (hub.isPrincipal()) {
             if (!Hub.imeEnabled(this)) {
-                lines.add("✗ Activar el teclado Mesa Doble");
+                lines.add("✗ Activar el teclado ChronOS");
                 fixes.add(() -> openSettings(android.provider.Settings.ACTION_INPUT_METHOD_SETTINGS, null,
-                        "Activa \"Mesa Doble\" en la lista de teclados y vuelve."));
-            } else lines.add("✓ Teclado Mesa Doble activado");
+                        "Activa \"ChronOS\" en la lista de teclados y vuelve."));
+            } else lines.add("✓ Teclado ChronOS activado");
             boolean full = MesaAccess.available(this);
             if (!full) {
-                lines.add("• Versión liviana: al conectar, toca el aviso \"quiere escribir aquí\" para elegir el teclado Mesa Doble");
+                lines.add("• Versión liviana: al conectar, toca el aviso \"quiere escribir aquí\" para elegir el teclado ChronOS");
             } else if (!MesaAccess.isEnabled(this)) {
                 lines.add("✗ Cambio automático de teclado (accesibilidad)");
                 fixes.add(this::guideAccessibility);
@@ -868,7 +1044,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             } else if (!canOverlay()) {
                 lines.add("✗ Abrir apps pedidas desde el extendido");
                 fixes.add(() -> openSettings(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()),
-                        "Activa \"Mostrar sobre otras apps\" para Mesa Doble y vuelve."));
+                        "Activa \"Mostrar sobre otras apps\" para ChronOS y vuelve."));
             } else lines.add("✓ Abrir apps pedidas desde el extendido");
         } else {
             if (ScreenSync.enabled(this)) {
@@ -887,7 +1063,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             } else if (!canOverlay()) {
                 lines.add("✗ Abrir el teclado solo, aunque la mesa esté de fondo");
                 fixes.add(() -> openSettings(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()),
-                        "Activa \"Mostrar sobre otras apps\" para Mesa Doble y vuelve."));
+                        "Activa \"Mostrar sobre otras apps\" para ChronOS y vuelve."));
             } else lines.add("✓ Abrir el teclado solo");
         }
         if (ScreenSync.enabled(this)) {
@@ -908,7 +1084,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         Ui.Sheet sh = new Ui.Sheet(this)
                 .title(hub.isPrincipal() ? "Configurar el principal" : "Configurar el extendido")
                 .message(fixes.isEmpty() ? "Todo listo." : "Toca lo que falta para resolverlo. En teléfonos Xiaomi revisa también: "
-                        + "Ajustes → Apps → Mesa Doble → Otros permisos → \"Mostrar ventanas emergentes en segundo plano\".");
+                        + "Ajustes → Apps → ChronOS → Otros permisos → \"Mostrar ventanas emergentes en segundo plano\".");
         int fi = 0;
         for (String l : lines) {
             boolean ok = l.startsWith("✓"), bad = l.startsWith("✗");
@@ -923,7 +1099,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private void requestLockAdmin() {
         new Ui.Sheet(this)
                 .title("Bloquearse junto al principal")
-                .message("Android pide activar a Mesa Doble como \"administrador del dispositivo\" solo para poder bloquear la pantalla. "
+                .message("Android pide activar a ChronOS como \"administrador del dispositivo\" solo para poder bloquear la pantalla. "
                         + "No puede borrar ni ver nada.\n\nPara desinstalar la app más adelante, primero desactívalo en "
                         + "Ajustes → Contraseñas y seguridad → Privacidad → Apps de administración del dispositivo.")
                 .button("Después", false, null)
@@ -951,13 +1127,13 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private void guideAccessibility() {
         new Ui.Sheet(this)
                 .title("Cambio automático de teclado")
-                .message("Mesa Doble usa un servicio de accesibilidad solo para cambiar al teclado Mesa Doble "
+                .message("ChronOS usa un servicio de accesibilidad solo para cambiar al teclado ChronOS "
                         + "(y devolver el tuyo al desconectarse) y para saber cuándo abres una app de chat. No lee tu pantalla.")
                 .option(Ui.LOCK, "1. Permitir ajustes restringidos", "Si aparece bloqueado: Info de la app → menú ⋮", () ->
                         openSettings(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName()),
                                 "Menú ⋮ → Permitir ajustes restringidos"))
-                .option(Ui.GEAR, "2. Activar en Accesibilidad", "Apps descargadas → Mesa Doble", () ->
-                        openSettings(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS, null, "Busca Mesa Doble en Apps descargadas y actívalo."))
+                .option(Ui.GEAR, "2. Activar en Accesibilidad", "Apps descargadas → ChronOS", () ->
+                        openSettings(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS, null, "Busca ChronOS en Apps descargadas y actívalo."))
                 .button("Después", false, null)
                 .show();
     }
@@ -1051,8 +1227,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private void askRecentsAccess() {
         new Ui.Sheet(this)
                 .title("Apps recientes")
-                .message("Para saber qué apps están abiertas, Android pide activar Mesa Doble en \"Acceso a datos de uso\" "
-                        + "(en el PRINCIPAL). Se abre esa pantalla: busca Mesa Doble, actívalo y vuelve.")
+                .message("Para saber qué apps están abiertas, Android pide activar ChronOS en \"Acceso a datos de uso\" "
+                        + "(en el PRINCIPAL). Se abre esa pantalla: busca ChronOS, actívalo y vuelve.")
                 .button("Ahora no", false, null)
                 .button("Abrir ajustes", true, () -> {
                     try { startActivity(RecentApps.accessIntent()); }
@@ -1070,7 +1246,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             }
             return;
         }
-        if (pkg.isEmpty()) { pkg = getPackageName(); label = "Mesa Doble"; }   // "Desktop": volver a la mesa del principal
+        if (pkg.isEmpty()) { pkg = getPackageName(); label = "ChronOS"; }   // "Desktop": volver a la mesa del principal
         openOnPrincipal(pkg, label);
         main.postDelayed(pollRecents, 900);
     }
@@ -1093,10 +1269,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private boolean resumed;
 
     /** El gestor de archivos se abre en los dos teléfonos: cada uno maneja su ventana. */
-    private void openFiles() {
-        startActivity(new Intent(this, FilesActivity.class));
-        if (hub.connected()) hub.send("fmOpen");
-    }
+    private void openFiles() { setFileMode(true, false); }
 
     /** El reloj muestra la próxima alarma de ESTE teléfono: al tocarlo se abren las alarmas de este teléfono. */
     @Override public void onOpenAlarms() { hub.openAlarms(); }
@@ -1166,7 +1339,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .title("Teclado")
                 .option(Ui.KEYBOARD, "Usar este teléfono como teclado", "Teclado, touchpad, gamepad o dictado",
                         () -> startActivity(new Intent(this, KeyboardActivity.class).putExtra("manual", true)))
-                .option(Ui.RECEIVE, "Recibir aquí lo que escribo", "Elegir el teclado Mesa Doble en este teléfono", this::setupReceiver)
+                .option(Ui.RECEIVE, "Recibir aquí lo que escribo", "Elegir el teclado ChronOS en este teléfono", this::setupReceiver)
                 .button("Cerrar", false, null)
                 .show();
     }
@@ -1177,7 +1350,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (Hub.imeSelected(this)) {
             new Ui.Sheet(this)
                     .title("Listo para recibir")
-                    .message("El teclado Mesa Doble ya está elegido. Abre cualquier app, toca donde se escribe y escribe desde el otro teléfono. "
+                    .message("El teclado ChronOS ya está elegido. Abre cualquier app, toca donde se escribe y escribe desde el otro teléfono. "
                             + "Para volver a tu teclado normal toca \"Cambiar teclado\" en la barra.")
                     .button("Cambiar teclado", false, () -> startActivity(new Intent(this, ImePickerActivity.class)))
                     .button("Entendido", true, null)
@@ -1186,18 +1359,18 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         }
         if (!imeEnabled()) {
             new Ui.Sheet(this)
-                    .title("Activa el teclado Mesa Doble")
-                    .message("Se abrirá la lista de teclados. Activa \"Mesa Doble\" y vuelve aquí. Android muestra un aviso general "
-                            + "sobre teclados: Mesa Doble solo escribe lo que mandas desde tu otro teléfono y no guarda nada.")
+                    .title("Activa el teclado ChronOS")
+                    .message("Se abrirá la lista de teclados. Activa \"ChronOS\" y vuelve aquí. Android muestra un aviso general "
+                            + "sobre teclados: ChronOS solo escribe lo que mandas desde tu otro teléfono y no guarda nada.")
                     .button("Cancelar", false, null)
                     .button("Abrir ajustes", true, () -> openSettings(android.provider.Settings.ACTION_INPUT_METHOD_SETTINGS, null,
-                            "Activa \"Mesa Doble\" y vuelve."))
+                            "Activa \"ChronOS\" y vuelve."))
                     .show();
             return;
         }
         new Ui.Sheet(this)
-                .title("Elige \"Mesa Doble\"")
-                .message("En la lista que aparece elige Mesa Doble. Al tocar donde se escribe verás una barra delgada en vez del teclado.")
+                .title("Elige \"ChronOS\"")
+                .message("En la lista que aparece elige ChronOS. Al tocar donde se escribe verás una barra delgada en vez del teclado.")
                 .button("Cancelar", false, null)
                 .button("Elegir teclado", true, () -> startActivity(new Intent(this, ImePickerActivity.class)))
                 .show();
@@ -1252,21 +1425,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         int ds = deskSide();
         desk.setVertical(stacked());
         desk.setSide(ds);
+        buildChronoBar();
         rebuildBar();
-        // la barra va en el borde exterior, lejos de la unión entre teléfonos
-        FrameLayout.LayoutParams bp = (FrameLayout.LayoutParams) dock.getLayoutParams();
-        if (stacked()) {
-            bp.gravity = (ds == 0 ? Gravity.TOP : Gravity.BOTTOM) | Gravity.START;
-            bp.setMargins(dp(14), dp(12), dp(14), dp(12));
-        } else {
-            bp.gravity = Gravity.BOTTOM | (ds == 0 ? Gravity.START : Gravity.END);
-            bp.setMargins(dp(12), 0, dp(12), dp(14));
-        }
-        dock.setLayoutParams(bp);
-        FrameLayout.LayoutParams np = (FrameLayout.LayoutParams) navPill.getLayoutParams();
-        np.gravity = (stacked() && ds == 0 ? Gravity.TOP : Gravity.BOTTOM) | Gravity.CENTER_HORIZONTAL;
-        np.setMargins(0, dp(12), 0, dp(stacked() ? 12 : 14));
-        navPill.setLayoutParams(np);
+        layoutChrono(false);
 
         otherSide = -1;
         hub.setSide(side);
@@ -1485,7 +1646,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     @Override public void onWidgetTap(Item it) { if (it.wid < 0) requestBind(it); }
 
     @Override public void onWidgetTouch(Item it, float fx, float fy) {
-        if (getPackageName().equals(it.pkg)) { hub.openAlarms(); return; }   // el reloj de Mesa Doble: alarmas de este teléfono
+        if (getPackageName().equals(it.pkg)) { hub.openAlarms(); return; }   // el reloj de ChronOS: alarmas de este teléfono
         if (hub.isPrincipal() || !hub.connected()) return;
         hub.send("wTap", "wid", it.wid, "x", (double) fx, "y", (double) fy);
     }
@@ -1753,6 +1914,22 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
         switch (t) {
+            case "fileMode":
+                main.post(() -> setFileMode(m.optBoolean("on"), true));
+                break;
+            case "notif":
+                main.post(() -> {
+                    if (side == 1 && barNotif != null) barNotif.show(m);   // en la barra del reloj
+                    else if (side == 0) floatNotif.show(m);                   // el principal está en otra app: aquí, arriba a la izquierda
+                });
+                break;
+            case "mState":
+                if (MediaHub.AUDIO.equals(m.optString("kind")) && barPlayer != null)
+                    main.post(() -> { cbar.showPlayer(true); barPlayer.update(m); placeStart(); });
+                break;
+            case "mEnd":
+                if (MediaHub.AUDIO.equals(m.optString("kind")) && cbar != null) main.post(() -> { cbar.showPlayer(false); placeStart(); });
+                break;
             case "notifs":
                 main.post(() -> desk.setNotified(m.optJSONArray("p")));
                 break;

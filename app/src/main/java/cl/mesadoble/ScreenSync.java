@@ -119,7 +119,7 @@ public class ScreenSync {
             PendingIntent pi = PendingIntent.getActivity(app, 5, i, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
             Notification n = new Notification.Builder(app, CHANNEL)
                     .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
-                    .setContentTitle("Mesa Doble")
+                    .setContentTitle("ChronOS")
                     .setContentText("Encendiendo junto al principal")
                     .setCategory(Notification.CATEGORY_ALARM)
                     .setFullScreenIntent(pi, true)

@@ -47,7 +47,7 @@ public class Hub implements Link.Listener {
     private float accX, accY;   // touchpad sin puntero (versión liviana): mueve el cursor del texto
     private long lastNotify = 0;
     public int acksOk = 0, acksFail = 0;
-    /** Hay una pantalla de Mesa Doble visible en este teléfono (permite abrir apps directo). */
+    /** Hay una pantalla de ChronOS visible en este teléfono (permite abrir apps directo). */
     public boolean foreground;
     /** La pantalla de teclado está abierta en este teléfono. */
     public boolean keyboardVisible;
@@ -102,7 +102,7 @@ public class Hub implements Link.Listener {
     /** El principal tiene puntero real (versión completa con accesibilidad activa). */
     public boolean remotePointer() { return remotePointer; }
 
-    /** ¿El teclado Mesa Doble está activado en la lista de teclados de ESTE teléfono? */
+    /** ¿El teclado ChronOS está activado en la lista de teclados de ESTE teléfono? */
     public static boolean imeEnabled(Context c) {
         InputMethodManager imm = (InputMethodManager) c.getSystemService(Context.INPUT_METHOD_SERVICE);
         if (imm == null) return false;
@@ -111,7 +111,7 @@ public class Hub implements Link.Listener {
         return false;
     }
 
-    /** ¿El teclado Mesa Doble es el teclado elegido ahora en ESTE teléfono? */
+    /** ¿El teclado ChronOS es el teclado elegido ahora en ESTE teléfono? */
     public static boolean imeSelected(Context c) {
         try {
             String cur = Settings.Secure.getString(c.getContentResolver(), Settings.Secure.DEFAULT_INPUT_METHOD);
@@ -169,7 +169,7 @@ public class Hub implements Link.Listener {
 
     // ---------------- teclado receptor ----------------
 
-    /** El teclado Mesa Doble de ESTE teléfono está (o no) listo para recibir texto. */
+    /** El teclado ChronOS de ESTE teléfono está (o no) listo para recibir texto. */
     public void setImeReady(boolean r) {
         if (r) cancelNotice();
         if (imeReady == r) return;
@@ -179,7 +179,7 @@ public class Hub implements Link.Listener {
 
     private void sendImeState() { send("kbState", "ready", imeReady, "sel", imeSelected(app), "ptr", MesaAccess.instance != null); }
 
-    /** Aviso en el teléfono que recibe: un toque y queda elegido el teclado Mesa Doble. */
+    /** Aviso en el teléfono que recibe: un toque y queda elegido el teclado ChronOS. */
     private void notifySwitch() {
         long now = System.currentTimeMillis();
         if (now - lastNotify < 15000 || imeSelected(app)) return;
@@ -194,7 +194,7 @@ public class Hub implements Link.Listener {
         Notification n = new Notification.Builder(app, "avisos")
                 .setSmallIcon(icon != 0 ? icon : android.R.drawable.stat_notify_more)
                 .setContentTitle("El otro teléfono quiere escribir aquí")
-                .setContentText("Toca para usar el teclado Mesa Doble")
+                .setContentText("Toca para usar el teclado ChronOS")
                 .setContentIntent(pi)
                 .setAutoCancel(true)
                 .build();
@@ -244,6 +244,8 @@ public class Hub implements Link.Listener {
             return;
         }
         if ("alarms".equals(t)) { openAlarms(); return; }
+        if ("boost".equals(t)) { if (!isPrincipal()) Boost.listen(app, this, m.optBoolean("on")); return; }
+        if ("boostSet".equals(t)) { if (isPrincipal()) Boost.setEnabled(app, this, m.optBoolean("on")); return; }
         if ("call".equals(t)) { if (!isPrincipal()) CallHub.onCall(app, this, m); }
         if ("callCmd".equals(t)) { if (isPrincipal()) CallHub.command(app, this, m); return; }
         if ("game".equals(t)) { if (!isPrincipal()) GameBg.handle(app, this, m); return; }
@@ -262,7 +264,7 @@ public class Hub implements Link.Listener {
         }
         if ("recAccess".equals(t)) {
             if (isPrincipal()) startOrNotify(RecentApps.accessIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), 44,
-                    "Apps recientes", "Toca y activa Mesa Doble en \"Acceso a datos de uso\"");
+                    "Apps recientes", "Toca y activa ChronOS en \"Acceso a datos de uso\"");
             return;
         }
         if ("update".equals(t)) { Updater.updateFromRemote(app, this); return; }
@@ -280,7 +282,11 @@ public class Hub implements Link.Listener {
         if ("mActive".equals(t) && !isPrincipal() && m.optBoolean("on") && m.optBoolean("video") && m.optBoolean("fresh")
                 && !KeyboardActivity.showingMedia)
             MediaHub.openControls(app, MediaHub.VIDEO);
-        if ("mOpen".equals(t)) { if (!isPrincipal()) MediaHub.openControls(app, m.optString("kind")); return; }
+        if ("mOpen".equals(t)) {
+            // la música se controla desde la action bar cuando ChronOS está a la vista
+            if (!isPrincipal() && !(MediaHub.AUDIO.equals(m.optString("kind")) && foreground)) MediaHub.openControls(app, m.optString("kind"));
+            return;
+        }
         // widgets: todos viven en el principal
         if ("wList".equals(t)) { if (isPrincipal()) WidgetHub.get(app).sendProviders(this); return; }
         if ("wWant".equals(t)) { if (isPrincipal()) WidgetHub.get(app).want(m, this); return; }
@@ -348,22 +354,22 @@ public class Hub implements Link.Listener {
     public static final int LAUNCHED = 0, NOTIFIED = 1, NOT_INSTALLED = 2;
 
     /**
-     * Abre una app en ESTE teléfono. Si Mesa Doble no está a la vista, Android no deja abrir apps
+     * Abre una app en ESTE teléfono. Si ChronOS no está a la vista, Android no deja abrir apps
      * desde segundo plano (salvo con el permiso "mostrar sobre otras apps"); en ese caso deja un aviso
      * que se abre con un toque.
      */
     /**
-     * "Desktop" del widget de apps recientes: la MESA de Mesa Doble en este teléfono (no la pantalla de inicio).
+     * "Desktop" del widget de apps recientes: la MESA de ChronOS en este teléfono (no la pantalla de inicio).
      * Igual que con las apps: inicio sin animación y enseguida la mesa; se reintenta hasta que la mesa esté al frente.
      */
     public void goDesk() {
         Intent desk = new Intent(app, MainActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_NO_ANIMATION);
-        startOwn(desk, () -> foreground, 46, "Volver a la mesa", "Toca para ver la mesa de Mesa Doble");
+        startOwn(desk, () -> foreground, 46, "Volver a la mesa", "Toca para ver la mesa de ChronOS");
     }
 
     /**
-     * Abre una pantalla de Mesa Doble aunque otra app esté al frente: inicio sin animación y enseguida la pantalla,
+     * Abre una pantalla de ChronOS aunque otra app esté al frente: inicio sin animación y enseguida la pantalla,
      * reintentando hasta que 'shown' sea verdadero; si no se logra, queda un aviso de un toque.
      */
     public void startOwn(Intent i, java.util.function.BooleanSupplier shown, int code, String title, String text) {
@@ -467,7 +473,7 @@ public class Hub implements Link.Listener {
             for (int i = 0; i < Math.abs(d); i++) key(d > 0 ? KeyEvent.KEYCODE_DPAD_UP : KeyEvent.KEYCODE_DPAD_DOWN);
         } else if ("nav".equals(t)) {
             String k = m.optString("k");
-            if ("back".equals(k)) key(KeyEvent.KEYCODE_BACK);          // llega a la app por el teclado Mesa Doble
+            if ("back".equals(k)) key(KeyEvent.KEYCODE_BACK);          // llega a la app por el teclado ChronOS
             else if ("home".equals(k)) goHome();
             else send("navAck", "k", k, "ok", false);                 // Recientes: Android no lo permite sin accesibilidad
         } else if ("pad".equals(t) && "btn".equals(m.optString("a")) && m.optBoolean("down")) {
@@ -502,7 +508,7 @@ public class Hub implements Link.Listener {
         } catch (Exception ignored) { }
     }
 
-    /** Entrega una tecla al teclado Mesa Doble de este teléfono, como si llegara del extendido. */
+    /** Entrega una tecla al teclado ChronOS de este teléfono, como si llegara del extendido. */
     private void key(int code) {
         JSONObject k = new JSONObject();
         try { k.put("t", "kb"); k.put("a", "key"); k.put("k", code); k.put("m", 0); } catch (JSONException ignored) { }
@@ -570,9 +576,17 @@ public class Hub implements Link.Listener {
     private String notifSig = "";
     private long notifSentAt;
 
+    /** Cambió algo en las notificaciones: se revisa ya (punto rojo de las apps). */
+    void notifsChanged() { if (!isPrincipal()) return; notifSentAt = 0; notifSig = "?"; RecentApps.worker.execute(this::pollNotifs); }
+
     private void pollNotifs() {
-        if (!RecentApps.hasAccess(app)) return;
-        java.util.List<String> l = RecentApps.unseen(app);
+        java.util.List<String> l = new java.util.ArrayList<>();
+        NotifService ns = NotifService.instance;
+        if (ns != null) {   // con acceso a notificaciones: las que siguen pendientes
+            JSONArray a = ns.pending();
+            for (int i = 0; i < a.length(); i++) l.add(a.optString(i));
+        } else if (RecentApps.hasAccess(app)) l = RecentApps.unseen(app);
+        else return;
         String sig = android.text.TextUtils.join(",", l);
         long now = SystemClock.uptimeMillis();
         if (sig.equals(notifSig) && now - notifSentAt < 30000) return;
@@ -580,7 +594,7 @@ public class Hub implements Link.Listener {
         notifSentAt = now;
         JSONObject m = new JSONObject();
         try { m.put("t", "notifs"); m.put("p", new JSONArray(l)); } catch (JSONException ignored) { }
-        send(m);
+        if (connected()) send(m);
         main.post(() -> local(m));
     }
 

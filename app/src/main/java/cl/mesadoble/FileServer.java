@@ -93,7 +93,7 @@ public class FileServer {
         try {
             nm.notify(21, new Notification.Builder(app, "avisos")
                     .setSmallIcon(icon != 0 ? icon : android.R.drawable.stat_notify_more)
-                    .setContentTitle("Mesa Doble quiere ver tus archivos")
+                    .setContentTitle("ChronOS quiere ver tus archivos")
                     .setContentText("Toca y activa \"Permitir acceso a todos los archivos\"")
                     .setContentIntent(pi)
                     .setAutoCancel(true)
@@ -222,6 +222,115 @@ public class FileServer {
         out.flush();
     }
 
+    // ---------------- categorías del gestor de archivos (inicio, imágenes, audio, videos, documentos, apps) ----------------
+
+    static final String[] DOC_EXT = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".txt", ".odt", ".ods", ".odp", ".rtf", ".csv", ".epub"};
+
+    /** Almacenamientos (interno y tarjeta SD) con espacio usado y total. */
+    static JSONArray storages(Context c) throws JSONException {
+        JSONArray a = new JSONArray();
+        java.util.LinkedHashSet<String> roots = new java.util.LinkedHashSet<>();
+        roots.add(root().getAbsolutePath());
+        File[] ext = c.getExternalFilesDirs(null);
+        for (int i = 1; ext != null && i < ext.length; i++) {
+            if (ext[i] == null) continue;
+            String p = ext[i].getAbsolutePath();
+            int k = p.indexOf("/Android/");
+            if (k > 0) roots.add(p.substring(0, k));
+        }
+        int n = 0;
+        for (String p : roots) {
+            try {
+                android.os.StatFs st = new android.os.StatFs(p);
+                long total = st.getTotalBytes(), free = st.getAvailableBytes();
+                JSONObject o = new JSONObject();
+                o.put("n", n == 0 ? "Almacenamiento" : "Tarjeta SD"); o.put("p", p); o.put("used", total - free); o.put("total", total);
+                a.put(o);
+                n++;
+            } catch (Exception ignored) { }
+        }
+        return a;
+    }
+
+    static JSONObject category(Context c, String cat) throws JSONException {
+        JSONObject r = new JSONObject();
+        JSONArray e = new JSONArray();
+        switch (cat) {
+            case "home": {
+                r.put("storages", storages(c));
+                r.put("downloads", Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).getAbsolutePath());
+                r.put("dlSize", dirSize(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), 3));
+                for (String k : new String[]{"images", "audio", "video", "docs"}) r.put(k + "N", media(c, k, null));
+                r.put("appsN", apps(c, null));
+                return r;
+            }
+            case "apps": apps(c, e); break;
+            default: media(c, cat, e);
+        }
+        r.put("entries", e);
+        return r;
+    }
+
+    private static long dirSize(File d, int depth) {
+        long s = 0;
+        File[] l = d.listFiles();
+        if (l == null) return 0;
+        for (File f : l) s += f.isDirectory() ? (depth > 0 ? dirSize(f, depth - 1) : 0) : f.length();
+        return s;
+    }
+
+    /** Archivos de un tipo, del más nuevo al más viejo (o solo cuántos hay, si out es null). */
+    @SuppressWarnings("deprecation")
+    private static int media(Context c, String cat, JSONArray out) {
+        android.net.Uri uri = android.provider.MediaStore.Files.getContentUri("external");
+        String sel;
+        switch (cat) {
+            case "images": sel = "media_type=1"; break;
+            case "audio": sel = "media_type=2"; break;
+            case "video": sel = "media_type=3"; break;
+            default: {
+                StringBuilder b = new StringBuilder("(");
+                for (int i = 0; i < DOC_EXT.length; i++) b.append(i > 0 ? " OR " : "").append("_data LIKE '%").append(DOC_EXT[i]).append("'");
+                sel = b.append(")").toString();
+            }
+        }
+        int n = 0;
+        try (android.database.Cursor cur = c.getContentResolver().query(uri,
+                new String[]{"_data", "_size", "date_modified"}, sel, null, "date_modified DESC")) {
+            if (cur == null) return 0;
+            if (out == null) return cur.getCount();
+            while (cur.moveToNext() && n < 1500) {
+                String p = cur.getString(0);
+                if (p == null) continue;
+                File f = new File(p);
+                JSONObject o = new JSONObject();
+                o.put("n", f.getName()); o.put("p", p); o.put("d", false); o.put("s", cur.getLong(1)); o.put("m", cur.getLong(2) * 1000);
+                out.put(o);
+                n++;
+            }
+        } catch (Exception ignored) { }
+        return n;
+    }
+
+    private static int apps(Context c, JSONArray out) {
+        PackageManager pm = c.getPackageManager();
+        int n = 0;
+        for (android.content.pm.ApplicationInfo ai : pm.getInstalledApplications(0)) {
+            if ((ai.flags & android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0 && (ai.flags & android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) == 0) continue;
+            if (pm.getLaunchIntentForPackage(ai.packageName) == null) continue;
+            n++;
+            if (out == null) continue;
+            try {
+                JSONObject o = new JSONObject();
+                File f = new File(ai.sourceDir);
+                o.put("n", String.valueOf(pm.getApplicationLabel(ai))); o.put("p", ai.sourceDir); o.put("k", ai.packageName);
+                o.put("d", false); o.put("s", f.length()); o.put("m", f.lastModified());
+                out.put(o);
+            } catch (Exception ignored) { }
+        }
+        return n;
+    }
+
     // ---------------- pedidos por la conexión de la mesa ----------------
 
     void handle(JSONObject m, Hub hub) {
@@ -236,6 +345,8 @@ public class FileServer {
                     r.put("path", d.getAbsolutePath());
                     r.put("root", root().getAbsolutePath());
                     try { r.put("entries", list(d)); } catch (IOException e) { r.put("err", e.getMessage()); }
+                } else if ("fsCat".equals(t)) {
+                    r.put("res", category(app, m.optString("cat")));
                 } else if ("fsOp".equals(t)) {
                     op(m, r);
                 } else if ("fsThumb".equals(t)) {

@@ -183,7 +183,7 @@ public class WidgetHub {
         int wid = m.optInt("wid", -1);
         AppWidgetHostView v = view(wid);
         if (v == null) return;
-        // el reloj de Mesa Doble: abre las alarmas directo (un toque simulado no puede abrir apps con otra app al frente)
+        // el reloj de ChronOS: abre las alarmas directo (un toque simulado no puede abrir apps con otra app al frente)
         AppWidgetProviderInfo info = awm.getAppWidgetInfo(wid);
         if (info != null && info.provider != null && info.provider.getClassName().equals(ClockWidget.class.getName())) {
             Hub.get(app).openAlarms();

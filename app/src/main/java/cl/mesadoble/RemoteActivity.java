@@ -249,7 +249,7 @@ public class RemoteActivity extends Activity implements Link.Listener {
         row2.addView(pill("Cerrar", v -> finish()), new LinearLayout.LayoutParams(-2, dp(46)));
         root.addView(row2);
         TextView note = new TextView(this);
-        note.setText("La barra de avance aparece con los videos que abres desde Archivos (reproductor de Mesa Doble). "
+        note.setText("La barra de avance aparece con los videos que abres desde Archivos (reproductor de ChronOS). "
                 + "En otras apps, Android solo deja enviar las teclas de reproducción.");
         note.setTextColor(0xFF888888);
         note.setTextSize(12);
