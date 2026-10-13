@@ -152,6 +152,21 @@ public class MesaAccess extends AccessibilityService {
         showPointer();
     }
 
+    /** Modo APP: gesto hecho en la columna del extendido (puntos de 0 a 1 sobre la pantalla del principal). */
+    public void appGesture(org.json.JSONArray p, long ms) {
+        Point sc = screen();
+        Path path = new Path();
+        int n = p.length() / 2;
+        if (n == 0) return;
+        for (int i = 0; i < n; i++) {
+            float x = (float) Math.max(1, Math.min(sc.x - 2, p.optDouble(i * 2) * sc.x));
+            float y = (float) Math.max(1, Math.min(sc.y - 2, p.optDouble(i * 2 + 1) * sc.y));
+            if (i == 0) path.moveTo(x, y); else path.lineTo(x, y);
+        }
+        try { dispatchGesture(new GestureDescription.Builder().addStroke(new GestureDescription.StrokeDescription(path, 0, Math.max(1, ms))).build(), null, null); }
+        catch (Exception ignored) { }
+    }
+
     private void tap(float x, float y, long ms) {
         Path p = new Path();
         p.moveTo(x, y);

@@ -12,20 +12,34 @@ import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 
 /**
- * Boost para apps (YouTube, Netflix…): captura el sonido que reproducen las apps del PRINCIPAL y lo manda al
- * extendido, que lo toca a la vez. Android pide permiso cada vez (aviso de "capturar lo que se reproduce").
+ * Captura del PRINCIPAL (un solo permiso de Android para las dos cosas, porque Android permite una captura a la vez):
+ *  - "audio": Boost para apps (YouTube, Netflix…): el sonido de las apps sale también por el extendido;
+ *  - "video": Modo APP: la pantalla del principal se ve derecha en el extendido (apps que no giran, como Instagram).
+ * Se detiene sola cuando ninguna de las dos está activa.
  */
 public class CaptureService extends Service {
 
-    static volatile boolean running;
+    static volatile boolean running, audioOn, videoOn;
     private static final int RATE = 48000;
     private MediaProjection projection;
     private AudioRecord rec;
-    private volatile boolean stop, quiet;
+    private volatile Thread audioThread;
     private long btCheck;
+    private volatile boolean quiet;
+
+    /** Enciende o apaga una parte ("audio" o "video"). Si no hay captura todavía, pide el permiso en el principal. */
+    static boolean want(Context c, String what, boolean on) {
+        if (running) {
+            Intent i = new Intent(c, CaptureService.class).setAction("set").putExtra("what", what).putExtra("on", on);
+            try { c.startService(i); return true; } catch (Exception e) { return false; }
+        }
+        return !on;   // sin captura: hay que pedir permiso (lo hace quien llama)
+    }
 
     static void stop(Context c) { c.stopService(new Intent(c, CaptureService.class)); }
 
@@ -34,30 +48,78 @@ public class CaptureService extends Service {
     @Override public int onStartCommand(Intent i, int flags, int id) {
         foreground();
         if (i != null && "stop".equals(i.getAction())) { stopSelf(); return START_NOT_STICKY; }
-        if (i == null || running) return START_NOT_STICKY;
+        if (i != null && "set".equals(i.getAction())) {
+            if (projection != null) set(i.getStringExtra("what"), i.getBooleanExtra("on", false));
+            return START_NOT_STICKY;
+        }
+        if (i == null || running) { if (i != null && running) set(i.getStringExtra("want"), true); return START_NOT_STICKY; }
         int code = i.getIntExtra("code", Activity.RESULT_CANCELED);
         Intent data = i.getParcelableExtra("data");
         MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
         try { projection = mpm.getMediaProjection(code, data); } catch (Exception e) { projection = null; }
-        if (projection == null) { fail("No se pudo capturar el sonido (Android no dio el permiso)"); return START_NOT_STICKY; }
-        try {
-            rec = build(projection);
-        } catch (Exception e) { rec = null; }
-        if (rec == null || rec.getState() != AudioRecord.STATE_INITIALIZED) { fail("Este teléfono no deja capturar el sonido de las apps"); return START_NOT_STICKY; }
+        if (projection == null) { fail("Android no dio el permiso de captura en el principal"); return START_NOT_STICKY; }
+        // Android 14+ exige registrar esto antes de mostrar la pantalla en otro lado
+        projection.registerCallback(new MediaProjection.Callback() {
+            @Override public void onStop() { new Handler(Looper.getMainLooper()).post(CaptureService.this::stopSelf); }
+        }, new Handler(Looper.getMainLooper()));
         running = true;
-        Hub hub = Hub.get(this);
-        Boost.serve();
-        hub.send("boost", "on", true);
-        Boost.syncVolume(this, hub, true);
-        if (hub.connected()) hub.send("boostMsg", "msg", "Boost activo: el sonido sale por los dos teléfonos");
-        new Thread(this::loop, "captura").start();
+        set(i.getStringExtra("want"), true);
         return START_NOT_STICKY;
+    }
+
+    private void set(String what, boolean on) {
+        Hub hub = Hub.get(this);
+        if ("video".equals(what)) {
+            if (on == videoOn) { if (on) hub.send("appState", "on", true); return; }
+            videoOn = on;
+            if (on) ScreenCast.start(this, projection); else ScreenCast.stop();
+            hub.appModeOn = on;
+            hub.send("appState", "on", on);
+            if (on && hub.connected()) hub.send("boostMsg", "msg", "Modo APP activo: las apps que no giran se verán derechas aquí");
+        } else if ("audio".equals(what)) {
+            if (on == audioOn) { if (on) hub.send("boost", "on", true); return; }
+            if (on) startAudio(); else stopAudio();
+        }
+        if (!audioOn && !videoOn) stopSelf();
+        else updateNotification();
     }
 
     private void fail(String msg) {
         Hub hub = Hub.get(this);
         if (hub.connected()) hub.send("boostMsg", "msg", msg);
-        stopSelf();
+        if (!running) stopSelf();
+    }
+
+    // ---------------- sonido (Boost para apps) ----------------
+
+    private void startAudio() {
+        try { rec = build(projection); } catch (Exception e) { rec = null; }
+        if (rec == null || rec.getState() != AudioRecord.STATE_INITIALIZED) {
+            if (rec != null) rec.release();
+            rec = null;
+            fail("Este teléfono no deja capturar el sonido de las apps");
+            return;
+        }
+        audioOn = true;
+        Hub hub = Hub.get(this);
+        Boost.serve();
+        hub.send("boost", "on", true);
+        Boost.syncVolume(this, hub, true);
+        if (hub.connected()) hub.send("boostMsg", "msg", "Boost activo: el sonido sale por los dos teléfonos");
+        Thread t = new Thread(this::loop, "captura");
+        audioThread = t;
+        t.start();
+    }
+
+    private void stopAudio() {
+        if (!audioOn) return;
+        audioOn = false;
+        audioThread = null;
+        try { if (rec != null) { rec.stop(); rec.release(); } } catch (Exception ignored) { }
+        rec = null;
+        Hub hub = Hub.get(this);
+        hub.send("boost", "on", false);
+        Boost.syncVolume(this, hub, false);
     }
 
     /** AudioRecord que escucha lo que suenan las otras apps (no ChronOS). Por reflexión: es de Android 10+. */
@@ -76,17 +138,19 @@ public class CaptureService extends Service {
     }
 
     private void loop() {
+        Thread me = Thread.currentThread();
+        AudioRecord r = rec;
         int frames = RATE / 50;   // 20 ms
         byte[] st = new byte[frames * 4], mono = new byte[frames * 2];
         try {
-            rec.startRecording();
-            while (!stop) {
-                int n = rec.read(st, 0, st.length);
+            r.startRecording();
+            while (audioThread == me) {
+                int n = r.read(st, 0, st.length);
                 if (n <= 0) continue;
                 int f = n / 4;
                 for (int k = 0; k < f; k++) {   // izquierda + derecha → un solo canal
-                    int l = (short) ((st[k * 4] & 0xff) | (st[k * 4 + 1] << 8)), r = (short) ((st[k * 4 + 2] & 0xff) | (st[k * 4 + 3] << 8));
-                    int m = (l + r) / 2;
+                    int l = (short) ((st[k * 4] & 0xff) | (st[k * 4 + 1] << 8)), rr = (short) ((st[k * 4 + 2] & 0xff) | (st[k * 4 + 3] << 8));
+                    int m = (l + rr) / 2;
                     mono[k * 2] = (byte) m; mono[k * 2 + 1] = (byte) (m >> 8);
                 }
                 long now = System.currentTimeMillis();
@@ -97,30 +161,45 @@ public class CaptureService extends Service {
     }
 
     @Override public void onDestroy() {
-        stop = true;
         running = false;
-        try { if (rec != null) { rec.stop(); rec.release(); } } catch (Exception ignored) { }
+        stopAudio();
+        if (videoOn) {
+            videoOn = false;
+            ScreenCast.stop();
+            Hub.get(this).appModeOn = false;
+            Hub.get(this).send("appState", "on", false);
+        }
         try { if (projection != null) projection.stop(); } catch (Exception ignored) { }
-        Hub hub = Hub.get(this);
-        hub.send("boost", "on", false);
-        Boost.syncVolume(this, hub, false);
+        projection = null;
         super.onDestroy();
     }
 
-    @SuppressWarnings("deprecation")
-    private void foreground() {
+    // ---------------- aviso permanente ----------------
+
+    private Notification notification() {
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (nm != null && nm.getNotificationChannel("boost") == null)
-            nm.createNotificationChannel(new NotificationChannel("boost", "Boost", NotificationManager.IMPORTANCE_LOW));
+            nm.createNotificationChannel(new NotificationChannel("boost", "Boost y Modo APP", NotificationManager.IMPORTANCE_LOW));
         PendingIntent off = PendingIntent.getService(this, 61, new Intent(this, CaptureService.class).setAction("stop"),
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-        Notification n = new Notification.Builder(this, "boost")
+        String title = audioOn && videoOn ? "Boost y Modo APP activos" : videoOn ? "Modo APP activo" : "Boost activo";
+        String text = videoOn ? "La pantalla del principal también se ve en el extendido" : "El sonido de las apps también sale por el extendido";
+        return new Notification.Builder(this, "boost")
                 .setSmallIcon(getResources().getIdentifier("ic_stat", "drawable", getPackageName()))
-                .setContentTitle("Boost activo")
-                .setContentText("El sonido de las apps también sale por el extendido")
+                .setContentTitle(title)
+                .setContentText(text)
                 .addAction(new Notification.Action.Builder(null, "Detener", off).build())
                 .setOngoing(true)
                 .build();
+    }
+
+    private void updateNotification() {
+        NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (nm != null) try { nm.notify(6, notification()); } catch (Exception ignored) { }
+    }
+
+    private void foreground() {
+        Notification n = notification();
         try {
             if (android.os.Build.VERSION.SDK_INT >= 29)
                 Service.class.getMethod("startForeground", int.class, Notification.class, int.class).invoke(this, 6, n, 32 /* MEDIA_PROJECTION */);

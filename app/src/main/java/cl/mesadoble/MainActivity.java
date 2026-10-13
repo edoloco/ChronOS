@@ -155,6 +155,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         pane = new FilePane(this, hub(), night);
         pane.setVisibility(View.GONE);
         root.addView(pane, new FrameLayout.LayoutParams(-1, -1));
+        appCast = new AppCastView(this, hub());
+        root.addView(appCast, new FrameLayout.LayoutParams(0, 0));
         floatNotif = new NotifCard(this, night, true);
         floatNotif.setTap(this::onNotifTap);
         FrameLayout.LayoutParams fl = new FrameLayout.LayoutParams(dp(360), dp(64), Gravity.TOP | Gravity.START);
@@ -589,7 +591,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         startPanel.addView(head);
         // orden: lo más usado arriba
         SquareButton[] order = {byKind(SquareButton.APPS), settingsBtn, byKind(SquareButton.DESKS), statusBtn,
-                byKind(SquareButton.TOOLS), byKind(SquareButton.KEYBOARD), filesBtn, aboutBtn(), null, null, null, null};
+                byKind(SquareButton.TOOLS), byKind(SquareButton.KEYBOARD), filesBtn, aboutBtn(), appModeBtn(), null, null, null};
         LinearLayout row = null;
         for (int i = 0; i < order.length; i++) {
             if (i % 4 == 0) {
@@ -622,6 +624,36 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     private SquareButton filesBtn, aboutSq;
+
+    private SquareButton appModeSq;
+    private AppCastView appCast;
+
+    /** "Modo APP" en el menú inicio: las apps que no giran se ven derechas en el extendido. */
+    private SquareButton appModeBtn() {
+        if (appModeSq == null) {
+            appModeSq = new SquareButton(this, SquareButton.APPMODE, "Modo APP", false, night);
+            appModeSq.setOnClickListener(v -> {
+                showStart(false);
+                if (!hub().connected()) { Toast.makeText(this, "El principal no está conectado", Toast.LENGTH_SHORT).show(); return; }
+                boolean on = !hub().appModeOn;
+                if (on) Toast.makeText(this, "Modo APP: las apps que no giran (como Instagram) se verán derechas aquí", Toast.LENGTH_LONG).show();
+                if (hub().isPrincipal()) hub().appMode(on); else hub().send("appMode", "on", on);
+            });
+            squares.add(appModeSq);
+        }
+        if (appModeSq.getParent() instanceof android.view.ViewGroup) ((android.view.ViewGroup) appModeSq.getParent()).removeView(appModeSq);
+        appModeSq.setOpen(hub().appModeOn);
+        return appModeSq;
+    }
+
+    /** La columna del Modo APP va a la derecha del extendido, sobre la barra de abajo. */
+    private void placeAppCast() {
+        if (appCast == null || rootView == null) return;
+        if (side == 1 || fileMode || !ScreenCast.shown) { appCast.setVisibility(View.GONE); return; }
+        int vh = cbar != null ? cbar.visualHeight() : 0;
+        boolean top = cbar != null && cbar.edgeTop();
+        appCast.place(rootView.getWidth(), rootView.getHeight(), (top ? vh : 0) + dp(6), (top ? 0 : vh) + dp(6), dp(6));
+    }
 
     /** "Acerca de" en el menú inicio (con el punto rojo si hay una versión nueva). */
     private SquareButton aboutBtn() {
@@ -732,6 +764,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         int vh = cbar.visualHeight();
         if (top) { pTop = vh; pBottom = 0; } else { pTop = 0; pBottom = vh; }
         pane.setPadding(0, pTop, 0, pBottom);
+        placeAppCast();
         // la tarjeta de notificación del extendido va arriba a la izquierda, sin taparse con la barra
         FrameLayout.LayoutParams fl = (FrameLayout.LayoutParams) floatNotif.getLayoutParams();
         fl.topMargin = top ? vh + dp(8) : dp(14);
@@ -1994,6 +2027,18 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 });
                 break;
             case "updMsg":
+            case "appCast":
+                main.post(this::placeAppCast);
+                break;
+            case "appState":
+                main.post(() -> { if (appModeSq != null) appModeSq.setOpen(hub().appModeOn); placeAppCast(); });
+                break;
+            case "appHint":
+                main.post(() -> Toast.makeText(this, "Esa app no gira. Abre \"Modo APP\" en el menú inicio para verla derecha aquí", Toast.LENGTH_LONG).show());
+                break;
+            case "appNoTouch":
+                main.post(() -> AppCastView.noTouch(this));
+                break;
             case "boostMsg":
                 main.post(() -> Toast.makeText(this, m.optString("msg"), Toast.LENGTH_LONG).show());
                 break;
