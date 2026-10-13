@@ -211,12 +211,30 @@ public class Link {
         Conn old = conn;
         conn = c;
         if (old != null) old.close();
+        try { s.setKeepAlive(true); } catch (Exception ignored) { }
         state(CONNECTED, null);
+        // latido: cada 5 s un mensaje corto. Si el otro teléfono se apaga o pierde el WiFi de golpe, sin esto la
+        // conexión parecería abierta para siempre; con él, a los 20 s sin noticias se da por perdida.
+        final JSONObject hb = new JSONObject();
+        try { hb.put("t", "hb"); } catch (Exception ignored) { }
+        main.postDelayed(new Runnable() {
+            @Override public void run() {
+                if (conn != c) return;
+                send(hb);
+                main.postDelayed(this, 5000);
+            }
+        }, 1000);
         new Thread(() -> {
             try {
                 BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
                 String line;
+                boolean beats = false;
                 while ((line = in.readLine()) != null) {
+                    if (line.startsWith("{\"t\":\"hb\"")) {
+                        // el otro teléfono también late: desde ahora, 20 s de silencio = conexión perdida
+                        if (!beats) { beats = true; try { s.setSoTimeout(20000); } catch (Exception ignored) { } }
+                        continue;
+                    }
                     try {
                         final JSONObject o = new JSONObject(line);
                         main.post(() -> listener.onMessage(o));

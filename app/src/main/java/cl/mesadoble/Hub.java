@@ -320,6 +320,12 @@ public class Hub implements Link.Listener {
             }
         }
         if ("torch".equals(t) || "torchState".equals(t)) { Torch.onMessage(app, this, m); return; }
+        // el extendido pide activar las notificaciones: si ChronOS no está a la vista en el principal, un aviso para abrirlo
+        if ("notifSetup".equals(t) && isPrincipal() && !foreground && !NotifService.enabled(app)) {
+            startOrNotify(new Intent(app, MainActivity.class).putExtra("notifSetup", true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                    83, "Notificaciones en la barra", "Toca para activarlas en este teléfono");
+            return;
+        }
         if ("phoneOffer".equals(t) && isPrincipal()) { lostOffered = false; PhoneMode.offer(app, this, m.optString("title", "Modo teléfono normal")); return; }
         // fotos, música y video: se ven en el principal; los controles, en el extendido
         if ("mPlay".equals(t)) { if (isPrincipal()) MediaHub.open(app, m.optString("kind"), MediaHub.paths(m), m.optInt("idx")); return; }

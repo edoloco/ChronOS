@@ -209,6 +209,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         handleShare(getIntent());
         String bw = getIntent().getStringExtra("bindWidget");
         if (bw != null) bindRequested(bw, 0);
+        if (getIntent().getBooleanExtra("notifSetup", false)) { getIntent().removeExtra("notifSetup"); main.post(this::guideNotifs); }
         if (getIntent().getBooleanExtra("phoneNow", false)) { getIntent().removeExtra("phoneNow"); main.post(() -> PhoneMode.enter(this, hub)); }
     }
 
@@ -216,6 +217,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         super.onNewIntent(intent);
         String bw = intent.getStringExtra("bindWidget");
         if (bw != null) { intent.removeExtra("bindWidget"); bindRequested(bw, 0); }
+        if (intent.getBooleanExtra("notifSetup", false)) { intent.removeExtra("notifSetup"); main.post(this::guideNotifs); }
         if (intent.getBooleanExtra("phoneNow", false)) { intent.removeExtra("phoneNow"); main.post(() -> PhoneMode.enter(this, hub)); }
         handleShare(intent);
     }
@@ -226,6 +228,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         hub.foreground = true;
         resumed = true;
         if (side == 1) PhoneMode.exit(this, hub);   // se volvió a ChronOS: deja el modo teléfono normal
+        // Xiaomi a veces detiene el lector de notificaciones: se le pide a Android que lo vuelva a conectar
+        if (side == 1 && NotifService.instance == null && NotifService.enabled(this))
+            try { android.service.notification.NotificationListenerService.requestRebind(new android.content.ComponentName(this, NotifService.class)); } catch (Exception ignored) { }
         Updater.checkQuiet(this, false, this::showUpdateBadge);
         // el principal quedó esperando el permiso de instalar: si ya lo tiene, sigue la actualización
         if (side == 1 && prefs.getBoolean("pendingUpdate", false) && Updater.canInstall(this)) Updater.updateFromRemote(this, hub);
@@ -592,7 +597,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         startPanel.addView(head);
         // orden: lo más usado arriba
         SquareButton[] order = {byKind(SquareButton.APPS), settingsBtn, byKind(SquareButton.DESKS), statusBtn,
-                byKind(SquareButton.TOOLS), byKind(SquareButton.KEYBOARD), filesBtn, aboutBtn(), null, null, null, null};
+                byKind(SquareButton.TOOLS), byKind(SquareButton.KEYBOARD), filesBtn, aboutBtn(), phoneBtn(), null, null, null};
         LinearLayout row = null;
         for (int i = 0; i < order.length; i++) {
             if (i % 4 == 0) {
@@ -625,6 +630,19 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     private SquareButton filesBtn, aboutSq;
+
+    private SquareButton phoneSq;
+
+    /** "Teléfono normal" en el menú inicio: el principal vuelve a su pantalla de inicio y su teclado de siempre. */
+    private SquareButton phoneBtn() {
+        if (phoneSq == null) {
+            phoneSq = new SquareButton(this, SquareButton.HOME, "Teléfono normal", false, night);
+            phoneSq.setOnClickListener(v -> { showStart(false); phoneModeNow(); });
+            squares.add(phoneSq);
+        }
+        if (phoneSq.getParent() instanceof android.view.ViewGroup) ((android.view.ViewGroup) phoneSq.getParent()).removeView(phoneSq);
+        return phoneSq;
+    }
 
     /** "Acerca de" en el menú inicio (con el punto rojo si hay una versión nueva). */
     private SquareButton aboutBtn() {
@@ -945,9 +963,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                         principal ? "Muestra las notificaciones animadas en la barra del reloj (o en el extendido)"
                                   : "Se activa en el principal", principal && NotifService.enabled(this),
                         () -> {
-                            if (!principal) { Toast.makeText(this, "Actívalo en el principal: Ajustes → Notificaciones", Toast.LENGTH_LONG).show(); return; }
-                            openSettings("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS", null,
-                                    "Activa ChronOS en \"Acceso a notificaciones\" y vuelve.");
+                            if (!principal) { hub.send("notifSetup"); Toast.makeText(this, "Sigue los pasos en el principal", Toast.LENGTH_LONG).show(); return; }
+                            guideNotifs();
                         })
                 .option(Ui.RECEIVE, -1, "Llamadas: " + (principal ? (CallHub.ready(this) ? "listo" : "falta permiso") : "contestar aquí"),
                         principal ? "Permitir que el extendido conteste o cuelgue las llamadas de este teléfono"
@@ -1180,6 +1197,28 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         } catch (Exception e) {
             Toast.makeText(this, "No pude abrir esa pantalla de Ajustes", Toast.LENGTH_LONG).show();
         }
+    }
+
+    /**
+     * Notificaciones en la barra: Android 13+ bloquea el "Acceso a notificaciones" de las apps instaladas fuera de
+     * Play Store hasta que se permiten los ajustes restringidos de ChronOS. Por eso son dos pasos.
+     */
+    void guideNotifs() {
+        if (NotifService.enabled(this)) {
+            Toast.makeText(this, "Las notificaciones ya están activas en la barra", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        new Ui.Sheet(this)
+                .title("Notificaciones en la barra")
+                .message("Android pide dos pasos. Si en el paso 2 ChronOS aparece gris o dice \"ajuste restringido\", haz primero el paso 1.")
+                .option(Ui.GEAR, "1. Permitir ajustes restringidos", "Info de la app → ⋮ (arriba a la derecha) → Permitir ajustes restringidos", () ->
+                        openSettings(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName()),
+                                "Toca ⋮ arriba a la derecha → \"Permitir ajustes restringidos\" y vuelve."))
+                .option(Ui.NOTE, "2. Acceso a notificaciones", "Activa ChronOS en la lista", () ->
+                        openSettings("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS", null,
+                                "Activa ChronOS en \"Acceso a notificaciones\" y vuelve."))
+                .button("Listo", false, null)
+                .show();
     }
 
     private void guideAccessibility() {
@@ -2031,13 +2070,16 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                     else if (side == 0) floatNotif.show(m);                   // el principal está en otra app: aquí, arriba a la izquierda
                 });
                 break;
-            case "updMsg":
+            case "notifSetup":
+                if (side == 1) main.post(this::guideNotifs);
+                break;
             case "phoneOffer":
                 main.post(() -> phoneOffer(m.optString("title")));
                 break;
             case "torchUi":
                 main.post(() -> desk.invalidate());
                 break;
+            case "updMsg":
             case "boostMsg":
                 main.post(() -> Toast.makeText(this, m.optString("msg"), Toast.LENGTH_LONG).show());
                 break;
