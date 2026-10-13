@@ -98,6 +98,7 @@ public class MediaService extends Service implements MediaHub.Controller {
             prepared = true;
             Boost.serve();
             Hub.get(this).send("boost", "on", true);
+            Boost.syncVolume(this, Hub.get(this), true);
             be = new Boost.Engine(path, startMs, err -> h.post(() -> {
                 if (be == null) return;
                 if (idx + 1 < list.size()) start(idx + 1);
@@ -109,6 +110,7 @@ public class MediaService extends Service implements MediaHub.Controller {
             return;
         }
         Hub.get(this).send("boost", "on", false);
+        Boost.syncVolume(this, Hub.get(this), false);
         mp = new MediaPlayer();
         prepared = false;
         try {
@@ -167,6 +169,7 @@ public class MediaService extends Service implements MediaHub.Controller {
         h.removeCallbacks(tick);
         release();
         Hub.get(this).send("boost", "on", false);
+        Boost.syncVolume(this, Hub.get(this), false);
         if (MediaHub.current == this) MediaHub.current = null;
         MediaHub.end(this, MediaHub.AUDIO);
         stopForeground(true);

@@ -244,8 +244,13 @@ public class Hub implements Link.Listener {
             return;
         }
         if ("alarms".equals(t)) { openAlarms(); return; }
-        if ("boost".equals(t)) { if (!isPrincipal()) Boost.listen(app, this, m.optBoolean("on")); return; }
+        if ("boost".equals(t)) {
+            if (!isPrincipal()) Boost.listen(app, this, m.optBoolean("on"));
+            else Boost.syncVolume(app, this, m.optBoolean("on"));
+            return;
+        }
         if ("boostSet".equals(t)) { if (isPrincipal()) Boost.setEnabled(app, this, m.optBoolean("on")); return; }
+        if ("boostVol".equals(t)) { Boost.applyVolume(app, m.optDouble("f")); return; }
         if ("call".equals(t)) { if (!isPrincipal()) CallHub.onCall(app, this, m); }
         if ("callCmd".equals(t)) { if (isPrincipal()) CallHub.command(app, this, m); return; }
         if ("game".equals(t)) { if (!isPrincipal()) GameBg.handle(app, this, m); return; }
@@ -279,12 +284,14 @@ public class Hub implements Link.Listener {
         if ("mPlay".equals(t)) { if (isPrincipal()) MediaHub.open(app, m.optString("kind"), MediaHub.paths(m), m.optInt("idx")); return; }
         if ("mCmd".equals(t)) { if (isPrincipal()) MediaHub.command(app, m); return; }
         // un video empezó en el principal: el control de video se abre UNA vez (si se cierra, no vuelve hasta otro video)
+        // (si ChronOS está a la vista, los controles salen en su action bar)
         if ("mActive".equals(t) && !isPrincipal() && m.optBoolean("on") && m.optBoolean("video") && m.optBoolean("fresh")
-                && !KeyboardActivity.showingMedia)
+                && !KeyboardActivity.showingMedia && !foreground)
             MediaHub.openControls(app, MediaHub.VIDEO);
         if ("mOpen".equals(t)) {
             // la música se controla desde la action bar cuando ChronOS está a la vista
-            if (!isPrincipal() && !(MediaHub.AUDIO.equals(m.optString("kind")) && foreground)) MediaHub.openControls(app, m.optString("kind"));
+            String k = m.optString("kind");
+            if (!isPrincipal() && !((MediaHub.AUDIO.equals(k) || MediaHub.VIDEO.equals(k)) && foreground)) MediaHub.openControls(app, k);
             return;
         }
         // widgets: todos viven en el principal

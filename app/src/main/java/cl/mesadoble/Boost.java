@@ -36,8 +36,45 @@ final class Boost {
     /** Desde cualquiera de los dos: se guarda en el principal y la música en curso cambia de modo. */
     static void setEnabled(Context c, Hub hub, boolean on) {
         c.getSharedPreferences("mesa", Context.MODE_PRIVATE).edit().putBoolean("boost", on).apply();
-        if (hub.isPrincipal()) MediaService.boostChanged(c);
+        if (hub.isPrincipal()) { MediaService.boostChanged(c); VideoActivity.boostChanged(c); }
         else if (hub.connected()) hub.send("boostSet", "on", on);
+    }
+
+    // ---------------- volumen: en Boost los dos teléfonos suenan al mismo volumen ----------------
+
+    private static volatile boolean volLoop;
+    private static int lastVol = -1;
+
+    /** Mientras hay Boost, cada teléfono avisa al otro si cambió su volumen (en fracción, por si tienen escalas distintas). */
+    static void syncVolume(Context c, Hub hub, boolean on) {
+        if (!on) { volLoop = false; return; }
+        if (volLoop) return;
+        volLoop = true;
+        lastVol = -1;
+        android.media.AudioManager am = (android.media.AudioManager) c.getSystemService(Context.AUDIO_SERVICE);
+        if (am == null) return;
+        new Thread(() -> {
+            while (volLoop) {
+                int v = am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC);
+                if (v != lastVol) {
+                    lastVol = v;
+                    double f = v / (double) Math.max(1, am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC));
+                    if (hub.connected()) hub.send("boostVol", "f", f);
+                }
+                try { Thread.sleep(350); } catch (InterruptedException e) { return; }
+            }
+        }, "boost-volumen").start();
+    }
+
+    /** Llegó el volumen del otro teléfono: este queda igual. */
+    static void applyVolume(Context c, double f) {
+        android.media.AudioManager am = (android.media.AudioManager) c.getSystemService(Context.AUDIO_SERVICE);
+        if (am == null) return;
+        int max = am.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC);
+        int v = (int) Math.round(f * max);
+        if (v == am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)) return;
+        lastVol = v;   // no rebota de vuelta
+        try { am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, v, 0); } catch (Exception ignored) { }
     }
 
     // ---------------- reloj y sincronía ----------------
@@ -142,6 +179,7 @@ final class Boost {
 
     static void listen(Context c, Hub hub, boolean on) {
         Thread cur = sink;
+        syncVolume(c, hub, on);
         if (on && cur != null && cur.isAlive()) return;   // ya está escuchando
         stopSink();
         if (!on) return;
@@ -275,6 +313,18 @@ final class Boost {
         void pause() { playing = false; }
         boolean playing() { return playing; }
         long pos() { return posMs; }
+        /** Lo que se está oyendo ahora (lo decodificado menos lo que aún espera en el parlante). */
+        private volatile AudioTrack curTrack;
+        private volatile long curWritten;
+        private volatile int curRate = 44100;
+        long heard() {
+            AudioTrack t = curTrack;
+            if (t == null) return posMs;
+            try {
+                long head = t.getPlaybackHeadPosition() & 0xffffffffL;
+                return Math.max(0, posMs - Math.max(0, curWritten - head) * 1000 / Math.max(1, curRate));
+            } catch (Exception e) { return posMs; }
+        }
         long dur() { return durMs; }
         void seek(long ms) { seekMs = Math.max(0, ms); }
         void release() { stop = true; }
@@ -355,7 +405,8 @@ final class Boost {
                             send(sr, left, frames * 2, timeOf(track, written, sr));   // con la hora en que suena aquí
                             track.write(right, 0, frames * 2);   // marca el ritmo
                             written += frames;
-                            posMs = info.presentationTimeUs / 1000;
+                            curTrack = track; curWritten = written; curRate = sr;
+                            posMs = info.presentationTimeUs / 1000 + frames * 1000L / Math.max(1, sr);
                         }
                         codec.releaseOutputBuffer(oi, false);
                         if ((info.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) { ended = true; break; }

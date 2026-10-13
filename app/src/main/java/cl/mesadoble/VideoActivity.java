@@ -41,6 +41,10 @@ public class VideoActivity extends Activity implements MediaHub.Controller {
     private ArrayList<String> list = new ArrayList<>();
     private int idx;
     private boolean prepared, dragging;
+    // Boost: el sonido del video lo toca el motor de Boost (derecho aquí, izquierdo en el extendido) y la imagen lo sigue
+    private android.media.MediaPlayer player;
+    private Boost.Engine boost;
+    static VideoActivity instance;
 
     private int dp(float v) { return Math.round(v * getResources().getDisplayMetrics().density); }
 
@@ -122,7 +126,7 @@ public class VideoActivity extends Activity implements MediaHub.Controller {
                 | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                 | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
 
-        video.setOnPreparedListener(mp -> { prepared = true; video.start(); showControls(); tick.run(); });
+        video.setOnPreparedListener(mp -> { player = mp; prepared = true; video.start(); startBoost(0); showControls(); tick.run(); });
         video.setOnCompletionListener(mp -> { if (idx + 1 < list.size()) load(idx + 1); else { playBtn.setKind(MediaIcon.PLAY); showControls(); publish(); } });
         video.setOnErrorListener((mp, w, e) -> { title.setText("No se puede reproducir este video"); return true; });
         handle(getIntent());
@@ -138,6 +142,7 @@ public class VideoActivity extends Activity implements MediaHub.Controller {
     }
 
     private void load(int i) {
+        stopBoost();
         idx = i;
         prepared = false;
         title.setText(MediaHub.title(list.get(idx)) + (list.size() > 1 ? "   ·   " + (idx + 1) + " de " + list.size() : ""));
@@ -145,8 +150,69 @@ public class VideoActivity extends Activity implements MediaHub.Controller {
         playBtn.setKind(MediaIcon.PAUSE);
     }
 
+    // ---------------- Boost en videos ----------------
+
+    private void startBoost(long fromMs) {
+        stopBoost();
+        if (!Boost.enabled(this) || player == null) return;
+        try { player.setVolume(0f, 0f); } catch (Exception ignored) { }
+        Boost.serve();
+        Hub hub = Hub.get(this);
+        hub.send("boost", "on", true);
+        Boost.syncVolume(this, hub, true);
+        boost = new Boost.Engine(list.get(idx), fromMs > 0 ? fromMs : video.getCurrentPosition(), err -> { });
+        if (!video.isPlaying()) boost.pause();
+        boost.start();
+        h.removeCallbacks(sync);
+        h.postDelayed(sync, 600);
+    }
+
+    private void stopBoost() {
+        h.removeCallbacks(sync);
+        if (boost != null) { boost.release(); boost = null; }
+        if (player != null) {
+            try { player.setVolume(1f, 1f); } catch (Exception ignored) { }
+            try { if (video.isPlaying()) player.setPlaybackParams(player.getPlaybackParams().setSpeed(1f)); } catch (Exception ignored) { }
+        }
+    }
+
+    /** Se activó o desactivó Boost con el video andando. */
+    static void boostChanged(android.content.Context c) {
+        VideoActivity v = instance;
+        if (v == null) return;
+        v.h.post(() -> {
+            if (Boost.enabled(v)) v.startBoost(v.video.getCurrentPosition());
+            else {
+                v.stopBoost();
+                Hub hub = Hub.get(v);
+                hub.send("boost", "on", false);
+                Boost.syncVolume(v, hub, false);
+            }
+        });
+    }
+
+    /** La imagen sigue al sonido: si se separan un poco se ajusta la velocidad; si se separan mucho, salta. */
+    private final Runnable sync = new Runnable() {
+        @Override public void run() {
+            if (boost == null || player == null) return;
+            try {
+                if (video.isPlaying() && boost.playing()) {
+                    long drift = boost.heard() - video.getCurrentPosition();   // > 0: la imagen va atrasada
+                    if (Math.abs(drift) > 350) { video.seekTo((int) boost.heard()); player.setPlaybackParams(player.getPlaybackParams().setSpeed(1f)); }
+                    else {
+                        float sp = 1f + Math.max(-0.06f, Math.min(0.06f, drift / 3000f));
+                        if (Math.abs(drift) < 25) sp = 1f;
+                        player.setPlaybackParams(player.getPlaybackParams().setSpeed(sp));
+                    }
+                }
+            } catch (Exception ignored) { }
+            h.postDelayed(this, 400);
+        }
+    };
+
     @Override protected void onResume() {
         super.onResume();
+        instance = this;
         MediaHub.current = this;
         MediaHub.currentKind = MediaHub.VIDEO;
     }
@@ -164,6 +230,13 @@ public class VideoActivity extends Activity implements MediaHub.Controller {
         closed = true;
         h.removeCallbacksAndMessages(null);
         if (MediaHub.current == this) MediaHub.current = null;
+        if (instance == this) instance = null;
+        if (boost != null) {
+            stopBoost();
+            Hub hub = Hub.get(this);
+            hub.send("boost", "on", false);
+            Boost.syncVolume(this, hub, false);
+        }
         MediaHub.end(this, MediaHub.VIDEO);
     }
 
@@ -192,7 +265,7 @@ public class VideoActivity extends Activity implements MediaHub.Controller {
         try {
             s.put("kind", MediaHub.VIDEO); s.put("title", MediaHub.title(list.get(idx))); s.put("sub", list.size() > 1 ? (idx + 1) + " de " + list.size() : "");
             s.put("pos", prepared ? video.getCurrentPosition() : 0); s.put("dur", prepared ? video.getDuration() : 0);
-            s.put("play", video.isPlaying()); s.put("idx", idx); s.put("n", list.size());
+            s.put("play", video.isPlaying()); s.put("idx", idx); s.put("n", list.size()); s.put("boost", boost != null);
         } catch (Exception ignored) { }
         MediaHub.state(this, s);
     }
@@ -208,11 +281,15 @@ public class VideoActivity extends Activity implements MediaHub.Controller {
         String a = m.optString("a");
         double v = m.optDouble("v", 0);
         switch (a) {
-            case "toggle": if (video.isPlaying()) video.pause(); else video.start(); break;
-            case "play": video.start(); break;
-            case "pause": video.pause(); break;
-            case "seek": if (prepared) video.seekTo((int) v); break;
-            case "rel": if (prepared) video.seekTo(Math.max(0, Math.min(video.getDuration(), video.getCurrentPosition() + (int) v))); break;
+            case "toggle": if (video.isPlaying()) { video.pause(); if (boost != null) boost.pause(); } else { video.start(); if (boost != null) boost.play(); } break;
+            case "play": video.start(); if (boost != null) boost.play(); break;
+            case "pause": video.pause(); if (boost != null) boost.pause(); break;
+            case "seek": if (prepared) { video.seekTo((int) v); if (boost != null) boost.seek((long) v); } break;
+            case "rel": if (prepared) {
+                int to = Math.max(0, Math.min(video.getDuration(), video.getCurrentPosition() + (int) v));
+                video.seekTo(to);
+                if (boost != null) boost.seek(to);
+            } break;
             case "next": if (idx + 1 < list.size()) load(idx + 1); break;
             case "prev": if (prepared && video.getCurrentPosition() > 3000) video.seekTo(0); else if (idx > 0) load(idx - 1); break;
             case "stop": finish(); return;

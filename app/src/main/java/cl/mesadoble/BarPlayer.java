@@ -39,11 +39,11 @@ public class BarPlayer extends LinearLayout {
         play = new MediaIcon(c, MediaIcon.PAUSE, 42, (ink & 0x00FFFFFF) | 0x26000000, ink);
         MediaIcon fwd = new MediaIcon(c, MediaIcon.FWD10, 34, bg, ink);
         MediaIcon next = new MediaIcon(c, MediaIcon.NEXT, 34, bg, ink);
-        prev.setOnClickListener(v -> MediaHub.cmd(c, "prev", 0));
-        back.setOnClickListener(v -> MediaHub.cmd(c, "rel", -10000));
-        play.setOnClickListener(v -> MediaHub.cmd(c, "toggle", 0));
-        fwd.setOnClickListener(v -> MediaHub.cmd(c, "rel", 10000));
-        next.setOnClickListener(v -> MediaHub.cmd(c, "next", 0));
+        prev.setOnClickListener(v -> act("prev", 0, "prev"));
+        back.setOnClickListener(v -> act("rel", -10000, "rw"));
+        play.setOnClickListener(v -> act("toggle", 0, "play"));
+        fwd.setOnClickListener(v -> act("rel", 10000, "ff"));
+        next.setOnClickListener(v -> act("next", 0, "next"));
         for (View v : new View[]{prev, back, play, fwd, next}) addView(v);
 
         LinearLayout mid = new LinearLayout(c);
@@ -89,7 +89,7 @@ public class BarPlayer extends LinearLayout {
         });
         addView(boost, new LayoutParams(-2, dp(30)));
         MediaIcon close = new MediaIcon(c, MediaIcon.CLOSE, 30, bg, ink);
-        close.setOnClickListener(v -> MediaHub.cmd(c, "stop", 0));
+        close.setOnClickListener(v -> { if (external) onClose.run(); else MediaHub.cmd(c, "stop", 0); });
         LayoutParams cl = new LayoutParams(-2, -2);
         cl.setMarginStart(dp(4));
         addView(close, cl);
@@ -105,9 +105,32 @@ public class BarPlayer extends LinearLayout {
         boost.setTextColor(on ? 0xFFFFFFFF : ink);
     }
 
-    /** Estado de la música (mState de tipo audio). */
+    // ---- video de otra app (YouTube, Netflix…): sin barra de avance; los botones mandan teclas multimedia
+    private boolean external;
+    private Runnable onClose = () -> { };
+    public void setOnClose(Runnable r) { onClose = r; }
+    public boolean isExternal() { return external; }
+
+    public void setExternal(boolean on) {
+        external = on;
+        if (on) {
+            title.setText("▶  Video en el principal");
+            seek.setVisibility(INVISIBLE);
+            pos.setText(""); dur.setText("");
+            play.setKind(MediaIcon.PAUSE);
+        } else seek.setVisibility(VISIBLE);
+    }
+
+    private void act(String cmd, double v, String key) {
+        if (external) { if (hub.isPrincipal()) hub.media(key); else hub.send("media", "k", key); }
+        else MediaHub.cmd(getContext(), cmd, v);
+    }
+
+    /** Estado del reproductor (mState de música o video). */
     public void update(JSONObject m) {
-        title.setText(m.optString("title") + (m.optString("sub").isEmpty() ? "" : "  ·  " + m.optString("sub")));
+        if (external) setExternal(false);
+        title.setText((MediaHub.VIDEO.equals(m.optString("kind")) ? "▶  " : "♪  ") + m.optString("title")
+                + (m.optString("sub").isEmpty() ? "" : "  ·  " + m.optString("sub")));
         duration = m.optLong("dur");
         dur.setText(MediaHub.fmt(duration));
         if (!dragging) {

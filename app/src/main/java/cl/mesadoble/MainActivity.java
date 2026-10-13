@@ -678,6 +678,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             }
             cbar.setNavRow(navRow);
             barPlayer = new BarPlayer(this, hub, ChronoBar.ink(night));
+            barPlayer.setOnClose(() -> { cbar.showPlayer(false); main.postDelayed(() -> layoutChrono(false), 400); });
             cbar.setPlayer(barPlayer);
             recentsBar = new RecentsBar(this, ChronoBar.ink(night));
             recentsBar.setPick(this::onRecent);
@@ -1976,12 +1977,19 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                     else if (side == 0) floatNotif.show(m);                   // el principal está en otra app: aquí, arriba a la izquierda
                 });
                 break;
+            case "mActive":   // video en otra app del principal: los controles salen en la barra
+                if (side == 0 && barPlayer != null && m.optBoolean("video") && m.optBoolean("on") && m.optBoolean("fresh"))
+                    main.post(() -> { boolean was = cbar.playerShown(); barPlayer.setExternal(true); cbar.showPlayer(true); if (!was) main.postDelayed(() -> layoutChrono(false), 560); });
+                else if (side == 0 && barPlayer != null && !m.optBoolean("on"))   // terminó (o se pausó largo): se recoge
+                    main.postDelayed(() -> { if (barPlayer != null && barPlayer.isExternal() && cbar.playerShown()) { cbar.showPlayer(false); main.postDelayed(() -> layoutChrono(false), 400); } }, 8000);
+                break;
             case "mState":
-                if (MediaHub.AUDIO.equals(m.optString("kind")) && barPlayer != null)
+                if ((MediaHub.AUDIO.equals(m.optString("kind")) || MediaHub.VIDEO.equals(m.optString("kind"))) && barPlayer != null)
                     main.post(() -> { boolean was = cbar.playerShown(); cbar.showPlayer(true); barPlayer.update(m); if (!was) main.postDelayed(() -> { layoutChrono(false); }, 560); });
                 break;
             case "mEnd":
-                if (MediaHub.AUDIO.equals(m.optString("kind")) && cbar != null) main.post(() -> { cbar.showPlayer(false); main.postDelayed(() -> layoutChrono(false), 400); });
+                if ((MediaHub.AUDIO.equals(m.optString("kind")) || MediaHub.VIDEO.equals(m.optString("kind"))) && cbar != null)
+                    main.post(() -> { cbar.showPlayer(false); main.postDelayed(() -> layoutChrono(false), 400); });
                 break;
             case "notifs":
                 main.post(() -> { desk.setNotified(m.optJSONArray("p")); if (recentsBar != null) recentsBar.setNotified(m.optJSONArray("p")); });
