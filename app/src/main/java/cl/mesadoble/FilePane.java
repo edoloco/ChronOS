@@ -8,7 +8,9 @@ import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.TextUtils;
+import android.graphics.Canvas;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
@@ -153,6 +155,158 @@ public class FilePane extends FrameLayout implements Link.Listener {
         homeScroll.addView(home);
         body.addView(homeScroll, new LayoutParams(-1, -1));
         addView(col, new LayoutParams(-1, -1));
+        transferView = new TransferView(a, night);
+        transferView.setListener(() -> {
+            if (remote()) hub.send("fmCancel"); else FileServer.get(a).cancelJob();
+            transferView.update("Cancelando…", -1, "");
+        });
+        addView(transferView, new LayoutParams(-1, -1));
+        setWillNotDraw(false);
+        paper.setColor(0xFFFFFFFF);
+        paper.setShadowLayer(6 * dp, 0, 3, 0x55000000);
+        line.setColor(0xFFB8C4CE);
+        line.setStrokeWidth(1.6f * dp);
+        badge.setColor(th.accent);
+        badgeText.setColor(0xFFFFFFFF);
+        badgeText.setTextSize(13 * dp);
+        badgeText.setTextAlign(android.graphics.Paint.Align.CENTER);
+        badgeText.setTypeface(Typeface.DEFAULT_BOLD);
+    }
+
+    // ---------------- lanzar archivos a la otra pantalla (con la animación de las hojas) ----------------
+
+    private final TransferView transferView;
+    private final android.graphics.Paint paper = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG),
+            line = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG), badge = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG),
+            badgeText = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG), glow = new android.graphics.Paint();
+    private float downX, downY, gx, gy, homeX, homeY;
+    private int downPos = -1;
+    private boolean dragging, flying;
+    private android.view.VelocityTracker vt;
+
+    /** Hacia dónde está el otro teléfono: abajo/arriba en horizontal, derecha/izquierda en vertical. */
+    private float dirX() { return landscape() ? 0 : hub.isPrincipal() ? 1 : -1; }
+    private float dirY() { return landscape() ? (hub.isPrincipal() ? 1 : -1) : 0; }
+    private boolean landscape() { return getResources().getConfiguration().orientation != android.content.res.Configuration.ORIENTATION_PORTRAIT; }
+
+    private int listPos(float x, float y) {
+        int[] me = new int[2], l = new int[2];
+        getLocationInWindow(me);
+        list.getLocationInWindow(l);
+        return list.pointToPosition((int) (x - (l[0] - me[0])), (int) (y - (l[1] - me[1])));
+    }
+
+    private boolean onSelected(int pos) { return pos >= 0 && pos < entries.size() && sel.contains(entries.get(pos).path); }
+
+    @Override public boolean onInterceptTouchEvent(MotionEvent e) {
+        if (flying) return true;
+        if (!"dir".equals(mode) && sel.isEmpty()) return false;
+        switch (e.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                downX = e.getX(); downY = e.getY(); dragging = false;
+                downPos = listPos(downX, downY);
+                if (vt != null) vt.recycle();
+                vt = android.view.VelocityTracker.obtain();
+                vt.addMovement(e);
+                return false;
+            case MotionEvent.ACTION_MOVE:
+                if (vt != null) vt.addMovement(e);
+                // mantener presionado elige el archivo y, sin soltar, ya se puede arrastrar
+                if (!dragging && onSelected(listPos(downX, downY))
+                        && Math.hypot(e.getX() - downX, e.getY() - downY) > android.view.ViewConfiguration.get(getContext()).getScaledTouchSlop() * 1.5f) {
+                    dragging = true;
+                    homeX = downX; homeY = downY;
+                    gx = e.getX(); gy = e.getY();
+                    performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK);
+                    invalidate();
+                    return true;
+                }
+                return false;
+        }
+        return false;
+    }
+
+    @Override public boolean onTouchEvent(MotionEvent e) {
+        if (!dragging) return super.onTouchEvent(e);
+        if (vt != null) vt.addMovement(e);
+        switch (e.getActionMasked()) {
+            case MotionEvent.ACTION_MOVE:
+                gx = e.getX(); gy = e.getY();
+                invalidate();
+                return true;
+            case MotionEvent.ACTION_UP: case MotionEvent.ACTION_CANCEL: {
+                float vx = 0, vy = 0;
+                if (vt != null) { vt.computeCurrentVelocity(1000); vx = vt.getXVelocity(); vy = vt.getYVelocity(); vt.recycle(); vt = null; }
+                float dx = dirX(), dy = dirY();
+                float toward = vx * dx + vy * dy;   // px/s hacia el otro teléfono
+                float edgeDist = dy > 0 ? getHeight() - gy : dy < 0 ? gy : dx > 0 ? getWidth() - gx : gx;
+                float extent = dy != 0 ? getHeight() : getWidth();
+                boolean go = e.getActionMasked() == MotionEvent.ACTION_UP && (toward > 900 * dp || edgeDist < extent * 0.14f);
+                if (go && otherPath.isEmpty()) { toast("Abre una carpeta en la otra pantalla para recibirlo"); go = false; }
+                if (go) flyOut(); else flyBack();
+                return true;
+            }
+        }
+        return true;
+    }
+
+    private void fly(float tx, float ty, long ms, Runnable end) {
+        flying = true;
+        final float sx = gx, sy = gy;
+        android.animation.ValueAnimator an = android.animation.ValueAnimator.ofFloat(0, 1);
+        an.setDuration(ms);
+        an.setInterpolator(new android.view.animation.DecelerateInterpolator());
+        an.addUpdateListener(v -> { float t = (float) v.getAnimatedValue(); gx = sx + (tx - sx) * t; gy = sy + (ty - sy) * t; invalidate(); });
+        an.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(android.animation.Animator x) { flying = false; dragging = false; invalidate(); if (end != null) end.run(); }
+        });
+        an.start();
+    }
+
+    private void flyOut() {
+        float dx = dirX(), dy = dirY();
+        float tx = dx > 0 ? getWidth() + 80 * dp : dx < 0 ? -80 * dp : gx;
+        float ty = dy > 0 ? getHeight() + 80 * dp : dy < 0 ? -80 * dp : gy;
+        fly(tx, ty, 260, () -> transfer("dir".equals(mode)));   // en carpetas se mueve; en las categorías, se copia
+    }
+
+    private void flyBack() { fly(homeX, homeY, 220, null); }
+
+    @Override protected void dispatchDraw(Canvas c) {
+        super.dispatchDraw(c);
+        if (!dragging) return;
+        int W = getWidth(), H = getHeight();
+        float dx = dirX(), dy = dirY();
+        // brillo en el borde del otro teléfono: más fuerte mientras más cerca
+        float edgeDist = dy > 0 ? H - gy : dy < 0 ? gy : dx > 0 ? W - gx : gx;
+        float extent = dy != 0 ? H : W;
+        int al = (int) (80 + 175 * Math.max(0, 1 - edgeDist / (extent * 0.5f)));
+        int col = (th.accent & 0x00FFFFFF) | (al << 24);
+        float band = 36 * dp;
+        if (dy > 0) { glow.setShader(new android.graphics.LinearGradient(0, H, 0, H - band, col, 0, android.graphics.Shader.TileMode.CLAMP)); c.drawRect(0, H - band, W, H, glow); }
+        else if (dy < 0) { glow.setShader(new android.graphics.LinearGradient(0, 0, 0, band, col, 0, android.graphics.Shader.TileMode.CLAMP)); c.drawRect(0, 0, W, band, glow); }
+        else if (dx > 0) { glow.setShader(new android.graphics.LinearGradient(W, 0, W - band, 0, col, 0, android.graphics.Shader.TileMode.CLAMP)); c.drawRect(W - band, 0, W, H, glow); }
+        else { glow.setShader(new android.graphics.LinearGradient(0, 0, band, 0, col, 0, android.graphics.Shader.TileMode.CLAMP)); c.drawRect(0, 0, band, H, glow); }
+        // montón de hojas bajo el dedo
+        int n = Math.min(3, sel.size());
+        for (int i = n - 1; i >= 0; i--) drawPaper(c, gx + i * 5 * dp, gy - 40 * dp + i * 4 * dp, (i - 1) * 7f);
+        c.drawCircle(gx + 22 * dp, gy - 62 * dp, 13 * dp, badge);
+        c.drawText(String.valueOf(sel.size()), gx + 22 * dp, gy - 57 * dp, badgeText);
+    }
+
+    private void drawPaper(Canvas c, float x, float y, float rot) {
+        float w = 38 * dp, h = 48 * dp, f = 11 * dp;
+        c.save();
+        c.translate(x, y);
+        c.rotate(rot);
+        android.graphics.Path p = new android.graphics.Path();
+        p.moveTo(-w / 2, -h / 2); p.lineTo(w / 2 - f, -h / 2); p.lineTo(w / 2, -h / 2 + f); p.lineTo(w / 2, h / 2); p.lineTo(-w / 2, h / 2); p.close();
+        c.drawPath(p, paper);
+        for (int i = 0; i < 4; i++) {
+            float ly = -h / 2 + h * (0.3f + i * 0.17f);
+            c.drawLine(-w / 2 + 6 * dp, ly, w / 2 - 6 * dp, ly, line);
+        }
+        c.restore();
     }
 
     private int ChronoBarInk() { return CardTheme.dark(th.bg) ? 0xFFF2F5F8 : 0xFF1D2733; }
@@ -662,13 +816,14 @@ public class FilePane extends FrameLayout implements Link.Listener {
         } else if ("fmAnim".equals(t)) {
             main.post(() -> {
                 String s = m.optString("s");
-                if ("begin".equals(s)) showStatus(m.optString("title") + "…");
-                else if ("prog".equals(s)) {
-                    double p = m.optDouble("p", -1);
-                    showStatus(m.optString("name") + (p >= 0 ? "  " + Math.round(p * 100) + "%" : ""));
-                } else if ("end".equals(s)) {
+                boolean mine = (remote() ? "e" : "p").equals(m.optString("src"));
+                if ("begin".equals(s)) transferView.begin(mine, m.optString("title"), dirX(), dirY(), true);
+                else if ("prog".equals(s)) transferView.update(m.optString("name"), (float) m.optDouble("p", -1), m.optString("d"));
+                else if ("end".equals(s)) {
+                    transferView.end();
                     String msg = m.optString("msg");
-                    showStatus(msg.isEmpty() ? null : msg);
+                    if (mine && !msg.isEmpty()) toast(msg);
+                    showStatus(null);
                     if (open) reload();
                 }
             });

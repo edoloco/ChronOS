@@ -672,8 +672,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             while (navPill.getChildCount() > 0) {
                 View v = navPill.getChildAt(0);
                 navPill.removeViewAt(0);
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(26), dp(26));
-                lp.setMargins(dp(10), 0, dp(10), 0);
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(32), dp(32));
+                lp.setMargins(dp(12), 0, dp(12), 0);
                 navRow.addView(v, lp);
             }
             cbar.setNavRow(navRow);

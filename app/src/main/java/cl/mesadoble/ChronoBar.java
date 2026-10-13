@@ -76,15 +76,15 @@ public class ChronoBar extends FrameLayout {
 
     // ---------------- medidas ----------------
 
-    float strip() { return 26 * dp; }
+    float strip() { return 36 * dp; }
     /** Avance del reproductor al abrirse (0 = cerrado, 1 = abierto): sale desde el logo hacia la izquierda. */
     private float pp;
     private android.animation.ValueAnimator ppAnim;
-    float tab() { return (kind == NAV ? 62 + 22 * pp : 62) * dp; }
+    float tab() { return (kind == NAV ? 74 + 24 * pp : 74) * dp; }
     float diag() { return 46 * dp; }
     float tabW() { return kind == CLOCK ? Math.min(getWidth() * 0.42f, 200 * dp) : 112 * dp; }
     /** Alto de la barra (lo que ocupa en la pantalla). */
-    int barHeight() { return Math.round((kind == NAV ? 84 : 62) * dp); }
+    int barHeight() { return Math.round((kind == NAV ? 98 : 74) * dp); }
     /** Lo que se ve de la barra (para dejar espacio al gestor de archivos). */
     int visualHeight() { return Math.round(tab()); }
 
@@ -152,9 +152,9 @@ public class ChronoBar extends FrameLayout {
         for (int i = 0; i < getChildCount(); i++) {
             View v = getChildAt(i);
             if (v == player) v.measure(MeasureSpec.makeMeasureSpec(Math.max(0, Math.round(W - tabW() - Math.min(W * 0.27f, 250 * dp) - diag() * 1.6f - 12 * dp)), MeasureSpec.EXACTLY),
-                    MeasureSpec.makeMeasureSpec(Math.round(22 * dp + 62 * dp - strip() - 6 * dp), MeasureSpec.EXACTLY));
+                    MeasureSpec.makeMeasureSpec(Math.round(98 * dp - strip() - 6 * dp), MeasureSpec.EXACTLY));
             else if (v == recents) v.measure(MeasureSpec.makeMeasureSpec(Math.max(1, Math.round(Math.min(W * 0.27f, 250 * dp) - 10 * dp)), MeasureSpec.EXACTLY),
-                    MeasureSpec.makeMeasureSpec(Math.round(62 * dp - 8 * dp), MeasureSpec.EXACTLY));
+                    MeasureSpec.makeMeasureSpec(Math.round(74 * dp - 8 * dp), MeasureSpec.EXACTLY));
             else if (v == notif) v.measure(MeasureSpec.makeMeasureSpec(Math.round(Math.min(W - tabW() - diag() * 0.4f - 10 * dp, 520 * dp)), MeasureSpec.EXACTLY),
                     MeasureSpec.makeMeasureSpec(Math.round(tab() - 10 * dp), MeasureSpec.EXACTLY));
             else v.measure(MeasureSpec.makeMeasureSpec(W, MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(Math.round(strip()), MeasureSpec.AT_MOST));
@@ -225,7 +225,7 @@ public class ChronoBar extends FrameLayout {
 
     /** Pestaña de apps recientes a la izquierda (de la franja sube en diagonal). */
     private void recentsEdge(float S, float D) {
-        float RW = recW(), T0 = 62 * dp;
+        float RW = recW(), T0 = 74 * dp;
         if (RW < 1) { shape.lineTo(0, y(S)); return; }
         shape.lineTo(RW + D * 0.8f * rp, y(S));
         shape.lineTo(RW, y(T0));
