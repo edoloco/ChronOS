@@ -139,6 +139,14 @@ public class Hub implements Link.Listener {
 
     public void remove(Link.Listener l) { listeners.remove(l); }
 
+    private boolean battOffered, lostOffered, lostPending;
+    private final Runnable lostCheck = () -> {
+        lostPending = false;
+        if (connected() || lostOffered || !isPrincipal()) return;
+        lostOffered = true;
+        PhoneMode.offer(Hub.this.app, this, "No se encuentra el teléfono extendido");
+    };
+
     public volatile int myBatt = -1, otherBatt = -1;
     public volatile boolean myChg, otherChg;
 
@@ -220,12 +228,21 @@ public class Hub implements Link.Listener {
             fs.start();
             send("fsTok", "k", fs.token, "port", FileServer.PORT);
             main.removeCallbacks(restoreIme);
-            if (isPrincipal() && MesaAccess.instance != null) MesaAccess.instance.switchToMesa();
+            main.removeCallbacks(lostCheck);
+            lostPending = false;
+            lostOffered = false;
+            Torch.listen(app, this);
+            send("torchState", "on", Torch.mine);
+            if (isPrincipal() && PhoneMode.active(app)) PhoneMode.extendedBack(app);   // en modo normal: solo un aviso
+            else if (isPrincipal() && MesaAccess.instance != null) MesaAccess.instance.switchToMesa();
             else if (isPrincipal() && !imeSelected(app)) notifySwitch();   // versión liviana: un toque en el aviso
         } else {
             remoteImeReady = false;
             // sin el extendido no hay teclado: si la conexión no vuelve pronto, devolver el teclado normal
             if (isPrincipal()) { main.removeCallbacks(restoreIme); main.postDelayed(restoreIme, 6000); }
+            // el extendido no aparece por un minuto: se ofrece volver al teléfono normal
+            Torch.other = false;
+            if (isPrincipal() && !lostOffered && !lostPending) { lostPending = true; main.postDelayed(lostCheck, 60_000); }
         }
         for (Link.Listener l : listeners) l.onState(st, inf);
     }
@@ -292,7 +309,18 @@ public class Hub implements Link.Listener {
             return;
         }
         if ("fmPath".equals(t)) FileServer.remoteDir = m.optString("path");
-        if ("batt".equals(t)) { otherBatt = m.optInt("l", -1); otherChg = m.optBoolean("c"); }
+        if ("batt".equals(t)) {
+            otherBatt = m.optInt("l", -1); otherChg = m.optBoolean("c");
+            // el extendido se está quedando sin batería: se ofrece (una vez) volver al teléfono normal
+            if (isPrincipal()) {
+                if (otherBatt >= 0 && otherBatt <= 15 && !otherChg && !battOffered) {
+                    battOffered = true;
+                    PhoneMode.offer(app, this, "El extendido tiene poca batería (" + otherBatt + "%)");
+                } else if (otherChg || otherBatt >= 25) battOffered = false;
+            }
+        }
+        if ("torch".equals(t) || "torchState".equals(t)) { Torch.onMessage(app, this, m); return; }
+        if ("phoneOffer".equals(t) && isPrincipal()) { lostOffered = false; PhoneMode.offer(app, this, m.optString("title", "Modo teléfono normal")); return; }
         // fotos, música y video: se ven en el principal; los controles, en el extendido
         if ("mPlay".equals(t)) { if (isPrincipal()) MediaHub.open(app, m.optString("kind"), MediaHub.paths(m), m.optInt("idx")); return; }
         if ("mCmd".equals(t)) { if (isPrincipal()) MediaHub.command(app, m); return; }

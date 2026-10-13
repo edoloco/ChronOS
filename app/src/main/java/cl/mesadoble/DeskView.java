@@ -67,6 +67,9 @@ public class DeskView extends View {
         void onRecent(String pkg, String label);
         /** Widget de cámara: open | switch | shot | flash | close (la cámara corre en el principal). */
         void onCamera(String action);
+        /** Interruptor de linternas: ¿alguna prendida? y cambiarlo (las dos a la vez). */
+        boolean torchOn();
+        void onTorch();
     }
 
     // ---------------- widget de cámara: visor y botones de la cámara del principal ----------------
@@ -965,6 +968,8 @@ public class DeskView extends View {
             it.hPx = 96 * dp;
         } else if (Item.CAMERA.equals(it.kind)) {
             it.hPx = 26 * dp + width * 0.6f + camBar();
+        } else if (Item.TORCH.equals(it.kind)) {
+            it.hPx = 96 * dp;
         } else {
             it.hPx = 132 * dp;
         }
@@ -1019,7 +1024,7 @@ public class DeskView extends View {
         RectF box = new RectF(0, 0, width, h);
 
         boolean isNote = Item.NOTE.equals(it.kind), isImg = Item.IMG.equals(it.kind), isApp = Item.APP.equals(it.kind),
-                isWidget = Item.WIDGET.equals(it.kind), isClock = Item.CLOCK.equals(it.kind), isBatt = Item.BATTERY.equals(it.kind), isRec = Item.RECENTS.equals(it.kind), isCam = Item.CAMERA.equals(it.kind);
+                isWidget = Item.WIDGET.equals(it.kind), isClock = Item.CLOCK.equals(it.kind), isBatt = Item.BATTERY.equals(it.kind), isRec = Item.RECENTS.equals(it.kind), isCam = Item.CAMERA.equals(it.kind), isTorch = Item.TORCH.equals(it.kind);
         boolean glassCard = CardTheme.isGlass() && !isNote && !isImg;
         boolean aeroCard = glassCard && CardTheme.isAero();
         boolean intense = glassCard && CardTheme.isIntense();
@@ -1055,8 +1060,11 @@ public class DeskView extends View {
 
         int ink = isNote || isImg ? 0xFF2B2A22 : fg;
         label.setColor((ink & 0x00FFFFFF) | 0x77000000);
-        String tag = isNote ? "NOTA" : isImg ? "IMAGEN" : isApp ? "APP" : isWidget ? "WIDGET" : isClock ? "RELOJ" : isBatt ? "BATERÍA" : isRec ? "APPS RECIENTES" : isCam ? "CÁMARA" : "ENLACE";
-        if (isCam) {
+        String tag = isNote ? "NOTA" : isImg ? "IMAGEN" : isApp ? "APP" : isWidget ? "WIDGET" : isClock ? "RELOJ" : isBatt ? "BATERÍA" : isRec ? "APPS RECIENTES" : isCam ? "CÁMARA" : isTorch ? "LINTERNAS" : "ENLACE";
+        if (isTorch) {
+            c.drawText(tag, 10 * dp, 18 * dp, label);
+            drawTorch(c, width, h);
+        } else if (isCam) {
             c.drawText(tag, 10 * dp, 18 * dp, label);
             drawCamera(c, width, h);
         } else if (isRec) {
@@ -1195,6 +1203,39 @@ public class DeskView extends View {
     }
 
     /** Una fila del widget de batería: nombre, pila con su nivel y porcentaje (⚡ si está cargando). */
+    /** Linternas: ícono de linterna, el texto y un interruptor grande a la derecha. */
+    private void drawTorch(Canvas c, float width, float h) {
+        boolean on = host != null && host.torchOn();
+        float cy = 18 * dp + (h - 18 * dp) / 2;
+        // linterna (cuerpo + cabeza), con rayos si está prendida
+        float x = 22 * dp, u = 7 * dp;
+        Paint p = battBody;
+        p.setStyle(Paint.Style.STROKE);
+        p.setStrokeWidth(2 * dp);
+        p.setColor(on ? 0xFFFFC53D : muted);
+        Path b = new Path();
+        b.moveTo(x - u * 0.9f, cy - u * 0.4f); b.lineTo(x + u * 0.9f, cy - u * 0.4f);
+        b.lineTo(x + u * 0.5f, cy + u * 0.4f); b.lineTo(x - u * 0.5f, cy + u * 0.4f); b.close();
+        c.drawPath(b, p);
+        c.drawRoundRect(new RectF(x - u * 0.45f, cy + u * 0.4f, x + u * 0.45f, cy + u * 1.9f), 2 * dp, 2 * dp, p);
+        if (on) for (int i = -1; i <= 1; i++) c.drawLine(x + i * u * 0.7f, cy - u * 0.9f, x + i * u * 1.2f, cy - u * 1.7f, p);
+        small.setColor(fg);
+        small.setTextSize(Math.max(13 * dp, Math.min(16 * dp, width * 0.06f)));
+        float tx = x + u * 2.2f;
+        float sw = 58 * dp, sh = 32 * dp;
+        String t = ellipsize(on ? "Prendidas" : "Apagadas", small, Math.max(10, width - tx - sw - 24 * dp));
+        c.drawText(t, tx, cy - 2 * dp, small);
+        label.setColor((fg & 0x00FFFFFF) | 0x99000000);
+        c.drawText(ellipsize("Principal y extendido", label, Math.max(10, width - tx - sw - 24 * dp)), tx, cy + 14 * dp, label);
+        // interruptor
+        RectF tr = new RectF(width - 14 * dp - sw, cy - sh / 2, width - 14 * dp, cy + sh / 2);
+        battFill.setColor(on ? 0xFFFFB300 : (muted & 0x00FFFFFF) | 0x55000000);
+        c.drawRoundRect(tr, sh / 2, sh / 2, battFill);
+        battFill.setColor(0xFFFFFFFF);
+        float kx = on ? tr.right - sh / 2 : tr.left + sh / 2;
+        c.drawCircle(kx, cy, sh / 2 - 4 * dp, battFill);
+    }
+
     private void drawBattery(Canvas c, String who, int lvl, boolean charging, float width, float cy) {
         small.setColor(fg);
         small.setTextSize(Math.max(12 * dp, Math.min(15 * dp, width * 0.055f)));
@@ -1519,6 +1560,7 @@ public class DeskView extends View {
             else host.onWidgetTap(it);
         }
         else if (Item.CLOCK.equals(it.kind)) { if (host != null) host.onOpenAlarms(); }
+        else if (Item.TORCH.equals(it.kind)) { if (host != null) { host.onTorch(); invalidate(); } }
         else if (Item.CAMERA.equals(it.kind)) { if (downLocal != null) tapCamera(downLocal[0], downLocal[1], downLocal[2], downLocal[3]); }
         else if (Item.RECENTS.equals(it.kind)) {
             if (downLocal == null || host == null) return;

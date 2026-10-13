@@ -209,12 +209,14 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         handleShare(getIntent());
         String bw = getIntent().getStringExtra("bindWidget");
         if (bw != null) bindRequested(bw, 0);
+        if (getIntent().getBooleanExtra("phoneNow", false)) { getIntent().removeExtra("phoneNow"); main.post(() -> PhoneMode.enter(this, hub)); }
     }
 
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         String bw = intent.getStringExtra("bindWidget");
         if (bw != null) { intent.removeExtra("bindWidget"); bindRequested(bw, 0); }
+        if (intent.getBooleanExtra("phoneNow", false)) { intent.removeExtra("phoneNow"); main.post(() -> PhoneMode.enter(this, hub)); }
         handleShare(intent);
     }
 
@@ -223,6 +225,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         immersive();
         hub.foreground = true;
         resumed = true;
+        if (side == 1) PhoneMode.exit(this, hub);   // se volvió a ChronOS: deja el modo teléfono normal
         Updater.checkQuiet(this, false, this::showUpdateBadge);
         // el principal quedó esperando el permiso de instalar: si ya lo tiene, sigue la actualización
         if (side == 1 && prefs.getBoolean("pendingUpdate", false) && Updater.canInstall(this)) Updater.updateFromRemote(this, hub);
@@ -1205,6 +1208,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .option(Ui.WIDGETS, "Widget", "Widgets de tus apps (clima, calendario, música...)", this::addWidget)
                 .option(Ui.FOLDER, "Archivos", "Pasar archivos entre los dos teléfonos", this::openFiles)
                 .option(Ui.IMAGE, "Cámara", "Widget con el visor y los botones de la cámara del principal", this::addCamera)
+                .option(Ui.AUTO, "Linternas", "Interruptor que prende y apaga la linterna de los dos teléfonos", this::addTorch)
+                .option(Ui.HOME, "Modo teléfono normal", "El principal vuelve a su pantalla de inicio y su teclado de siempre", this::phoneModeNow)
                 .option(Ui.RECEIVE, "Actualizar app", Updater.updateAvailable(this) ? "Hay una versión nueva: " + Updater.latestKnown(this)
                         : "Versión instalada: " + Updater.clean(Updater.installedVersion(this)), () -> Updater.check(this, hub))
                 .badgeIf(Updater.updateAvailable(this), "1")
@@ -1227,6 +1232,39 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         boolean pc = pr ? hub.myChg : hub.otherChg, ec = pr ? hub.otherChg : hub.myChg;
         if (!hub.connected()) { if (pr) el = -1; else pl = -1; }
         return new int[]{pl, pc ? 1 : 0, el, ec ? 1 : 0};
+    }
+
+    private void addTorch() {
+        Item it = new Item();
+        it.kind = Item.TORCH;
+        it.w = sized(0.62);
+        double[] p = desk.spot(it.w);
+        it.x = p[0]; it.y = p[1];
+        addItem(it);
+        Torch.listen(this, hub);
+    }
+
+    @Override public boolean torchOn() { return Torch.anyOn(); }
+    @Override public void onTorch() { Torch.toggle(this, hub); }
+
+    /** Herramientas → Modo teléfono normal: en el principal se hace ya; desde el extendido se le pregunta al principal. */
+    private void phoneModeNow() {
+        if (hub.isPrincipal()) { PhoneMode.enter(this, hub); return; }
+        if (!hub.connected()) { Toast.makeText(this, "El principal no está conectado", Toast.LENGTH_SHORT).show(); return; }
+        hub.send("phoneOffer", "title", "¿Volver al modo teléfono normal?");
+        Toast.makeText(this, "Confirma en el principal", Toast.LENGTH_SHORT).show();
+    }
+
+    /** El principal ofrece volver a la interfaz normal del teléfono (extendido sin batería o sin conexión). */
+    private void phoneOffer(String title) {
+        if (!hub.isPrincipal() || PhoneMode.active(this)) return;
+        new Ui.Sheet(this)
+                .title(title)
+                .message("Puedes seguir usando este teléfono con su pantalla de inicio y su teclado de siempre. "
+                        + "Cuando quieras volver, abre ChronOS.")
+                .button("Usar el teléfono normal", true, () -> PhoneMode.enter(this, hub))
+                .button("Seguir en ChronOS", false, null)
+                .show();
     }
 
     private void addClock() {
@@ -1994,6 +2032,12 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 });
                 break;
             case "updMsg":
+            case "phoneOffer":
+                main.post(() -> phoneOffer(m.optString("title")));
+                break;
+            case "torchUi":
+                main.post(() -> desk.invalidate());
+                break;
             case "boostMsg":
                 main.post(() -> Toast.makeText(this, m.optString("msg"), Toast.LENGTH_LONG).show());
                 break;
