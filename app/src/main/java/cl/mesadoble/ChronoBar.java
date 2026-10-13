@@ -82,7 +82,21 @@ public class ChronoBar extends FrameLayout {
     private android.animation.ValueAnimator ppAnim;
     float tab() { return (kind == NAV ? 74 + 24 * pp : 74) * dp; }
     float diag() { return 46 * dp; }
-    float tabW() { return kind == CLOCK ? Math.min(getWidth() * 0.42f, 200 * dp) : 112 * dp; }
+    float tabW() { return kind == CLOCK ? Math.min(getWidth() * 0.6f, Math.max(200 * dp, clockNeeded())) : 112 * dp; }
+
+    /** Ancho que necesita la caja del reloj para que la hora y la fecha queden adentro (también junto al corte diagonal). */
+    private float clockNeeded() {
+        float pad = 8 * dp, h = tab() - 2 * pad, cut = h * 0.75f;
+        Date now = new Date();
+        boolean is24 = android.text.format.DateFormat.is24HourFormat(getContext());
+        String time = new SimpleDateFormat(is24 ? "HH:mm" : "h:mm", Locale.getDefault()).format(now);
+        String day = new SimpleDateFormat("EEEE", new Locale("es")).format(now);
+        String date = new SimpleDateFormat("d MMM yyyy", new Locale("es")).format(now).replace(".", "");
+        timeP.setTextSize(h * 0.62f);
+        dateP.setTextSize(Math.min(12.5f * dp, h * 0.3f));
+        float dateW = Math.max(dateP.measureText(day), dateP.measureText(date));
+        return pad + 12 * dp + timeP.measureText(time) + 10 * dp + dateW + cut + 18 * dp;
+    }
     /** Alto de la barra (lo que ocupa en la pantalla). */
     int barHeight() { return Math.round((kind == NAV ? 98 : 74) * dp); }
     /** Lo que se ve de la barra (para dejar espacio al gestor de archivos). */
@@ -324,7 +338,7 @@ public class ChronoBar extends FrameLayout {
         float dx = tx + timeP.measureText(time) + 10 * dp;
         dateP.setColor((ink & 0x00FFFFFF) | 0xCC000000);
         dateP.setTextSize(Math.min(12.5f * dp, h * 0.3f));
-        float maxW = right - cut * 0.5f - dx - 4 * dp;
+        float maxW = right - cut - dx - 4 * dp;
         if (maxW > 30 * dp) {
             c.drawText(Character.toUpperCase(day.charAt(0)) + day.substring(1), dx, top + h * 0.44f, dateP);
             c.drawText(date, dx, top + h * 0.44f + dateP.getTextSize() * 1.25f, dateP);

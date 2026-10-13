@@ -71,10 +71,6 @@ public class Hub implements Link.Listener {
                 if (pct == myBatt && chg == myChg) return;
                 myBatt = pct; myChg = chg;
                 sendBattery();
-            main.removeCallbacks(musicPoll);
-            musicActive = false;
-            videoActive = false;
-            main.postDelayed(musicPoll, 2000);
             }
         }, new android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED));
         // al desinstalar una app, la lista de apps del otro teléfono se actualiza
@@ -212,6 +208,12 @@ public class Hub implements Link.Listener {
         state = st;
         info = inf;
         if (st == Link.CONNECTED) {
+            // revisión periódica del principal (video, juegos, notificaciones): arranca al conectarse
+            main.removeCallbacks(musicPoll);
+            musicActive = false;
+            videoActive = false;
+            videoAppWas = false;
+            main.postDelayed(musicPoll, 1500);
             sendImeState();
             sendBattery();
             FileServer fs = FileServer.get(app);
@@ -558,7 +560,8 @@ public class Hub implements Link.Listener {
     private long lastVideoAt;
     private final Runnable musicPoll = new Runnable() {
         @Override public void run() {
-            if (!isPrincipal() || !connected()) return;
+            main.removeCallbacks(this);
+            if (!isPrincipal() || !connected()) { main.postDelayed(this, 4000); return; }   // sigue revisando, por si se conecta
             RecentApps.worker.execute(() -> GameBg.poll(app, Hub.this));   // ¿empezó un juego? → fondo en el extendido
             RecentApps.worker.execute(Hub.this::pollNotifs);                // apps con notificaciones nuevas → punto rojo
             RecentApps.worker.execute(() -> {                                 // ¿hay una app de video al frente? (YouTube, Netflix…)

@@ -587,7 +587,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         startPanel.addView(head);
         // orden: lo más usado arriba
         SquareButton[] order = {byKind(SquareButton.APPS), settingsBtn, byKind(SquareButton.DESKS), statusBtn,
-                byKind(SquareButton.TOOLS), byKind(SquareButton.KEYBOARD), filesBtn, null, null, null, null, null};
+                byKind(SquareButton.TOOLS), byKind(SquareButton.KEYBOARD), filesBtn, aboutBtn(), null, null, null, null};
         LinearLayout row = null;
         for (int i = 0; i < order.length; i++) {
             if (i % 4 == 0) {
@@ -619,7 +619,20 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         return null;
     }
 
-    private SquareButton filesBtn;
+    private SquareButton filesBtn, aboutSq;
+
+    /** "Acerca de" en el menú inicio (con el punto rojo si hay una versión nueva). */
+    private SquareButton aboutBtn() {
+        if (aboutSq == null) {
+            aboutSq = new SquareButton(this, SquareButton.STATUS, "Acerca de", false, night);
+            aboutSq.setInfo(true);
+            aboutSq.setOnClickListener(v -> { showStart(false); about(); });
+            squares.add(aboutSq);
+        }
+        if (aboutSq.getParent() instanceof android.view.ViewGroup) ((android.view.ViewGroup) aboutSq.getParent()).removeView(aboutSq);
+        aboutSq.setBadge(Updater.updateAvailable(this));
+        return aboutSq;
+    }
 
     /** El menú inicio aparece junto al logo (o junto al reloj en el principal). */
     private void placeStart() {
@@ -961,6 +974,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private void showUpdateBadge() {
         if (settingsBtn != null) settingsBtn.setBadge(Updater.updateAvailable(this));
         if (cbar != null) cbar.setBadge(Updater.updateAvailable(this));
+        if (aboutSq != null) aboutSq.setBadge(Updater.updateAvailable(this));
     }
 
     /** Acerca de: versión de este teléfono y del otro, para saber si los dos están al día. */

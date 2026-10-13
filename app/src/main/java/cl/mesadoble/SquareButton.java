@@ -22,6 +22,9 @@ public class SquareButton extends View {
 
     private final int kind;
     public int kind() { return kind; }
+    private boolean info;
+    /** Ícono "i" (Acerca de). */
+    public void setInfo(boolean i) { info = i; invalidate(); }
     private final String text;
     private final float dp;
     private final Paint bg = new Paint(Paint.ANTI_ALIAS_FLAG), stroke = new Paint(Paint.ANTI_ALIAS_FLAG),
@@ -147,7 +150,7 @@ public class SquareButton extends View {
         c.rotate(rot, w / 2, h / 2);
         float cx = w / 2, cy = compact ? h / 2 : h * 0.42f, u = (compact ? 5 : 7) * dp;   // u: unidad del ícono
         int ink = fgColor;
-        if (kind == STATUS) ink = statusLevel == 2 ? accent : statusLevel == 1 ? warn : 0xFF8798A9;
+        if (kind == STATUS && !info) ink = statusLevel == 2 ? accent : statusLevel == 1 ? warn : 0xFF8798A9;
         stroke.setColor(ink);
         fill.setColor(ink);
         Path p = new Path();
@@ -243,6 +246,12 @@ public class SquareButton extends View {
                 break;
             }
             case STATUS:
+                if (info) {
+                    c.drawCircle(cx, cy, u * 1.15f, stroke);
+                    c.drawCircle(cx, cy - u * 0.55f, 1.6f * dp, fill);
+                    c.drawLine(cx, cy - u * 0.15f, cx, cy + u * 0.65f, stroke);
+                    break;
+                }
                 for (int i = 1; i <= 2; i++) {
                     float rr = u * 0.55f * i;
                     c.drawArc(new RectF(cx - rr, cy + u * 0.5f - rr, cx + rr, cy + u * 0.5f + rr), 225, 90, false, stroke);
@@ -260,7 +269,7 @@ public class SquareButton extends View {
             c.drawCircle(bx, by, br, badgePaint);
             c.rotate(rot, w / 2, h / 2);
         }
-        label.setColor(kind == STATUS ? ink : fgColor);
+        label.setColor(kind == STATUS && !info ? ink : fgColor);
         if (!compact) {
             float ts = 9.5f * dp;   // los nombres largos se achican para caber
             label.setTextSize(ts);
