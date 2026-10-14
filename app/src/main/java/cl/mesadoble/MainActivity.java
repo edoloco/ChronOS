@@ -335,7 +335,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         boolean h = locked() ? prefs.getBoolean("orientH", true) : landscapeNow();
         hub.send("view", "h", h, "lock", locked());
         hub.send("bg", "c", prefs.getInt("deskColor", 0));
-        hub.send("cardTheme", "c", CardTheme.color, "g", CardTheme.glass);
+        hub.send("cardTheme", "c", CardTheme.color, "g", CardTheme.glass, "k", CardTheme.console);
         hub.send("flip", "p", prefs.getBoolean("flipP", false), "e", prefs.getBoolean("flipE", false));
         hub.send("pages", "n", desk.pages(), "cur", desk.page());
         hub.send("apps", "lock", prefs.getBoolean("appsLock", false), "auto", prefs.getBoolean("appsAuto", false));
@@ -482,7 +482,13 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             row.setGravity(Gravity.CENTER);
             for (int i = r * 6; i < r * 6 + 6; i++) {
                 final int col = COLORS[i];
-                row.addView(swatch(col, col == cur, () -> { setDeskColor(col, false); if (dlg[0] != null) dlg[0].dismiss(); main.postDelayed(this::chooseColor, 260); }), swatchLp());
+                final boolean first = i == 0;
+                row.addView(swatch(col, col == cur, () -> {
+                    setDeskColor(col, false);
+                    if (dlg[0] != null) dlg[0].dismiss();
+                    if (first && secretTap()) { main.postDelayed(this::chooseConsole, 300); return; }
+                    main.postDelayed(this::chooseColor, 260);
+                }), swatchLp());
             }
             grid.addView(row);
         }
@@ -496,6 +502,84 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .option(Ui.PALETTE, "Color personalizado", "Elegir tono, intensidad y brillo", () -> customColor(cur, col -> { setDeskColor(col, false); main.postDelayed(this::chooseColor, 260); }))
                 .button("Cerrar", false, null)
                 .show();
+    }
+
+    private static int secretTaps;
+    private static long secretAt;
+
+    /** Tres toques seguidos al primer color de fondo desbloquean los temas de consola. */
+    private boolean secretTap() {
+        long now = System.currentTimeMillis();
+        secretTaps = now - secretAt < 2500 ? secretTaps + 1 : 1;
+        secretAt = now;
+        if (secretTaps < 3) return false;
+        secretTaps = 0;
+        boolean was = prefs.getBoolean("consoleUnlocked", false);
+        prefs.edit().putBoolean("consoleUnlocked", true).apply();
+        Toast.makeText(this, was ? "Temas de consola" : "🎮 ¡Desbloqueaste los temas de consola!", Toast.LENGTH_LONG).show();
+        return true;
+    }
+
+    /** Temas de consola: colores de menús inspirados en consolas de juego (también cambian el fondo de la mesa). */
+    private void chooseConsole() {
+        Ui.Sheet sh = new Ui.Sheet(this)
+                .title("🎮 Temas de consola")
+                .message("Menús, tarjetas y fondo con los colores de cada consola. Se aplica en ambos teléfonos.");
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        final android.app.Dialog[] dlg = new android.app.Dialog[1];
+        boolean n = CardTheme.sheetNight(night);
+        for (int k = 1; k < CardTheme.CONSOLE_NAMES.length; k++) {
+            final int kk = k;
+            LinearLayout row = new LinearLayout(this);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(10), dp(8), dp(10), dp(8));
+            // muestra: mesa con una tarjeta encima y su borde
+            int[] pv = CardTheme.consolePreview(k);
+            android.widget.FrameLayout prev = new android.widget.FrameLayout(this);
+            GradientDrawable bgp = new GradientDrawable();
+            bgp.setColor(pv[0]);
+            bgp.setCornerRadius(dp(10));
+            bgp.setStroke(dp(1), 0x33888888);
+            prev.setBackground(bgp);
+            View card = new View(this);
+            GradientDrawable cg = new GradientDrawable();
+            cg.setColor(pv[1]);
+            cg.setCornerRadius(dp(5));
+            cg.setStroke(dp(2), pv[2]);
+            card.setBackground(cg);
+            prev.addView(card, new android.widget.FrameLayout.LayoutParams(dp(30), dp(20), Gravity.CENTER));
+            row.addView(prev, new LinearLayout.LayoutParams(dp(56), dp(38)));
+            LinearLayout tx = new LinearLayout(this);
+            tx.setOrientation(LinearLayout.VERTICAL);
+            tx.setPadding(dp(12), 0, 0, 0);
+            TextView t1 = new TextView(this);
+            t1.setText((CardTheme.console == k ? "✓ " : "") + "Tema " + CardTheme.CONSOLE_NAMES[k]);
+            t1.setTextSize(16);
+            t1.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
+            t1.setTextColor(Ui.fg(n));
+            TextView t2 = new TextView(this);
+            t2.setText(CardTheme.CONSOLE_DESC[k]);
+            t2.setTextSize(12);
+            t2.setTextColor(Ui.muted(n));
+            tx.addView(t1);
+            tx.addView(t2);
+            row.addView(tx, new LinearLayout.LayoutParams(0, -2, 1));
+            row.setOnClickListener(v -> {
+                setCardTheme(0, CardTheme.NONE, kk, false);
+                setDeskColor(CardTheme.consoleDesk(kk), false);
+                if (dlg[0] != null) dlg[0].dismiss();
+                main.postDelayed(this::chooseConsole, 300);
+            });
+            list.addView(row);
+        }
+        android.widget.ScrollView sc = new android.widget.ScrollView(this);
+        sc.addView(list);
+        sc.setLayoutParams(new LinearLayout.LayoutParams(-1, Math.min(dp(360), getResources().getDisplayMetrics().heightPixels * 3 / 5)));
+        sh.view(sc);
+        if (CardTheme.isConsole()) sh.option(Ui.AUTO, "Quitar tema de consola", "Volver a los colores automáticos",
+                () -> { setCardTheme(0, CardTheme.NONE, 0, false); setDeskColor(0, false); });
+        dlg[0] = sh.button("Cerrar", false, null).show();
     }
 
     private View swatch(int col, boolean selected, Runnable r) {
@@ -587,6 +671,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         dlg[0] = new Ui.Sheet(this)
                 .title("Tarjetas y menús")
                 .message("Color de las tarjetas de apps y elementos, de la barra de opciones y de estos menús. Se aplica en ambos teléfonos.")
+                .optionIf(prefs.getBoolean("consoleUnlocked", false), Ui.PALETTE, "🎮 Temas de consola",
+                        CardTheme.isConsole() ? "Ahora: " + CardTheme.CONSOLE_NAMES[CardTheme.console] : "DS, 3DS, Switch, Wii, PS3, PSP, NES y Super NES", this::chooseConsole)
                 .option(Ui.PALETTE, -1, "Cristal intenso", "Vidrio esmerilado realista: fondo borroso, sombras profundas y brillo",
                         CardTheme.isIntense(), () -> { setCardTheme(0, CardTheme.GLASS_INTENSE, false); main.postDelayed(this::chooseCardColor, 260); })
                 .option(Ui.PALETTE, -1, "Cristal Aero (Windows 7)", "Vidrio de color con brillo y vetas de luz",
@@ -595,7 +681,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                         () -> { setCardTheme(0, CardTheme.GLASS_LIGHT, false); main.postDelayed(this::chooseCardColor, 260); })
                 .option(Ui.PALETTE, -1, "Cristal oscuro", "Vidrio ahumado, para fondos claros u oscuros", CardTheme.glass == CardTheme.GLASS_DARK,
                         () -> { setCardTheme(0, CardTheme.GLASS_DARK, false); main.postDelayed(this::chooseCardColor, 260); })
-                .option(Ui.AUTO, -1, "Automático", "Según el modo claro u oscuro del teléfono", !CardTheme.isGlass() && CardTheme.color == 0,
+                .option(Ui.AUTO, -1, "Automático", "Según el modo claro u oscuro del teléfono", !CardTheme.isGlass() && !CardTheme.isConsole() && CardTheme.color == 0,
                         () -> { setCardTheme(0, CardTheme.NONE, false); main.postDelayed(this::chooseCardColor, 260); })
                 .view(grid)
                 .option(Ui.PALETTE, "Color personalizado", "Elegir tono, intensidad y brillo",
@@ -638,13 +724,15 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .show();
     }
 
-    private void setCardTheme(int color, int glass, boolean fromRemote) {
-        CardTheme.save(this, color, glass);
+    private void setCardTheme(int color, int glass, boolean fromRemote) { setCardTheme(color, glass, 0, fromRemote); }
+
+    private void setCardTheme(int color, int glass, int console, boolean fromRemote) {
+        CardTheme.save(this, color, glass, console);
         desk.setCardTheme();
         for (SquareButton b : squares) b.applyTheme();
         if (cbar != null) cbar.invalidate();
         rebuildBar();
-        if (!fromRemote) hub.send("cardTheme", "c", color, "g", glass);
+        if (!fromRemote) hub.send("cardTheme", "c", color, "g", glass, "k", console);
     }
 
     private void setDeskColor(int c, boolean fromRemote) {
@@ -672,6 +760,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         g.setColor(CardTheme.sheetFill(night));
         g.setCornerRadius(dp(22));
         if (CardTheme.isGlass()) g.setStroke(dp(1), CardTheme.stroke());
+        if (CardTheme.isConsole()) g.setStroke(dp(2), CardTheme.stroke());
         startPanel.setBackground(CardTheme.isAero() ? new android.graphics.drawable.LayerDrawable(new android.graphics.drawable.Drawable[]{g,
                 new Aero.Bg(CardTheme.aeroTint(), dp(22), getResources().getDisplayMetrics().density)}) : g);
         startPanel.setElevation(dp(16));
@@ -1164,7 +1253,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .option(Ui.PALETTE, "Color de fondo", "El color de la mesa", this::chooseColor)
                 .option(Ui.PALETTE, "Tarjetas y menús", CardTheme.glass == CardTheme.GLASS_LIGHT ? "Cristal claro"
                         : CardTheme.glass == CardTheme.GLASS_DARK ? "Cristal oscuro" : CardTheme.isIntense() ? "Cristal intenso"
-                        : CardTheme.isAero() ? "Cristal Aero" : CardTheme.color == 0 ? "Automático" : "Color propio", this::chooseCardColor)
+                        : CardTheme.isAero() ? "Cristal Aero" : CardTheme.isConsole() ? "Tema " + CardTheme.CONSOLE_NAMES[CardTheme.console]
+                        : CardTheme.color == 0 ? "Automático" : "Color propio", this::chooseCardColor)
                 .option(Ui.IMAGE, -1, "Fondo de juegos: " + (GameBg.enabled(this) ? "sí" : "no"),
                         "Al abrir un juego en el principal, el extendido muestra una imagen del juego", GameBg.enabled(this), () -> {
                             boolean on = !GameBg.enabled(this);
@@ -2501,7 +2591,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 setAppsMode(m.optBoolean("lock", false), m.optBoolean("auto", false), true);
                 break;
             case "cardTheme":
-                if (m.optInt("c") != CardTheme.color || m.optInt("g") != CardTheme.glass) setCardTheme(m.optInt("c"), m.optInt("g"), true);
+                if (m.optInt("c") != CardTheme.color || m.optInt("g") != CardTheme.glass || m.optInt("k") != CardTheme.console)
+                    setCardTheme(m.optInt("c"), m.optInt("g"), m.optInt("k"), true);
                 break;
             case "bg":
                 if (m.optInt("c") != prefs.getInt("deskColor", 0)) setDeskColor(m.optInt("c"), true);

@@ -70,6 +70,7 @@ public class Ui {
             GradientDrawable bg = new GradientDrawable();
             bg.setColor(CardTheme.sheetFill(night(a)));
             if (CardTheme.isGlass()) bg.setStroke(px(1), CardTheme.stroke());
+            if (CardTheme.isConsole()) bg.setStroke(px(2), CardTheme.stroke());
             bg.setCornerRadius(px(26));
             if (CardTheme.isIntense()) {
                 // cristal intenso: velo esmerilado con brillo arriba y sombra abajo (lo de atrás se ve borroso)
@@ -198,6 +199,8 @@ public class Ui {
         }
 
         public Sheet option(int icon, String label, String sub, Runnable r) { return option(icon, -1, label, sub, false, r); }
+
+        public Sheet optionIf(boolean show, int icon, String t, String sub, Runnable r) { return show ? option(icon, t, sub, r) : this; }
 
         public Sheet button(String label, boolean primary, Runnable r) {
             TextView b = new TextView(a);
