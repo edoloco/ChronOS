@@ -73,6 +73,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private ChronoBar cbar;
     private FilePane pane;
     private NotifCard barNotif, floatNotif;
+    private TickerView barTicker, floatTicker;
+    private org.json.JSONArray tickerItems;
+    private boolean tickerHere;
     private BarPlayer barPlayer;
     private RecentsBar recentsBar;
     private LinearLayout navRow, startPanel;
@@ -160,6 +163,12 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         FrameLayout.LayoutParams fl = new FrameLayout.LayoutParams(dp(360), dp(64), Gravity.TOP | Gravity.START);
         fl.setMargins(dp(12), dp(36), dp(12), dp(12));
         root.addView(floatNotif, fl);
+        // banda tipo noticiero arriba del extendido (cuando el principal está en otra app)
+        floatTicker = new TickerView(this, true);
+        floatTicker.setTap(this::onNotifTap);
+        FrameLayout.LayoutParams tl = new FrameLayout.LayoutParams(-1, dp(34), Gravity.TOP);
+        tl.setMargins(dp(12), dp(26), dp(12), 0);
+        root.addView(floatTicker, tl);
         root.addOnLayoutChangeListener((v, l, t, r2, b2, ol, ot, or, ob) -> {
             if (b2 - t != ob - ot || r2 - l != or - ol) main.post(() -> layoutChrono(false));   // al ocultarse las barras de Android
         });
@@ -228,6 +237,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         super.onResume();
         immersive();
         hub.foreground = true;
+        hub.notifsChanged();
         resumed = true;
         main.postDelayed(this::reportHome, 1200);
         if (side == 1) PhoneMode.exit(this, hub);   // se volvió a ChronOS: deja el modo teléfono normal
@@ -248,6 +258,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     @Override protected void onPause() {
         hub.foreground = false;
+        hub.notifsChanged();
         resumed = false;
         main.removeCallbacks(pollRecents);
         main.removeCallbacks(camKeepAlive);
@@ -719,6 +730,14 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         return phoneSq;
     }
 
+    /** Banda de notificaciones: en la barra del reloj del principal; en el extendido solo si el principal está en otra app. */
+    private void applyTicker() {
+        if (side == 1) {
+            if (barTicker != null) barTicker.set(tickerItems);
+            if (floatTicker != null) floatTicker.set(null);
+        } else if (floatTicker != null) floatTicker.set(tickerHere ? null : tickerItems);
+    }
+
     /** "Acerca de" en el menú inicio (con el punto rojo si hay una versión nueva). */
     private SquareButton aboutBtn() {
         if (aboutSq == null) {
@@ -803,6 +822,11 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             barNotif = new NotifCard(this, night, false);
             barNotif.setTap(this::onNotifTap);
             cbar.setNotif(barNotif);
+            barTicker = new TickerView(this, false);
+            barTicker.setTap(this::onNotifTap);
+            barTicker.setInk(Ui.fg(CardTheme.sheetNight(night)));
+            cbar.setTicker(barTicker);
+            if (tickerItems != null) applyTicker();
         }
         int at = rootView.indexOfChild(startOverlay);
         rootView.addView(cbar, at, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
@@ -2179,11 +2203,10 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             case "fileMode":
                 main.post(() -> setFileMode(m.optBoolean("on"), true));
                 break;
-            case "notif":
-                main.post(() -> {
-                    if (side == 1 && barNotif != null) barNotif.show(m);   // en la barra del reloj
-                    else if (side == 0) floatNotif.show(m);                   // el principal está en otra app: aquí, arriba a la izquierda
-                });
+            case "notif":   // ahora las notificaciones corren en la banda (ticker); la tarjeta ya no se usa
+                break;
+            case "ticker":
+                main.post(() -> { tickerItems = m.optJSONArray("items"); tickerHere = m.optBoolean("here"); applyTicker(); });
                 break;
             case "notifTestR":
                 main.post(() -> notifResult(m));

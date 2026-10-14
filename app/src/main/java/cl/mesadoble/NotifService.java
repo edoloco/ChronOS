@@ -51,6 +51,39 @@ public class NotifService extends NotificationListenerService {
         return new JSONArray(s);
     }
 
+    /** Para la banda tipo noticiero: las pendientes, la más nueva primero (una por conversación/clave). */
+    JSONArray items() {
+        JSONArray out = new JSONArray();
+        try {
+            StatusBarNotification[] all = getActiveNotifications();
+            java.util.Arrays.sort(all, (a, b) -> Long.compare(b.getPostTime(), a.getPostTime()));
+            PackageManager pm = getPackageManager();
+            for (StatusBarNotification n : all) {
+                String pkg = n.getPackageName();
+                if (!n.isClearable() || "android".equals(pkg)) continue;
+                if (pkg.equals(getPackageName()) && !NotifTest.TAG.equals(n.getTag())) continue;
+                Notification nn = n.getNotification();
+                if ((nn.flags & Notification.FLAG_GROUP_SUMMARY) != 0) continue;
+                CharSequence t = nn.extras.getCharSequence(Notification.EXTRA_TITLE), x = nn.extras.getCharSequence(Notification.EXTRA_TEXT);
+                if (t == null && x == null) continue;
+                String label = pkg;
+                try { label = String.valueOf(pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0))); } catch (Exception ignored) { }
+                String ic = icons.get(pkg);
+                if (ic == null) {
+                    try { ic = AppsDialog.iconPng(pm.getApplicationIcon(pkg), 48); } catch (Exception e) { ic = ""; }
+                    icons.put(pkg, ic);
+                }
+                JSONObject o = new JSONObject();
+                o.put("key", n.getKey()); o.put("pkg", pkg); o.put("app", label);
+                o.put("title", t == null ? "" : t.toString()); o.put("text", x == null ? "" : x.toString());
+                o.put("time", n.getPostTime()); o.put("icon", ic);
+                out.put(o);
+                if (out.length() >= 12) break;
+            }
+        } catch (Exception ignored) { }
+        return out;
+    }
+
     @Override public void onNotificationPosted(StatusBarNotification sbn) {
         Hub hub = Hub.get(this);
         if (!hub.isPrincipal()) return;

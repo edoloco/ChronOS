@@ -222,6 +222,7 @@ public class Hub implements Link.Listener {
             videoActive = false;
             videoAppWas = false;
             main.postDelayed(musicPoll, 1500);
+            if (isPrincipal()) main.postDelayed(this::resendTicker, 1500);
             sendImeState();
             sendBattery();
             FileServer fs = FileServer.get(app);
@@ -686,7 +687,15 @@ public class Hub implements Link.Listener {
     private long notifSentAt;
 
     /** Cambió algo en las notificaciones: se revisa ya (punto rojo de las apps). */
-    void notifsChanged() { if (!isPrincipal()) return; notifSentAt = 0; notifSig = "?"; RecentApps.worker.execute(this::pollNotifs); }
+    void notifsChanged() {
+        if (!isPrincipal()) return;
+        notifSentAt = 0; notifSig = "?";
+        RecentApps.worker.execute(this::pollNotifs);
+        RecentApps.worker.execute(this::sendTicker);
+    }
+
+    /** Al conectarse el extendido, que reciba la banda aunque nada haya cambiado. */
+    void resendTicker() { tickerSig = ""; notifsChanged(); }
 
     private void pollNotifs() {
         java.util.List<String> l = new java.util.ArrayList<>();
@@ -703,6 +712,23 @@ public class Hub implements Link.Listener {
         notifSentAt = now;
         JSONObject m = new JSONObject();
         try { m.put("t", "notifs"); m.put("p", new JSONArray(l)); } catch (JSONException ignored) { }
+        if (connected()) send(m);
+        main.post(() -> local(m));
+    }
+
+    private String tickerSig = "";
+
+    /** Banda tipo noticiero: las pendientes del principal, a la barra del reloj (o arriba del extendido si el principal está en otra app). */
+    private void sendTicker() {
+        NotifService ns = NotifService.instance;
+        JSONArray items = ns != null ? ns.items() : new JSONArray();
+        StringBuilder sb = new StringBuilder().append(foreground).append('|');
+        for (int i = 0; i < items.length(); i++) sb.append(items.optJSONObject(i).optString("key")).append(items.optJSONObject(i).optString("text").hashCode()).append(',');
+        String sig = sb.toString();
+        if (sig.equals(tickerSig)) return;
+        tickerSig = sig;
+        JSONObject m = new JSONObject();
+        try { m.put("t", "ticker"); m.put("items", items); m.put("here", foreground); } catch (JSONException ignored) { }
         if (connected()) send(m);
         main.post(() -> local(m));
     }

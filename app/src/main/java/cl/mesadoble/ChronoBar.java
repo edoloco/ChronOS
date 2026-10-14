@@ -48,7 +48,7 @@ public class ChronoBar extends FrameLayout {
             clockBox = new Paint(Paint.ANTI_ALIAS_FLAG), timeP = new Paint(Paint.ANTI_ALIAS_FLAG), dateP = new Paint(Paint.ANTI_ALIAS_FLAG),
             logoBox = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final int[] me = new int[2], other = new int[2];
-    private View navRow, logo, player, notif;
+    private View navRow, logo, player, notif, ticker;
     private final android.graphics.drawable.Drawable logoDrawable;
 
     public ChronoBar(Context c, int kind, boolean night) {
@@ -107,6 +107,8 @@ public class ChronoBar extends FrameLayout {
     public void setNavRow(View v) { navRow = v; addView(v, new LayoutParams(-2, -2)); }
     public void setPlayer(View v) { player = v; addView(v, new LayoutParams(-1, -2)); v.setVisibility(GONE); }
     public void setNotif(View v) { notif = v; addView(v, new LayoutParams(-2, -2)); }
+    /** Banda de notificaciones tipo noticiero: corre en la franja, a la derecha del reloj. */
+    public void setTicker(View v) { ticker = v; addView(v, new LayoutParams(-2, -2)); }
 
     // ---- apps recientes: pestaña a la izquierda de la barra del extendido (se esconde con el gestor de archivos)
     private View recents;
@@ -175,6 +177,8 @@ public class ChronoBar extends FrameLayout {
                     MeasureSpec.makeMeasureSpec(Math.round(98 * dp - strip() - 6 * dp), MeasureSpec.EXACTLY));
             else if (v == recents) v.measure(MeasureSpec.makeMeasureSpec(Math.max(1, Math.round(recWFor(W) / Math.max(0.01f, rp) - 10 * dp)), MeasureSpec.EXACTLY),
                     MeasureSpec.makeMeasureSpec(Math.round(74 * dp - 8 * dp), MeasureSpec.EXACTLY));
+            else if (v == ticker) v.measure(MeasureSpec.makeMeasureSpec(Math.max(1, Math.round(W - tabW() - diag() * 0.5f - 14 * dp)), MeasureSpec.EXACTLY),
+                    MeasureSpec.makeMeasureSpec(Math.round(strip() - 4 * dp), MeasureSpec.EXACTLY));
             else if (v == notif) v.measure(MeasureSpec.makeMeasureSpec(Math.round(Math.min(W - tabW() - diag() * 0.4f - 10 * dp, 520 * dp)), MeasureSpec.EXACTLY),
                     MeasureSpec.makeMeasureSpec(Math.round(tab() - 10 * dp), MeasureSpec.EXACTLY));
             else v.measure(MeasureSpec.makeMeasureSpec(W, MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(Math.round(strip()), MeasureSpec.AT_MOST));
@@ -198,6 +202,11 @@ public class ChronoBar extends FrameLayout {
             int x = Math.round(4 * dp), h = recents.getMeasuredHeight();
             int top = Math.round(edgeTop ? 4 * dp : H - 4 * dp - h);
             recents.layout(x, top, x + recents.getMeasuredWidth(), top + h);
+        }
+        if (ticker != null) {
+            int x = Math.round(tabW() + diag() * 0.5f), h = ticker.getMeasuredHeight();
+            int top = Math.round(edgeTop ? 2 * dp : H - 2 * dp - h);
+            ticker.layout(x, top, x + ticker.getMeasuredWidth(), top + h);
         }
         if (notif != null) {
             int x = Math.round(tabW() + diag() * 0.4f), h = notif.getMeasuredHeight();
@@ -384,7 +393,7 @@ public class ChronoBar extends FrameLayout {
     @Override public boolean dispatchTouchEvent(MotionEvent e) {
         if (e.getActionMasked() == MotionEvent.ACTION_DOWN && !region.contains((int) e.getX(), (int) e.getY())) {
             boolean onChild = false;
-            for (View v : new View[]{notif, player, recents})
+            for (View v : new View[]{notif, player, recents, ticker})
                 if (v != null && v.getVisibility() == VISIBLE && v.getAlpha() > 0.1f && e.getX() >= v.getLeft() && e.getX() <= v.getRight()
                         && e.getY() >= v.getTop() && e.getY() <= v.getBottom()) onChild = true;
             if (!onChild) return false;
