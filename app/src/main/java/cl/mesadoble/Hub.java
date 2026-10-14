@@ -326,6 +326,14 @@ public class Hub implements Link.Listener {
                     83, "Notificaciones en la barra", "Toca para activarlas en este teléfono");
             return;
         }
+        // pantalla de inicio pedida desde el otro teléfono: se abre ChronOS aquí y aparece la confirmación de Android
+        if ("homeSet".equals(t)) {
+            startOrNotify(new Intent(app, MainActivity.class).putExtra("homeSet", m.optBoolean("on"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP), 84,
+                    "Pantalla de inicio", "Toca para " + (m.optBoolean("on") ? "poner" : "quitar") + " ChronOS como inicio en este teléfono");
+            return;
+        }
+        if ("homeState".equals(t) || "homeAsk".equals(t)) { for (Link.Listener l : listeners) l.onMessage(m); return; }
         if ("phoneOffer".equals(t) && isPrincipal()) { lostOffered = false; PhoneMode.offer(app, this, m.optString("title", "Modo teléfono normal")); return; }
         // fotos, música y video: se ven en el principal; los controles, en el extendido
         if ("mPlay".equals(t)) { if (isPrincipal()) MediaHub.open(app, m.optString("kind"), MediaHub.paths(m), m.optInt("idx")); return; }

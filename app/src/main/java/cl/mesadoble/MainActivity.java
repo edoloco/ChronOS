@@ -209,6 +209,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         handleShare(getIntent());
         String bw = getIntent().getStringExtra("bindWidget");
         if (bw != null) bindRequested(bw, 0);
+        if (getIntent().hasExtra("homeSet")) { boolean on = getIntent().getBooleanExtra("homeSet", true); getIntent().removeExtra("homeSet"); main.post(() -> { if (on) forceHome(); else releaseHome(); }); }
         if (getIntent().getBooleanExtra("notifSetup", false)) { getIntent().removeExtra("notifSetup"); main.post(this::guideNotifs); }
         if (getIntent().getBooleanExtra("phoneNow", false)) { getIntent().removeExtra("phoneNow"); main.post(() -> PhoneMode.enter(this, hub)); }
     }
@@ -217,6 +218,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         super.onNewIntent(intent);
         String bw = intent.getStringExtra("bindWidget");
         if (bw != null) { intent.removeExtra("bindWidget"); bindRequested(bw, 0); }
+        if (intent.hasExtra("homeSet")) { boolean on = intent.getBooleanExtra("homeSet", true); intent.removeExtra("homeSet"); main.post(() -> { if (on) forceHome(); else releaseHome(); }); }
         if (intent.getBooleanExtra("notifSetup", false)) { intent.removeExtra("notifSetup"); main.post(this::guideNotifs); }
         if (intent.getBooleanExtra("phoneNow", false)) { intent.removeExtra("phoneNow"); main.post(() -> PhoneMode.enter(this, hub)); }
         handleShare(intent);
@@ -227,6 +229,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         immersive();
         hub.foreground = true;
         resumed = true;
+        main.postDelayed(this::reportHome, 1200);
         if (side == 1) PhoneMode.exit(this, hub);   // se volvió a ChronOS: deja el modo teléfono normal
         // Xiaomi a veces detiene el lector de notificaciones: se le pide a Android que lo vuelva a conectar
         if (side == 1 && NotifService.instance == null && NotifService.enabled(this))
@@ -334,10 +337,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     // ---------------- pantalla de inicio ----------------
 
-    private boolean isLauncher() {
-        return getPackageManager().getComponentEnabledSetting(new android.content.ComponentName(this, getPackageName() + ".Escritorio"))
-                == android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED;
-    }
+    private boolean isLauncher() { return homeEnabled(this); }
 
     @SuppressWarnings("deprecation")
     @Override public void onBackPressed() {
@@ -347,24 +347,99 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         super.onBackPressed();
     }
 
-    /** Activa o desactiva ChronOS como pantalla de inicio (launcher). No necesita permisos especiales. */
-    private void toggleLauncher() {
-        boolean on = !isLauncher();
-        getPackageManager().setComponentEnabledSetting(new android.content.ComponentName(this, getPackageName() + ".Escritorio"),
+    // ChronOS como pantalla de inicio, en este teléfono o en el otro. "Forzar" usa la ventana de Android
+    // "¿Usar ChronOS como app de inicio predeterminada?" (Android 10+); si el teléfono no la tiene, abre los ajustes de inicio.
+
+    static boolean homeEnabled(android.content.Context c) {
+        return c.getPackageManager().getComponentEnabledSetting(new android.content.ComponentName(c, c.getPackageName() + ".Escritorio"))
+                == android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED;
+    }
+
+    /** ¿ChronOS es de verdad la pantalla de inicio de este teléfono? */
+    static boolean homeDefault(android.content.Context c) {
+        try {
+            Object rm = c.getSystemService("role");
+            if (rm != null) return (Boolean) rm.getClass().getMethod("isRoleHeld", String.class).invoke(rm, "android.app.role.HOME");
+        } catch (Exception ignored) { }
+        android.content.pm.ResolveInfo r = c.getPackageManager().resolveActivity(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),
+                android.content.pm.PackageManager.MATCH_DEFAULT_ONLY);
+        return r != null && r.activityInfo != null && c.getPackageName().equals(r.activityInfo.packageName);
+    }
+
+    static void setHomeEnabled(android.content.Context c, boolean on) {
+        c.getPackageManager().setComponentEnabledSetting(new android.content.ComponentName(c, c.getPackageName() + ".Escritorio"),
                 on ? android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED : android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
                 android.content.pm.PackageManager.DONT_KILL_APP);
-        if (on) {
-            new Ui.Sheet(this)
-                    .title("Elige ChronOS como inicio")
-                    .message("Se abrirá la lista de apps de inicio: elige ChronOS. Desde ahí el botón Inicio te trae a la mesa "
-                            + "y las apps se abren desde el botón Apps.\n\nEn Xiaomi, si la navegación por gestos deja de funcionar con "
-                            + "otro inicio, usa los botones de navegación.")
-                    .button("Abrir ajustes", true, () -> openSettings(android.provider.Settings.ACTION_HOME_SETTINGS, null, "Elige ChronOS"))
-                    .show();
-        } else {
-            Toast.makeText(this, "ChronOS ya no es la pantalla de inicio", Toast.LENGTH_SHORT).show();
-            try { startActivity(new Intent(android.provider.Settings.ACTION_HOME_SETTINGS)); } catch (Exception ignored) { }
+    }
+
+    private static final int REQ_HOME = 91;
+
+    /** Pone ChronOS como inicio de ESTE teléfono: primero la ventana de Android; si no existe, los ajustes de inicio. */
+    void forceHome() {
+        setHomeEnabled(this, true);
+        if (homeDefault(this)) { Toast.makeText(this, "ChronOS ya es la pantalla de inicio de este teléfono", Toast.LENGTH_SHORT).show(); reportHome(); return; }
+        main.postDelayed(() -> {   // Android tarda un momento en ver la pantalla de inicio recién activada
+            try {
+                Object rm = getSystemService("role");
+                boolean avail = rm != null && (Boolean) rm.getClass().getMethod("isRoleAvailable", String.class).invoke(rm, "android.app.role.HOME");
+                if (avail) {
+                    Intent i = (Intent) rm.getClass().getMethod("createRequestRoleIntent", String.class).invoke(rm, "android.app.role.HOME");
+                    startActivityForResult(i, REQ_HOME);
+                    return;
+                }
+            } catch (Exception ignored) { }
+            homeSettings();
+        }, 400);
+    }
+
+    private void homeSettings() {
+        for (String a : new String[]{android.provider.Settings.ACTION_HOME_SETTINGS, "android.settings.MANAGE_DEFAULT_APPS_SETTINGS"}) {
+            try { startActivity(new Intent(a)); Toast.makeText(this, "Elige ChronOS como pantalla de inicio", Toast.LENGTH_LONG).show(); return; }
+            catch (Exception ignored) { }
         }
+        openSettings(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName()),
+                "Busca \"Pantalla de inicio\" / \"Abrir de forma predeterminada\" y elige ChronOS");
+    }
+
+    /** Deja de ser la pantalla de inicio de este teléfono: Android vuelve a la de siempre. */
+    void releaseHome() {
+        boolean was = homeDefault(this);
+        setHomeEnabled(this, false);
+        Toast.makeText(this, "ChronOS ya no es la pantalla de inicio de este teléfono", Toast.LENGTH_SHORT).show();
+        if (was) main.postDelayed(this::homeSettings, 300);
+        main.postDelayed(this::reportHome, 800);
+    }
+
+    /** Le cuenta al otro teléfono si ChronOS es el inicio aquí (para mostrarlo en Ajustes). */
+    void reportHome() {
+        if (hub.connected()) hub.send("homeState", "def", homeDefault(this), "en", homeEnabled(this));
+    }
+
+    private boolean otherHome, otherHomeKnown;
+
+    private String homeLabel(boolean def) { return def ? "sí" : "no"; }
+
+    /** Ajustes → Pantalla de inicio: en el principal y en el extendido, desde cualquiera de los dos. */
+    private void launcherMenu() {
+        if (hub.connected()) hub.send("homeAsk");
+        boolean me = homeDefault(this), principal = hub.isPrincipal();
+        String meName = principal ? "el principal" : "el extendido", otherName = principal ? "el extendido" : "el principal";
+        Ui.Sheet sh = new Ui.Sheet(this)
+                .title("ChronOS como pantalla de inicio")
+                .message("Con ChronOS como inicio, el botón Inicio del teléfono te trae a la mesa. Android pide confirmarlo en cada teléfono: "
+                        + "aparece su ventana \"¿Usar como app de inicio?\" (o sus ajustes) y se elige ChronOS.");
+        sh.option(Ui.HOME, (me ? "Quitar en " : "Poner en ") + meName, "Ahora: " + homeLabel(me) + " · este teléfono",
+                () -> { if (me) releaseHome(); else forceHome(); });
+        if (hub.connected()) {
+            sh.option(Ui.HOME, (otherHomeKnown && otherHome ? "Quitar en " : "Poner en ") + otherName,
+                    "Ahora: " + (otherHomeKnown ? homeLabel(otherHome) : "…") + " · la confirmación aparece en " + otherName, () -> {
+                        boolean on = !(otherHomeKnown && otherHome);
+                        hub.send("homeSet", "on", on);
+                        Toast.makeText(this, "Confirma en " + otherName, Toast.LENGTH_LONG).show();
+                    });
+        }
+        sh.option(Ui.GEAR, "Abrir los ajustes de inicio de este teléfono", "Si la ventana no aparece, elígelo a mano", this::homeSettings);
+        sh.button("Cerrar", false, null).show();
     }
 
     // ---------------- color de fondo ----------------
@@ -973,8 +1048,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                             if (principal) requestPermissions(CallHub.PERMS, 61);
                             else Toast.makeText(this, "Actívalo en el principal: Ajustes → Llamadas", Toast.LENGTH_LONG).show();
                         })
-                .option(Ui.HOME, isLauncher() ? "Pantalla de inicio: sí" : "Pantalla de inicio: no",
-                        isLauncher() ? "ChronOS es tu launcher (tocar para dejar de usarla)" : "Usar ChronOS como launcher de este teléfono", this::toggleLauncher)
+                .option(Ui.HOME, "Pantalla de inicio", (principal ? "Principal: " + homeLabel(homeDefault(this)) + " · Extendido: " + (otherHomeKnown ? homeLabel(otherHome) : "…")
+                        : "Principal: " + (otherHomeKnown ? homeLabel(otherHome) : "…") + " · Extendido: " + homeLabel(homeDefault(this))), this::launcherMenu)
                 .option(Ui.GEAR, "Revisar configuración", principal ? "Permisos del principal" : "Permisos del extendido", () -> checkSetup(true))
                 .option(Ui.WIFI, "Conexión", statusText, this::showConnection)
                 .option(Ui.NOTE, "Acerca de la app", Updater.updateAvailable(this)
@@ -1950,6 +2025,14 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     @Override protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
+        if (req == REQ_HOME) {
+            main.postDelayed(() -> {
+                boolean ok = homeDefault(this);
+                if (!ok) homeSettings();   // la ventana no lo dejó: a los ajustes de inicio
+                else Toast.makeText(this, "Listo: ChronOS es la pantalla de inicio", Toast.LENGTH_SHORT).show();
+                reportHome();
+            }, 500);
+        }
         if (req == PICK_IMAGE && res == RESULT_OK && data != null && data.getData() != null) addImage(data.getData());
         if (req == REQ_BIND) {
             if (res == RESULT_OK && pendingWidget != null) configureWidget();
@@ -2034,6 +2117,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         linkInfo = state == Link.CONNECTED ? null : info;
         if (state == Link.WAITING && info == null) waitingSince = System.currentTimeMillis();
         if (state == Link.CONNECTED && side == 0) main.postDelayed(() -> AppsDialog.prefetch(this, hub), 1500);   // menú de apps al instante
+        if (state == Link.CONNECTED) main.postDelayed(() -> { reportHome(); hub.send("homeAsk"); }, 2000);   // ¿ChronOS es el inicio en cada teléfono?
         if (state == Link.CONNECTED) {
             JSONObject hello = new JSONObject();
             JSONObject full = new JSONObject();
@@ -2072,6 +2156,13 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 break;
             case "notifSetup":
                 if (side == 1) main.post(this::guideNotifs);
+                break;
+            case "homeState":
+                otherHome = m.optBoolean("def");
+                otherHomeKnown = true;
+                break;
+            case "homeAsk":
+                main.post(this::reportHome);
                 break;
             case "phoneOffer":
                 main.post(() -> phoneOffer(m.optString("title")));
