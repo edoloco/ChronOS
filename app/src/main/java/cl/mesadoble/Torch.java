@@ -87,6 +87,22 @@ final class Torch {
         hub.local(state());
     }
 
+    /** ¿Está prendida la del principal / la del extendido? */
+    static boolean on(Hub hub, boolean principal) { return principal == hub.isPrincipal() ? mine : other; }
+
+    /** Interruptor de un teléfono: el de aquí se cambia directo; el otro, por mensaje. */
+    static void toggleOne(Context c, Hub hub, boolean principal) {
+        listen(c, hub);
+        boolean here = principal == hub.isPrincipal();
+        boolean on = !on(hub, principal);
+        if (here) {
+            if (!set(c, on) && on) android.widget.Toast.makeText(c, "No se pudo prender esta linterna (¿la cámara está en uso?)", android.widget.Toast.LENGTH_SHORT).show();
+            if (hub.connected()) hub.send("torchState", "on", mine);
+        } else if (hub.connected()) { hub.send("torch", "on", on); other = on; }
+        else android.widget.Toast.makeText(c, "El otro teléfono no está conectado", android.widget.Toast.LENGTH_SHORT).show();
+        hub.local(state());
+    }
+
     /** Mensajes del otro teléfono. */
     static void onMessage(Context c, Hub hub, org.json.JSONObject m) {
         listen(c, hub);

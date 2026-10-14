@@ -1035,12 +1035,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                         })
                 .option(Ui.PALETTE, "Personalizar", "Color de fondo, tarjetas y menús, fondo de juegos", this::personalize)
                 .option(Ui.NOTE, -1, "Notificaciones en la barra: " + (principal ? (NotifService.enabled(this) ? "sí" : "no") : "del principal"),
-                        principal ? "Muestra las notificaciones animadas en la barra del reloj (o en el extendido)"
-                                  : "Se activa en el principal", principal && NotifService.enabled(this),
-                        () -> {
-                            if (!principal) { hub.send("notifSetup"); Toast.makeText(this, "Sigue los pasos en el principal", Toast.LENGTH_LONG).show(); return; }
-                            guideNotifs();
-                        })
+                        "Probar, activar o reparar las notificaciones del principal", principal && NotifService.enabled(this), this::guideNotifs)
                 .option(Ui.RECEIVE, -1, "Llamadas: " + (principal ? (CallHub.ready(this) ? "listo" : "falta permiso") : "contestar aquí"),
                         principal ? "Permitir que el extendido conteste o cuelgue las llamadas de este teléfono"
                                   : "Las llamadas del principal se contestan o cuelgan desde este teléfono", principal && CallHub.ready(this),
@@ -1279,21 +1274,57 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
      * Play Store hasta que se permiten los ajustes restringidos de ChronOS. Por eso son dos pasos.
      */
     void guideNotifs() {
-        if (NotifService.enabled(this)) {
-            Toast.makeText(this, "Las notificaciones ya están activas en la barra", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        new Ui.Sheet(this)
+        boolean principal = hub.isPrincipal();
+        Ui.Sheet sh = new Ui.Sheet(this)
                 .title("Notificaciones en la barra")
-                .message("Android pide dos pasos. Si en el paso 2 ChronOS aparece gris o dice \"ajuste restringido\", haz primero el paso 1.")
-                .option(Ui.GEAR, "1. Permitir ajustes restringidos", "Info de la app → ⋮ (arriba a la derecha) → Permitir ajustes restringidos", () ->
-                        openSettings(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName()),
-                                "Toca ⋮ arriba a la derecha → \"Permitir ajustes restringidos\" y vuelve."))
-                .option(Ui.NOTE, "2. Acceso a notificaciones", "Activa ChronOS en la lista", () ->
-                        openSettings("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS", null,
-                                "Activa ChronOS en \"Acceso a notificaciones\" y vuelve."))
-                .button("Listo", false, null)
-                .show();
+                .message(principal
+                        ? (NotifService.enabled(this) ? "El permiso está activo. Prueba que lleguen; si no llegan, la prueba reinicia el lector de notificaciones."
+                                : "Android pide dos pasos. Si en el paso 2 ChronOS aparece gris o dice \"ajuste restringido\", haz primero el paso 1.")
+                        : "Las notificaciones son las del principal. La prueba se hace allá y el resultado aparece aquí.");
+        sh.option(Ui.CHECK, "Probar notificaciones", "Revisa el permiso, reinicia el lector si hace falta y manda un aviso de prueba", this::testNotifs);
+        if (principal) {
+            sh.option(Ui.GEAR, "1. Permitir ajustes restringidos", "Info de la app → ⋮ (arriba a la derecha) → Permitir ajustes restringidos", () ->
+                    openSettings(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName()),
+                            "Toca ⋮ arriba a la derecha → \"Permitir ajustes restringidos\" y vuelve."));
+            sh.option(Ui.NOTE, "2. Acceso a notificaciones", NotifService.enabled(this) ? "ChronOS ya está activado" : "Activa ChronOS en la lista", () ->
+                    openSettings("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS", null,
+                            "Activa ChronOS en \"Acceso a notificaciones\" y vuelve."));
+        } else {
+            sh.option(Ui.GEAR, "Activar en el principal", "Abre en el principal los pasos para dar el permiso", () -> {
+                hub.send("notifSetup");
+                Toast.makeText(this, "Sigue los pasos en el principal", Toast.LENGTH_LONG).show();
+            });
+        }
+        sh.button("Cerrar", false, null).show();
+    }
+
+    private void testNotifs() {
+        if (hub.isPrincipal()) {
+            if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != android.content.pm.PackageManager.PERMISSION_GRANTED)
+                requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 3);
+            NotifTest.run(this, hub);
+        } else if (hub.connected()) hub.send("notifTest");
+        else { Toast.makeText(this, "El principal no está conectado", Toast.LENGTH_SHORT).show(); return; }
+        Toast.makeText(this, "Probando… (unos segundos)", Toast.LENGTH_SHORT).show();
+    }
+
+    /** Resultado de la prueba, paso por paso, con qué hacer si algo falla. */
+    private void notifResult(org.json.JSONObject m) {
+        boolean perm = m.optBoolean("perm"), conn = m.optBoolean("conn"), post = m.optBoolean("post"), seen = m.optBoolean("seen");
+        StringBuilder b = new StringBuilder();
+        b.append(perm ? "✓" : "✗").append("  Permiso \"Acceso a notificaciones\" en el principal\n");
+        if (perm) b.append(conn ? "✓" : "✗").append("  Lector de notificaciones funcionando").append(m.optBoolean("fixed") ? " (se reinició)" : "").append("\n");
+        if (perm) b.append(post ? "✓" : "✗").append("  Aviso de prueba publicado\n");
+        if (perm && post) b.append(seen ? "✓" : "✗").append("  ChronOS recibió el aviso\n");
+        String what;
+        if (!perm) what = "Falta el permiso. Toca \"Activar\" y sigue los dos pasos en el principal.";
+        else if (!post) what = "El principal no deja que ChronOS muestre avisos: Ajustes → Apps → ChronOS → Notificaciones → permitir.";
+        else if (!seen) what = "Android no le pasa los avisos a ChronOS. En el principal: Ajustes → Apps → ChronOS → Ahorro de batería → Sin restricciones, "
+                + "y activa \"Inicio automático\". Después vuelve a probar.";
+        else what = "Todo funciona. Deberías haber visto \"Prueba de ChronOS\" en la barra del reloj (si ChronOS estaba a la vista en el principal) o como tarjeta en el extendido.";
+        Ui.Sheet sh = new Ui.Sheet(this).title(seen ? "Las notificaciones funcionan" : "Las notificaciones no llegan").message(b + "\n" + what);
+        if (!perm || !seen) sh.button("Activar", true, () -> { if (hub.isPrincipal()) guideNotifs(); else hub.send("notifSetup"); });
+        sh.button("Cerrar", false, null).show();
     }
 
     private void guideAccessibility() {
@@ -1322,7 +1353,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .option(Ui.WIDGETS, "Widget", "Widgets de tus apps (clima, calendario, música...)", this::addWidget)
                 .option(Ui.FOLDER, "Archivos", "Pasar archivos entre los dos teléfonos", this::openFiles)
                 .option(Ui.IMAGE, "Cámara", "Widget con el visor y los botones de la cámara del principal", this::addCamera)
-                .option(Ui.AUTO, "Linternas", "Interruptor que prende y apaga la linterna de los dos teléfonos", this::addTorch)
+                .option(Ui.AUTO, "Linternas", "Un interruptor para la linterna del principal y otro para la del extendido", this::addTorch)
                 .option(Ui.HOME, "Modo teléfono normal", "El principal vuelve a su pantalla de inicio y su teclado de siempre", this::phoneModeNow)
                 .option(Ui.RECEIVE, "Actualizar app", Updater.updateAvailable(this) ? "Hay una versión nueva: " + Updater.latestKnown(this)
                         : "Versión instalada: " + Updater.clean(Updater.installedVersion(this)), () -> Updater.check(this, hub))
@@ -1358,8 +1389,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         Torch.listen(this, hub);
     }
 
-    @Override public boolean torchOn() { return Torch.anyOn(); }
-    @Override public void onTorch() { Torch.toggle(this, hub); }
+    @Override public boolean torchOn(boolean principal) { return Torch.on(hub, principal); }
+    @Override public void onTorch(boolean principal) { Torch.toggleOne(this, hub, principal); }
 
     /** Herramientas → Modo teléfono normal: en el principal se hace ya; desde el extendido se le pregunta al principal. */
     private void phoneModeNow() {
@@ -2153,6 +2184,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                     if (side == 1 && barNotif != null) barNotif.show(m);   // en la barra del reloj
                     else if (side == 0) floatNotif.show(m);                   // el principal está en otra app: aquí, arriba a la izquierda
                 });
+                break;
+            case "notifTestR":
+                main.post(() -> notifResult(m));
                 break;
             case "notifSetup":
                 if (side == 1) main.post(this::guideNotifs);

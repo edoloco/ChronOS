@@ -320,6 +320,7 @@ public class Hub implements Link.Listener {
             }
         }
         if ("torch".equals(t) || "torchState".equals(t)) { Torch.onMessage(app, this, m); return; }
+        if ("notifTest".equals(t)) { if (isPrincipal()) NotifTest.run(app, this); return; }
         // el extendido pide activar las notificaciones: si ChronOS no está a la vista en el principal, un aviso para abrirlo
         if ("notifSetup".equals(t) && isPrincipal() && !foreground && !NotifService.enabled(app)) {
             startOrNotify(new Intent(app, MainActivity.class).putExtra("notifSetup", true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP),

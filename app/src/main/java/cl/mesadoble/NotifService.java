@@ -56,7 +56,9 @@ public class NotifService extends NotificationListenerService {
         if (!hub.isPrincipal()) return;
         Notification n = sbn.getNotification();
         String pkg = sbn.getPackageName();
-        if (pkg.equals(getPackageName()) || !sbn.isClearable()) return;                      // propias y permanentes (música, descargas…)
+        boolean test = pkg.equals(getPackageName()) && NotifTest.TAG.equals(sbn.getTag());   // la prueba de ChronOS sí pasa
+        if (test) NotifTest.seenAt = System.currentTimeMillis();
+        if ((pkg.equals(getPackageName()) && !test) || !sbn.isClearable()) return;           // propias y permanentes (música, descargas…)
         if ((n.flags & Notification.FLAG_GROUP_SUMMARY) != 0) return;                         // el resumen de un grupo repite lo mismo
         if ((n.flags & Notification.FLAG_ONLY_ALERT_ONCE) != 0 && lastShown.containsKey(sbn.getKey())) return;   // actualización silenciosa
         Bundle x = n.extras;

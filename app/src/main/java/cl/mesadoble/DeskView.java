@@ -68,8 +68,9 @@ public class DeskView extends View {
         /** Widget de cámara: open | switch | shot | flash | close (la cámara corre en el principal). */
         void onCamera(String action);
         /** Interruptor de linternas: ¿alguna prendida? y cambiarlo (las dos a la vez). */
-        boolean torchOn();
-        void onTorch();
+        /** Linternas: cada teléfono por separado (principal = true). */
+        boolean torchOn(boolean principal);
+        void onTorch(boolean principal);
     }
 
     // ---------------- widget de cámara: visor y botones de la cámara del principal ----------------
@@ -969,7 +970,7 @@ public class DeskView extends View {
         } else if (Item.CAMERA.equals(it.kind)) {
             it.hPx = 26 * dp + width * 0.6f + camBar();
         } else if (Item.TORCH.equals(it.kind)) {
-            it.hPx = 96 * dp;
+            it.hPx = 138 * dp;
         } else {
             it.hPx = 132 * dp;
         }
@@ -1204,36 +1205,36 @@ public class DeskView extends View {
 
     /** Una fila del widget de batería: nombre, pila con su nivel y porcentaje (⚡ si está cargando). */
     /** Linternas: ícono de linterna, el texto y un interruptor grande a la derecha. */
+    /** Linternas: una fila por teléfono (principal arriba, extendido abajo), cada una con su interruptor. */
     private void drawTorch(Canvas c, float width, float h) {
-        boolean on = host != null && host.torchOn();
-        float cy = 18 * dp + (h - 18 * dp) / 2;
-        // linterna (cuerpo + cabeza), con rayos si está prendida
-        float x = 22 * dp, u = 7 * dp;
+        float top = 24 * dp, rowH = (h - top - 8 * dp) / 2;
+        torchRow(c, "Principal", host != null && host.torchOn(true), width, top + rowH * 0.5f);
+        torchRow(c, "Extendido", host != null && host.torchOn(false), width, top + rowH * 1.5f);
+    }
+
+    private void torchRow(Canvas c, String who, boolean on, float width, float cy) {
+        float x = 22 * dp, u = 6.5f * dp;
         Paint p = battBody;
         p.setStyle(Paint.Style.STROKE);
         p.setStrokeWidth(2 * dp);
         p.setColor(on ? 0xFFFFC53D : muted);
         Path b = new Path();
-        b.moveTo(x - u * 0.9f, cy - u * 0.4f); b.lineTo(x + u * 0.9f, cy - u * 0.4f);
-        b.lineTo(x + u * 0.5f, cy + u * 0.4f); b.lineTo(x - u * 0.5f, cy + u * 0.4f); b.close();
+        b.moveTo(x - u * 0.9f, cy - u * 0.9f); b.lineTo(x + u * 0.9f, cy - u * 0.9f);
+        b.lineTo(x + u * 0.5f, cy - u * 0.1f); b.lineTo(x - u * 0.5f, cy - u * 0.1f); b.close();
         c.drawPath(b, p);
-        c.drawRoundRect(new RectF(x - u * 0.45f, cy + u * 0.4f, x + u * 0.45f, cy + u * 1.9f), 2 * dp, 2 * dp, p);
-        if (on) for (int i = -1; i <= 1; i++) c.drawLine(x + i * u * 0.7f, cy - u * 0.9f, x + i * u * 1.2f, cy - u * 1.7f, p);
+        c.drawRoundRect(new RectF(x - u * 0.45f, cy - u * 0.1f, x + u * 0.45f, cy + u * 1.4f), 2 * dp, 2 * dp, p);
+        if (on) for (int i = -1; i <= 1; i++) c.drawLine(x + i * u * 0.7f, cy - u * 1.4f, x + i * u * 1.2f, cy - u * 2.1f, p);
+        float sw = 54 * dp, sh = 30 * dp, tx = x + u * 2.4f, maxT = Math.max(10, width - tx - sw - 24 * dp);
         small.setColor(fg);
         small.setTextSize(Math.max(13 * dp, Math.min(16 * dp, width * 0.06f)));
-        float tx = x + u * 2.2f;
-        float sw = 58 * dp, sh = 32 * dp;
-        String t = ellipsize(on ? "Prendidas" : "Apagadas", small, Math.max(10, width - tx - sw - 24 * dp));
-        c.drawText(t, tx, cy - 2 * dp, small);
+        c.drawText(ellipsize(who, small, maxT), tx, cy - 1 * dp, small);
         label.setColor((fg & 0x00FFFFFF) | 0x99000000);
-        c.drawText(ellipsize("Principal y extendido", label, Math.max(10, width - tx - sw - 24 * dp)), tx, cy + 14 * dp, label);
-        // interruptor
+        c.drawText(on ? "Prendida" : "Apagada", tx, cy + 14 * dp, label);
         RectF tr = new RectF(width - 14 * dp - sw, cy - sh / 2, width - 14 * dp, cy + sh / 2);
         battFill.setColor(on ? 0xFFFFB300 : (muted & 0x00FFFFFF) | 0x55000000);
         c.drawRoundRect(tr, sh / 2, sh / 2, battFill);
         battFill.setColor(0xFFFFFFFF);
-        float kx = on ? tr.right - sh / 2 : tr.left + sh / 2;
-        c.drawCircle(kx, cy, sh / 2 - 4 * dp, battFill);
+        c.drawCircle(on ? tr.right - sh / 2 : tr.left + sh / 2, cy, sh / 2 - 4 * dp, battFill);
     }
 
     private void drawBattery(Canvas c, String who, int lvl, boolean charging, float width, float cy) {
@@ -1560,7 +1561,12 @@ public class DeskView extends View {
             else host.onWidgetTap(it);
         }
         else if (Item.CLOCK.equals(it.kind)) { if (host != null) host.onOpenAlarms(); }
-        else if (Item.TORCH.equals(it.kind)) { if (host != null) { host.onTorch(); invalidate(); } }
+        else if (Item.TORCH.equals(it.kind)) {   // fila de arriba = principal, de abajo = extendido
+            if (host == null || downLocal == null) return;
+            float top = 24 * dp;
+            host.onTorch(downLocal[1] < top + (downLocal[3] - top - 8 * dp) / 2);
+            invalidate();
+        }
         else if (Item.CAMERA.equals(it.kind)) { if (downLocal != null) tapCamera(downLocal[0], downLocal[1], downLocal[2], downLocal[3]); }
         else if (Item.RECENTS.equals(it.kind)) {
             if (downLocal == null || host == null) return;
