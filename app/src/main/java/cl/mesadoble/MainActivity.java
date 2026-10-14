@@ -1767,9 +1767,34 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         ip.setText(prefs.getString("lastIp", ""));
         Ui.Sheet sh = new Ui.Sheet(this).title("Conexión");
         if (side == 0) {
-            sh.message(statusText + "\n\nEste es el extendido y espera la conexión. Su IP es " + Link.localIp()
-                    + ". Si el principal no lo encuentra solo, escribe esa IP en el principal.")
-              .button("Listo", true, null);
+            ip.setHint("IP del principal (opcional)");
+            ip.setText(prefs.getString("principalIp", ""));
+            boolean on = hub.connected();
+            sh.message(statusText + "\n\nEste es el extendido (IP " + Link.localIp() + ")."
+                    + (on ? " Está conectado con el principal (" + hub.link.peerIp() + ")."
+                          : " Si el principal no aparece solo, llámalo: el principal recibe el aviso y se conecta. "
+                            + "Si tampoco funciona, escribe la IP del principal (está en el principal: Ajustes → Acerca del teléfono → Estado → Dirección IP)."))
+              .option(Ui.WIFI, "Llamar al principal", "Le pide al principal que se conecte a este teléfono", () -> {
+                  hub.link.call(null);
+                  linkInfo = "Llamando al principal…";
+                  updateStatus();
+                  Toast.makeText(this, "Llamando al principal…", Toast.LENGTH_SHORT).show();
+              })
+              .option(Ui.AUTO, "Reiniciar la conexión", "Vuelve a anunciarse en el WiFi y espera al principal", () -> {
+                  hub.link.start(true);
+                  main.postDelayed(() -> hub.link.call(null), 1200);
+                  Toast.makeText(this, "Conexión reiniciada", Toast.LENGTH_SHORT).show();
+              })
+              .view(ip)
+              .button("Cerrar", false, null)
+              .button("Llamar a esa IP", true, () -> {
+                  String v = ip.getText().toString().trim();
+                  if (v.isEmpty()) { hub.link.call(null); return; }
+                  prefs.edit().putString("principalIp", v).apply();
+                  linkInfo = "Llamando a " + v + "…";
+                  updateStatus();
+                  hub.link.call(v);
+              });
         } else {
             sh.message(statusText + "\n\nEl principal busca al extendido en el WiFi. Si no lo encuentra, escribe la IP que muestra el extendido.")
               .view(ip)

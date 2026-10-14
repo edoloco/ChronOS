@@ -84,11 +84,80 @@ public class Link {
         host = asHost;
         if (lock != null) lock.acquire();
         state(WAITING, null);
-        if (asHost) startServer(); else startDiscovery();
+        if (asHost) { startServer(); main.postDelayed(autoCall, 3000); }
+        else { startDiscovery(); startCallListener(); }
+    }
+
+    // ---------- llamada: el extendido le pide al principal que se conecte ----------
+    // El extendido espera la conexión; si el principal no lo encuentra solo, el extendido "llama": manda un aviso
+    // por el WiFi (a todos o a una IP) y el principal, al recibirlo, se conecta a quien llamó.
+
+    public static final int CALL_PORT = 47821;
+    private static final String CALL = "MESADOBLE-CALL";
+    private volatile java.net.DatagramSocket callSock;
+    private volatile boolean connecting;
+
+    /** Mientras espera, el extendido llama solo cada 8 s (por si la búsqueda del WiFi falla). */
+    private final Runnable autoCall = new Runnable() {
+        @Override public void run() {
+            if (!running || !host) return;
+            if (conn == null) call(null);
+            main.postDelayed(this, 8000);
+        }
+    };
+
+    /** Extendido: llama al principal (ip = null: a todo el WiFi). */
+    public void call(final String ip) {
+        if (!host) return;
+        new Thread(() -> {
+            try (java.net.DatagramSocket ds = new java.net.DatagramSocket()) {
+                ds.setBroadcast(true);
+                byte[] b = CALL.getBytes(StandardCharsets.UTF_8);
+                java.util.List<InetAddress> to = new java.util.ArrayList<>();
+                if (ip != null && !ip.isEmpty()) to.add(InetAddress.getByName(ip));
+                else {
+                    to.add(InetAddress.getByName("255.255.255.255"));
+                    for (NetworkInterface ni : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                        if (!ni.isUp() || ni.isLoopback()) continue;
+                        for (java.net.InterfaceAddress ia : ni.getInterfaceAddresses())
+                            if (ia.getBroadcast() != null) to.add(ia.getBroadcast());
+                    }
+                }
+                for (int k = 0; k < 4; k++) {
+                    for (InetAddress a : to) {
+                        try { ds.send(new java.net.DatagramPacket(b, b.length, a, CALL_PORT)); } catch (Exception ignored) { }
+                    }
+                    Thread.sleep(400);
+                }
+            } catch (Exception ignored) { }
+        }, "llamar").start();
+    }
+
+    /** Principal: escucha las llamadas del extendido y se conecta a quien llamó. */
+    private void startCallListener() {
+        new Thread(() -> {
+            try (java.net.DatagramSocket ds = new java.net.DatagramSocket(null)) {
+                ds.setReuseAddress(true);
+                ds.setBroadcast(true);
+                ds.bind(new InetSocketAddress(CALL_PORT));
+                callSock = ds;
+                byte[] buf = new byte[64];
+                while (running && !host) {
+                    java.net.DatagramPacket p = new java.net.DatagramPacket(buf, buf.length);
+                    ds.receive(p);
+                    String msg = new String(p.getData(), 0, p.getLength(), StandardCharsets.UTF_8);
+                    if (CALL.equals(msg) && conn == null && !connecting) connectTo(p.getAddress().getHostAddress());
+                }
+            } catch (Exception ignored) {
+            } finally { callSock = null; }
+        }, "escuchar-llamadas").start();
     }
 
     public void stop() {
         running = false;
+        main.removeCallbacks(autoCall);
+        java.net.DatagramSocket cs = callSock;
+        if (cs != null) cs.close();
         if (regL != null) { try { nsd.unregisterService(regL); } catch (Exception ignored) { } regL = null; }
         stopDiscovery();
         if (server != null) { try { server.close(); } catch (IOException ignored) { } server = null; }
@@ -115,7 +184,8 @@ public class Link {
 
     /** Conexión manual por IP (por si la búsqueda automática no funciona en esa red). */
     public void connectTo(final String ip) {
-        if (!running) return;
+        if (!running || connecting) return;
+        connecting = true;
         new Thread(() -> {
             try {
                 Socket s = new Socket();
@@ -123,7 +193,7 @@ public class Link {
                 attach(s);
             } catch (IOException e) {
                 state(WAITING, "No pude conectar con " + ip);
-            }
+            } finally { connecting = false; }
         }, "connect").start();
     }
 
