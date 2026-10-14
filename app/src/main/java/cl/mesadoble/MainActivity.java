@@ -172,6 +172,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         root.addOnLayoutChangeListener((v, l, t, r2, b2, ol, ot, or, ob) -> {
             if (b2 - t != ob - ot || r2 - l != or - ol) main.post(() -> layoutChrono(false));   // al ocultarse las barras de Android
         });
+        offlinePanel = buildOffline();
+        root.addView(offlinePanel, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
         startOverlay = new FrameLayout(this);
         startOverlay.setVisibility(View.GONE);
         startOverlay.setOnClickListener(v -> showStart(false));
@@ -242,6 +244,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         immersive();
         hub.foreground = true;
         hub.notifsChanged();
+        main.removeCallbacks(offlineTick);
+        main.postDelayed(offlineTick, 600);
         resumed = true;
         main.postDelayed(this::reportHome, 1200);
         if (side == 1) PhoneMode.exit(this, hub);   // se volvió a ChronOS: deja el modo teléfono normal
@@ -1456,6 +1460,145 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         phoneSheet = sh.show();
     }
 
+    // ---------------- principal sin extendido: botones flotantes ----------------
+    // Sin el extendido el principal no tiene menú de apps ni controles: aparece una tarjeta flotante con lo esencial.
+
+    private LinearLayout offlinePanel, offlineFull;
+    private TextView offlineInfo, offlinePill, offlineUpd;
+    private boolean offlineCollapsed;
+    private final long startedAt = android.os.SystemClock.uptimeMillis();
+
+    private LinearLayout buildOffline() {
+        boolean n = CardTheme.sheetNight(night);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setGravity(Gravity.CENTER_HORIZONTAL);
+        offlineFull = new LinearLayout(this);
+        offlineFull.setOrientation(LinearLayout.VERTICAL);
+        offlineFull.setPadding(dp(20), dp(16), dp(20), dp(16));
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(CardTheme.sheetFill(night));
+        g.setCornerRadius(dp(24));
+        g.setStroke(dp(1), (Ui.fg(n) & 0x00FFFFFF) | 0x33000000);
+        offlineFull.setBackground(g);
+        offlineFull.setElevation(dp(18));
+        LinearLayout head = new LinearLayout(this);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        TextView t = new TextView(this);
+        t.setText("Sin teléfono extendido");
+        t.setTextSize(18);
+        t.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
+        t.setTextColor(Ui.fg(n));
+        head.addView(t, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView min = new TextView(this);
+        min.setText("—");
+        min.setTextSize(18);
+        min.setTextColor(Ui.fg(n));
+        min.setPadding(dp(14), 0, dp(4), 0);
+        min.setOnClickListener(v -> { offlineCollapsed = true; updateOffline(); });
+        head.addView(min);
+        offlineFull.addView(head);
+        offlineInfo = new TextView(this);
+        offlineInfo.setTextSize(13);
+        offlineInfo.setTextColor(Ui.muted(n));
+        offlineInfo.setPadding(0, dp(4), 0, dp(12));
+        offlineFull.addView(offlineInfo);
+        LinearLayout r1 = new LinearLayout(this), r2 = new LinearLayout(this);
+        r1.addView(offBtn("Conectar", "Buscar al extendido", true, () -> {
+            hub.forceLink();
+            linkInfo = "Buscando al extendido en todo el WiFi…";
+            updateStatus();
+            updateOffline();
+        }), new LinearLayout.LayoutParams(dp(150), -2));
+        r1.addView(offBtn("Apps", "Abrir una app aquí", false, this::showApps), offLp());
+        offlineUpd = (TextView) offBtn("Actualizar", "Buscar versión nueva", false, this::offlineUpdate);
+        r2.addView(offlineUpd, new LinearLayout.LayoutParams(dp(150), -2));
+        r2.addView(offBtn("Teléfono normal", "Su inicio y su teclado", false, this::goNormal), offLp());
+        offlineFull.addView(r1);
+        LinearLayout.LayoutParams r2l = new LinearLayout.LayoutParams(-2, -2);
+        r2l.topMargin = dp(10);
+        offlineFull.addView(r2, r2l);
+        box.addView(offlineFull);
+        // versión chica: una pastilla que se toca para volver a abrir la tarjeta
+        offlinePill = new TextView(this);
+        offlinePill.setText("⚠  Sin extendido  ▾");
+        offlinePill.setTextSize(14);
+        offlinePill.setTextColor(0xFFFFFFFF);
+        offlinePill.setPadding(dp(16), dp(8), dp(16), dp(8));
+        GradientDrawable pg = new GradientDrawable();
+        pg.setColor(0xEEE07A1F);
+        pg.setCornerRadius(dp(20));
+        offlinePill.setBackground(pg);
+        offlinePill.setElevation(dp(12));
+        offlinePill.setOnClickListener(v -> { offlineCollapsed = false; updateOffline(); });
+        box.addView(offlinePill);
+        box.setVisibility(View.GONE);
+        return box;
+    }
+
+    private LinearLayout.LayoutParams offLp() {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(150), -2);
+        lp.setMarginStart(dp(10));
+        return lp;
+    }
+
+    private View offBtn(String title, String sub, boolean primary, Runnable r) {
+        boolean n = CardTheme.sheetNight(night);
+        TextView b = new TextView(this);
+        b.setText(title + "\n" + sub);
+        android.text.SpannableString ss = new android.text.SpannableString(title + "\n" + sub);
+        ss.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD), 0, title.length(), 0);
+        ss.setSpan(new android.text.style.RelativeSizeSpan(0.78f), title.length() + 1, ss.length(), 0);
+        b.setText(ss);
+        b.setTextSize(15);
+        b.setGravity(Gravity.CENTER);
+        b.setPadding(dp(10), dp(12), dp(10), dp(12));
+        GradientDrawable g = new GradientDrawable();
+        g.setCornerRadius(dp(16));
+        if (primary) { g.setColor(0xFF00917A); b.setTextColor(0xFFFFFFFF); }
+        else { g.setColor((Ui.fg(n) & 0x00FFFFFF) | 0x14000000); b.setTextColor(Ui.fg(n)); }
+        b.setBackground(g);
+        b.setOnClickListener(v -> { v.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY); r.run(); });
+        return b;
+    }
+
+    /** Se muestra en el principal mientras no esté el extendido (como el widget de baterías, que también lo sabe). */
+    private void updateOffline() {
+        if (offlinePanel == null) return;
+        boolean show = side == 1 && !hub.connected() && !PhoneMode.active(this)
+                && android.os.SystemClock.uptimeMillis() - startedAt > 5000;   // al abrir, unos segundos para que se conecte solo
+        if (!show) { offlinePanel.setVisibility(View.GONE); offlineCollapsed = false; return; }
+        offlinePanel.setVisibility(View.VISIBLE);
+        offlineFull.setVisibility(offlineCollapsed ? View.GONE : View.VISIBLE);
+        offlinePill.setVisibility(offlineCollapsed ? View.VISIBLE : View.GONE);
+        FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) offlinePanel.getLayoutParams();
+        lp.gravity = offlineCollapsed ? Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL : Gravity.CENTER;
+        lp.bottomMargin = offlineCollapsed ? dp(24) : 0;
+        offlinePanel.setLayoutParams(lp);
+        offlineInfo.setText(linkInfo != null ? linkInfo : "El extendido no responde. Puedes buscarlo, abrir apps aquí o usar el teléfono normal.");
+        if (Updater.updateAvailable(this)) offlineUpd.setText("Actualizar\nHay versión " + Updater.latestKnown(this));
+        offlinePanel.bringToFront();
+    }
+
+    private final Runnable offlineTick = new Runnable() {
+        @Override public void run() { updateOffline(); if (side == 1 && !hub.connected()) main.postDelayed(this, 3000); }
+    };
+
+    private void offlineUpdate() {
+        Toast.makeText(this, "Buscando versión nueva…", Toast.LENGTH_SHORT).show();
+        Updater.checkQuiet(this, true, () -> {
+            if (isFinishing()) return;
+            updateOffline();
+            if (!Updater.updateAvailable(this)) { Toast.makeText(this, "Ya tienes la última versión (" + Updater.clean(Updater.installedVersion(this)) + ")", Toast.LENGTH_LONG).show(); return; }
+            new Ui.Sheet(this)
+                    .title("Versión nueva: " + Updater.latestKnown(this))
+                    .message("Se actualiza este teléfono (el principal). El extendido se actualiza cuando vuelva a conectarse.")
+                    .button("Ahora no", false, null)
+                    .button("Actualizar", true, () -> { Toast.makeText(this, "Descargando…", Toast.LENGTH_LONG).show(); Updater.updateFromRemote(this, hub); })
+                    .show();
+        });
+    }
+
     /** Al teléfono normal; si hay una versión nueva, antes se ofrece actualizar. */
     private void goNormal() {
         Toast.makeText(this, "Revisando si hay actualización…", Toast.LENGTH_SHORT).show();
@@ -2234,6 +2377,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     @Override public void onState(int state, String info) {
         linkState = state;
         linkInfo = state == Link.CONNECTED ? null : info;
+        main.removeCallbacks(offlineTick);
+        main.post(offlineTick);
         if (state == Link.WAITING && info == null) waitingSince = System.currentTimeMillis();
         if (state == Link.CONNECTED && side == 0) main.postDelayed(() -> AppsDialog.prefetch(this, hub), 1500);   // menú de apps al instante
         if (state == Link.CONNECTED) main.postDelayed(() -> { reportHome(); hub.send("homeAsk"); }, 2000);
