@@ -140,11 +140,21 @@ public class Hub implements Link.Listener {
     public void remove(Link.Listener l) { listeners.remove(l); }
 
     private boolean battOffered, lostOffered, lostPending;
+
+    /** Principal: buscar al extendido a la fuerza (última IP + todo el WiFi). */
+    public void forceLink() {
+        if (!isPrincipal() || connected()) return;
+        lostOffered = false;
+        link.force(app.getSharedPreferences("mesa", Context.MODE_PRIVATE).getString("extIp", ""));
+        main.removeCallbacks(lostCheck);
+        lostPending = true;
+        main.postDelayed(lostCheck, 15_000);   // si no aparece, se vuelve a ofrecer
+    }
     private final Runnable lostCheck = () -> {
         lostPending = false;
         if (connected() || lostOffered || !isPrincipal()) return;
         lostOffered = true;
-        PhoneMode.offer(Hub.this.app, this, "No se encuentra el teléfono extendido");
+        PhoneMode.offer(Hub.this.app, this, PhoneMode.LOST);
     };
 
     public volatile int myBatt = -1, otherBatt = -1;
@@ -229,6 +239,8 @@ public class Hub implements Link.Listener {
             fs.start();
             send("fsTok", "k", fs.token, "port", FileServer.PORT);
             main.removeCallbacks(restoreIme);
+            if (isPrincipal() && link.peerIp() != null) app.getSharedPreferences("mesa", Context.MODE_PRIVATE).edit().putString("extIp", link.peerIp()).apply();
+            app.getSharedPreferences("mesa", Context.MODE_PRIVATE).edit().putLong("lastLinkAt", System.currentTimeMillis()).apply();
             main.removeCallbacks(lostCheck);
             lostPending = false;
             lostOffered = false;
@@ -243,7 +255,7 @@ public class Hub implements Link.Listener {
             if (isPrincipal()) { main.removeCallbacks(restoreIme); main.postDelayed(restoreIme, 6000); }
             // el extendido no aparece por un minuto: se ofrece volver al teléfono normal
             Torch.other = false;
-            if (isPrincipal() && !lostOffered && !lostPending) { lostPending = true; main.postDelayed(lostCheck, 60_000); }
+            if (isPrincipal() && !lostOffered && !lostPending) { lostPending = true; main.postDelayed(lostCheck, 10_000); }
         }
         for (Link.Listener l : listeners) l.onState(st, inf);
     }

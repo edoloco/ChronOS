@@ -23,6 +23,7 @@ final class PhoneMode {
     private PhoneMode() { }
 
     private static long enteredAt = -100000;
+    static final String LOST = "No se encuentra el teléfono extendido";
 
     private static SharedPreferences prefs(Context c) { return c.getSharedPreferences("mesa", Context.MODE_PRIVATE); }
 
@@ -41,17 +42,28 @@ final class PhoneMode {
         if (nm == null) return;
         if (nm.getNotificationChannel("avisos") == null)
             nm.createNotificationChannel(new NotificationChannel("avisos", "Avisos del teclado", NotificationManager.IMPORTANCE_HIGH));
+        // tocar el aviso abre la pregunta en ChronOS; los botones hacen cada cosa directo
+        Intent ask = new Intent(c, MainActivity.class).putExtra("phoneAsk", title)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent pi = PendingIntent.getActivity(c, 81, ask, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         Intent go = new Intent(c, MainActivity.class).putExtra("phoneNow", true)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        PendingIntent pi = PendingIntent.getActivity(c, 81, go, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        PendingIntent pNormal = PendingIntent.getActivity(c, 85, go, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        Intent fl = new Intent(c, MainActivity.class).putExtra("forceLink", true)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent pForce = PendingIntent.getActivity(c, 86, fl, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         int icon = c.getResources().getIdentifier("ic_stat", "drawable", c.getPackageName());
         Notification n = new Notification.Builder(c, "avisos")
                 .setSmallIcon(icon != 0 ? icon : android.R.drawable.stat_notify_more)
                 .setContentTitle(title)
-                .setContentText("Toca para volver al modo teléfono normal")
+                .setContentText(LOST.equals(title) ? "¿Teléfono normal o buscar el extendido?" : "Toca para volver al modo teléfono normal")
                 .setContentIntent(pi)
+                .addAction(new Notification.Action.Builder(null, "Teléfono normal", pNormal).build())
                 .setAutoCancel(true)
                 .build();
+        if (LOST.equals(title)) {
+            n = Notification.Builder.recoverBuilder(c, n).addAction(new Notification.Action.Builder(null, "Buscar extendido", pForce).build()).build();
+        }
         try { nm.notify(8, n); } catch (Exception ignored) { }
     }
 

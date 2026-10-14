@@ -133,6 +133,38 @@ public class Link {
         }, "llamar").start();
     }
 
+    /**
+     * Principal: busca al extendido a la fuerza. Primero en su última IP; si no, prueba todas las direcciones del WiFi
+     * (192.168.x.1 a .254) a ver cuál responde en el puerto de ChronOS. Tarda unos segundos.
+     */
+    public void force(final String lastIp) {
+        if (host || !running) return;
+        stopDiscovery();
+        startDiscovery();
+        if (lastIp != null && !lastIp.isEmpty()) connectTo(lastIp);
+        final String me = localIp();
+        int dot = me.lastIndexOf('.');
+        if (dot < 0 || !me.matches("\\d+\\.\\d+\\.\\d+\\.\\d+")) return;
+        final String base = me.substring(0, dot + 1);
+        java.util.concurrent.ExecutorService pool = Executors.newFixedThreadPool(32);
+        for (int i = 1; i < 255; i++) {
+            final String ip = base + i;
+            if (ip.equals(me)) continue;
+            pool.execute(() -> {
+                if (conn != null || !running) return;
+                Socket s = new Socket();
+                try {
+                    s.connect(new InetSocketAddress(ip, PORT), 350);
+                    synchronized (Link.this) {
+                        if (conn == null && running) { attach(s); return; }
+                    }
+                } catch (IOException ignored) { }
+                try { s.close(); } catch (IOException ignored) { }
+            });
+        }
+        pool.shutdown();
+    }
+
     /** Principal: escucha las llamadas del extendido y se conecta a quien llamó. */
     private void startCallListener() {
         new Thread(() -> {

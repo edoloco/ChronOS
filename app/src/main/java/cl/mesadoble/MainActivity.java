@@ -220,7 +220,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (bw != null) bindRequested(bw, 0);
         if (getIntent().hasExtra("homeSet")) { boolean on = getIntent().getBooleanExtra("homeSet", true); getIntent().removeExtra("homeSet"); main.post(() -> { if (on) forceHome(); else releaseHome(); }); }
         if (getIntent().getBooleanExtra("notifSetup", false)) { getIntent().removeExtra("notifSetup"); main.post(this::guideNotifs); }
-        if (getIntent().getBooleanExtra("phoneNow", false)) { getIntent().removeExtra("phoneNow"); main.post(() -> PhoneMode.enter(this, hub)); }
+        if (getIntent().hasExtra("phoneAsk")) { String pt = getIntent().getStringExtra("phoneAsk"); getIntent().removeExtra("phoneAsk"); main.post(() -> phoneOffer(pt)); }
+        if (getIntent().getBooleanExtra("forceLink", false)) { getIntent().removeExtra("forceLink"); main.post(() -> { hub.forceLink(); Toast.makeText(this, "Buscando al extendido…", Toast.LENGTH_SHORT).show(); }); }
+        if (getIntent().getBooleanExtra("phoneNow", false)) { getIntent().removeExtra("phoneNow"); main.post(this::goNormal); }
     }
 
     @Override protected void onNewIntent(Intent intent) {
@@ -229,7 +231,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (bw != null) { intent.removeExtra("bindWidget"); bindRequested(bw, 0); }
         if (intent.hasExtra("homeSet")) { boolean on = intent.getBooleanExtra("homeSet", true); intent.removeExtra("homeSet"); main.post(() -> { if (on) forceHome(); else releaseHome(); }); }
         if (intent.getBooleanExtra("notifSetup", false)) { intent.removeExtra("notifSetup"); main.post(this::guideNotifs); }
-        if (intent.getBooleanExtra("phoneNow", false)) { intent.removeExtra("phoneNow"); main.post(() -> PhoneMode.enter(this, hub)); }
+        if (intent.hasExtra("phoneAsk")) { String pt = intent.getStringExtra("phoneAsk"); intent.removeExtra("phoneAsk"); main.post(() -> phoneOffer(pt)); }
+        if (intent.getBooleanExtra("forceLink", false)) { intent.removeExtra("forceLink"); main.post(() -> { hub.forceLink(); Toast.makeText(this, "Buscando al extendido…", Toast.LENGTH_SHORT).show(); }); }
+        if (intent.getBooleanExtra("phoneNow", false)) { intent.removeExtra("phoneNow"); main.post(this::goNormal); }
         handleShare(intent);
     }
 
@@ -1425,15 +1429,50 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     /** El principal ofrece volver a la interfaz normal del teléfono (extendido sin batería o sin conexión). */
+    private android.app.Dialog phoneSheet;
+
+    /**
+     * El principal no encuentra al extendido (o el extendido se queda sin batería): o se vuelve al teléfono normal,
+     * o se busca al extendido a la fuerza. Antes de volver al normal se ofrece actualizar si hay versión nueva.
+     */
     private void phoneOffer(String title) {
         if (!hub.isPrincipal() || PhoneMode.active(this)) return;
-        new Ui.Sheet(this)
-                .title(title)
-                .message("Puedes seguir usando este teléfono con su pantalla de inicio y su teclado de siempre. "
-                        + "Cuando quieras volver, abre ChronOS.")
-                .button("Usar el teléfono normal", true, () -> PhoneMode.enter(this, hub))
-                .button("Seguir en ChronOS", false, null)
-                .show();
+        if (phoneSheet != null && phoneSheet.isShowing()) phoneSheet.dismiss();
+        boolean lost = !hub.connected();
+        Ui.Sheet sh = new Ui.Sheet(this).title(lost ? PhoneMode.LOST : title)
+                .message(lost ? "Puedes usar este teléfono como uno normal (su inicio y su teclado de siempre) o buscar al extendido a la fuerza."
+                              : "Puedes seguir usando este teléfono con su pantalla de inicio y su teclado de siempre. Cuando quieras volver, abre ChronOS.");
+        sh.option(Ui.HOME, "Usar el teléfono normal", "Cuando el extendido vuelva, te aviso para regresar a ChronOS", this::goNormal);
+        if (lost) {
+            sh.option(Ui.WIFI, "Buscar al extendido", "Prueba su última dirección y todo el WiFi (unos segundos)", () -> {
+                linkInfo = "Buscando al extendido en todo el WiFi…";
+                updateStatus();
+                hub.forceLink();
+                Toast.makeText(this, "Buscando al extendido…", Toast.LENGTH_SHORT).show();
+            });
+            sh.option(Ui.GEAR, "Escribir la IP del extendido", "Está en el extendido: menú inicio → Conexión", this::showConnection);
+        }
+        sh.button("Seguir en ChronOS", false, null);
+        phoneSheet = sh.show();
+    }
+
+    /** Al teléfono normal; si hay una versión nueva, antes se ofrece actualizar. */
+    private void goNormal() {
+        Toast.makeText(this, "Revisando si hay actualización…", Toast.LENGTH_SHORT).show();
+        Updater.checkQuiet(this, true, () -> {
+            if (isFinishing()) return;
+            if (!Updater.updateAvailable(this)) { PhoneMode.enter(this, hub); return; }
+            new Ui.Sheet(this)
+                    .title("Hay una versión nueva: " + Updater.latestKnown(this))
+                    .message("Este es un buen momento para actualizar el principal (el extendido no está). Instalada la versión nueva, "
+                            + "ChronOS se vuelve a abrir y puedes elegir el teléfono normal.")
+                    .button("Ahora no", false, () -> PhoneMode.enter(this, hub))
+                    .button("Actualizar", true, () -> {
+                        Toast.makeText(this, "Descargando la actualización…", Toast.LENGTH_LONG).show();
+                        Updater.updateFromRemote(this, hub);
+                    })
+                    .show();
+        });
     }
 
     private void addClock() {
@@ -2197,7 +2236,11 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         linkInfo = state == Link.CONNECTED ? null : info;
         if (state == Link.WAITING && info == null) waitingSince = System.currentTimeMillis();
         if (state == Link.CONNECTED && side == 0) main.postDelayed(() -> AppsDialog.prefetch(this, hub), 1500);   // menú de apps al instante
-        if (state == Link.CONNECTED) main.postDelayed(() -> { reportHome(); hub.send("homeAsk"); }, 2000);   // ¿ChronOS es el inicio en cada teléfono?
+        if (state == Link.CONNECTED) main.postDelayed(() -> { reportHome(); hub.send("homeAsk"); }, 2000);
+        if (state == Link.CONNECTED && phoneSheet != null && phoneSheet.isShowing()) {   // apareció el extendido: ya no hace falta la pregunta
+            phoneSheet.dismiss();
+            Toast.makeText(this, "Extendido conectado", Toast.LENGTH_SHORT).show();
+        }   // ¿ChronOS es el inicio en cada teléfono?
         if (state == Link.CONNECTED) {
             JSONObject hello = new JSONObject();
             JSONObject full = new JSONObject();
