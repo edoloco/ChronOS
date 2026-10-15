@@ -105,6 +105,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         super.onCreate(b);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         prefs = getSharedPreferences("mesa", MODE_PRIVATE);
+        solo = prefs.getBoolean("soloMode", false);
         CardTheme.load(this);
 
         FrameLayout root = new FrameLayout(this);
@@ -210,6 +211,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
         side = hub.side();
         if (side >= 0) applySide();
+        if (solo) setupSolo(root);
         if (side < 0) chooseSide();   // solo la primera vez: después se recuerda (se cambia en Ajustes)
         hub.add(this);
         LinkService.start(this);
@@ -283,7 +285,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
      */
     private boolean locked() { return prefs.getBoolean("viewLock", true); }
     private boolean landscapeNow() { return getResources().getConfiguration().orientation != Configuration.ORIENTATION_PORTRAIT; }
-    private boolean stacked() { return landscapeNow(); }
+    private boolean stacked() { return solo || landscapeNow(); }
     /** El principal siempre ocupa la primera pantalla (arriba o izquierda). */
     private int deskSide() { return side == 1 ? 0 : 1; }
     private int layoutIcon() { return stacked() ? Ui.LAYOUT_STACK : Ui.LAYOUT_SIDE_V; }
@@ -297,6 +299,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
      */
     static void applyOrientation(Activity a) {
         SharedPreferences p = a.getSharedPreferences("mesa", MODE_PRIVATE);
+        if (p.getBoolean("soloMode", false)) { a.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT); return; }   // una pantalla
         boolean h = p.getBoolean("orientH", true), lock = p.getBoolean("viewLock", true), principal = p.getInt("side", -1) == 1;
         boolean flip = p.getBoolean(principal ? "flipP" : "flipE", false);   // teléfono puesto al revés
         if (principal && !lock) a.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR);
@@ -780,7 +783,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         startPanel.addView(head);
         // orden: lo más usado arriba
         SquareButton[] order = {byKind(SquareButton.APPS), settingsBtn, byKind(SquareButton.DESKS), statusBtn,
-                byKind(SquareButton.TOOLS), byKind(SquareButton.KEYBOARD), filesBtn, aboutBtn(), phoneBtn(), null, null, null};
+                byKind(SquareButton.TOOLS), byKind(SquareButton.KEYBOARD), filesBtn, aboutBtn(), phoneBtn(), soloBtn(), null, null};
         LinearLayout row = null;
         for (int i = 0; i < order.length; i++) {
             if (i % 4 == 0) {
@@ -813,6 +816,19 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     private SquareButton filesBtn, aboutSq;
+
+    private SquareButton soloSq;
+
+    /** Menú inicio: pasar a una pantalla (o volver a dos). */
+    private SquareButton soloBtn() {
+        if (soloSq == null) {
+            soloSq = new SquareButton(this, SquareButton.DESKS, solo ? "Dos pantallas" : "Una pantalla", false, night);
+            soloSq.setOnClickListener(v -> { showStart(false); setSolo(!solo); });
+            squares.add(soloSq);
+        }
+        if (soloSq.getParent() instanceof android.view.ViewGroup) ((android.view.ViewGroup) soloSq.getParent()).removeView(soloSq);
+        return soloSq;
+    }
 
     private SquareButton phoneSq;
 
@@ -851,13 +867,14 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     /** El menú inicio aparece junto al logo (o junto al reloj en el principal). */
     private void placeStart() {
         if (startPanel == null || cbar == null) return;
-        boolean top = cbar.edgeTop();
+        ChronoBar sb = solo && nbar != null ? nbar : cbar;
+        boolean top = sb.edgeTop();
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(-2, -2,
-                (top ? Gravity.TOP : Gravity.BOTTOM) | (cbar.kind == ChronoBar.NAV ? Gravity.END : Gravity.START));
-        int m = cbar.visualHeight() + dp(6);
+                (top ? Gravity.TOP : Gravity.BOTTOM) | (sb.kind == ChronoBar.NAV ? Gravity.END : Gravity.START));
+        int m = sb.visualHeight() + dp(6);
         lp.setMargins(dp(12), top ? m : 0, dp(12), top ? 0 : m);
         startPanel.setLayoutParams(lp);
-        startPanel.setPivotX(cbar.kind == ChronoBar.NAV ? dp(260) : 0);
+        startPanel.setPivotX(sb.kind == ChronoBar.NAV ? dp(260) : 0);
         startPanel.setPivotY(top ? 0 : dp(240));
     }
 
@@ -933,7 +950,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private boolean barAtTop() {
         boolean principal = side == 1;
         boolean atTop = principal;
-        if (fileMode && stacked()) atTop = !atTop;
+        if (fileMode && stacked() && !solo) atTop = !atTop;
         return atTop;
     }
 
@@ -948,6 +965,11 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         int pTop, pBottom;
         int vh = cbar.visualHeight();
         if (top) { pTop = vh; pBottom = 0; } else { pTop = 0; pBottom = vh; }
+        if (solo && nbar != null) {
+            nbar.setEdgeTop(false);
+            nbar.setTranslationY(H - nbar.barHeight());
+            pBottom = nbar.visualHeight();
+        }
         pane.setPadding(0, pTop, 0, pBottom);
         // la tarjeta de notificación del extendido va arriba a la izquierda, sin taparse con la barra
         FrameLayout.LayoutParams fl = (FrameLayout.LayoutParams) floatNotif.getLayoutParams();
@@ -1104,7 +1126,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     /** Gira los íconos para que se lean derechos, sin mover nada de lugar. */
     private void onPhysicalOrientation(int o) {
-        if (o == OrientationEventListener.ORIENTATION_UNKNOWN) return;
+        if (o == OrientationEventListener.ORIENTATION_UNKNOWN || solo) return;
         int q = ((o + 45) / 90 * 90) % 360;
         if (snapped >= 0 && q != snapped) {
             int diff = Math.abs(o - snapped); diff = Math.min(diff, 360 - diff);
@@ -1550,11 +1572,97 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         phoneSheet = sh.show();
     }
 
+    // ---------------- modo una pantalla ----------------
+    // Un solo teléfono, en vertical: la mitad de arriba es la mesa del principal (con la barra del reloj) y la de abajo
+    // la del extendido (con la barra del logo, el menú inicio y las apps recientes). Las apps se abren en este teléfono.
+
+    private boolean solo;
+    private DeskView desk2;
+    private ChronoBar nbar;
+
+    static boolean soloMode(android.content.Context c) { return c.getSharedPreferences("mesa", MODE_PRIVATE).getBoolean("soloMode", false); }
+
+    /** Entra o sale del modo una pantalla (se vuelve a armar la pantalla). */
+    void setSolo(boolean on) {
+        if (on == solo) return;
+        SharedPreferences.Editor e = prefs.edit().putBoolean("soloMode", on);
+        if (on) {
+            e.putInt("soloPrevSide", side);
+            e.apply();
+            if (side != 1) hub.setSide(1);   // este teléfono hace de principal mientras tanto
+        } else {
+            int prev = prefs.getInt("soloPrevSide", side);
+            e.apply();
+            if (prev >= 0 && prev != hub.side()) hub.setSide(prev);
+        }
+        Toast.makeText(this, on ? "Modo una pantalla" : "Modo dos pantallas", Toast.LENGTH_SHORT).show();
+        recreate();
+    }
+
+    private void setupSolo(FrameLayout root) {
+        desk.setSide(0);
+        desk.setVertical(true);
+        desk2 = new DeskView(this, night);
+        desk2.setDeskColor(prefs.getInt("deskColor", 0), night);
+        desk2.setHost(this);
+        desk.setTwin(desk2);
+        desk2.setSide(1);
+        root.addView(desk2, 1, new FrameLayout.LayoutParams(-1, 0, Gravity.BOTTOM));
+        root.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            int H = b - t;
+            if (H <= 0) return;
+            FrameLayout.LayoutParams a1 = (FrameLayout.LayoutParams) desk.getLayoutParams(), a2 = (FrameLayout.LayoutParams) desk2.getLayoutParams();
+            if (a1.height == H / 2 && a2.height == H - H / 2) return;
+            a1.height = H / 2; a1.gravity = Gravity.TOP;
+            a2.height = H - H / 2; a2.gravity = Gravity.BOTTOM;
+            main.post(() -> { desk.setLayoutParams(a1); desk2.setLayoutParams(a2); });
+        });
+        // barra de abajo (como la del extendido): accesos rápidos, logo con el menú inicio y apps recientes
+        nbar = new ChronoBar(this, ChronoBar.NAV, night);
+        nbar.setListener(new ChronoBar.Listener() {
+            @Override public void onBarSwipe(ChronoBar b, boolean down) { setFileMode(!fileMode, false); }
+            @Override public void onClockTap() { hub.openAlarms(); }
+            @Override public void onLogoTap() { showStart(startOverlay.getVisibility() != View.VISIBLE); }
+            @Override public void onLogoLong() { showStart(true); }
+        });
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER);
+        int[] kinds = {SquareButton.APPS, SquareButton.TOOLS, SquareButton.FILES};
+        String[] labels = {"Apps", "Herramientas", "Archivos"};
+        Runnable[] acts = {this::showApps, this::toolsMenu, () -> setFileMode(!fileMode, false)};
+        for (int i = 0; i < kinds.length; i++) {
+            final Runnable r = acts[i];
+            SquareButton sb = new SquareButton(this, kinds[i], labels[i], false, night);
+            sb.setCompact(true);
+            sb.setOnClickListener(v -> r.run());
+            squares.add(sb);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(32), dp(32));
+            lp.setMargins(dp(12), 0, dp(12), 0);
+            row.addView(sb, lp);
+        }
+        nbar.setNavRow(row);
+        recentsBar = new RecentsBar(this, ChronoBar.ink(night));
+        recentsBar.setPick(this::onRecent);
+        nbar.setRecents(recentsBar);
+        root.addView(nbar, root.indexOfChild(startOverlay), new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
+        root.post(() -> layoutChrono(false));
+    }
+
+    /** En una pantalla, el otro teléfono volvió: ¿volver a dos pantallas? */
+    private void offerTwoScreens() {
+        new Ui.Sheet(this)
+                .title("Volvió el otro teléfono")
+                .message("¿Vuelves a usar ChronOS en dos pantallas?")
+                .button("Seguir en una", false, null)
+                .button("Dos pantallas", true, () -> setSolo(false))
+                .show();
+    }
+
     // ---------------- principal sin extendido: botones flotantes ----------------
     // Sin el extendido el principal no tiene menú de apps ni controles: aparece una tarjeta flotante con lo esencial.
 
     private LinearLayout offlinePanel, offlineFull;
-    private TextView offlineInfo, offlinePill, offlineUpd;
+    private TextView offlineInfo, offlinePill, offlineUpd, offlineSolo, offlineTitle;
     private boolean offlineCollapsed;
     private final long startedAt = android.os.SystemClock.uptimeMillis();
 
@@ -1575,6 +1683,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         LinearLayout head = new LinearLayout(this);
         head.setGravity(Gravity.CENTER_VERTICAL);
         TextView t = new TextView(this);
+        offlineTitle = t;
         t.setText("Sin teléfono extendido");
         t.setTextSize(18);
         t.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
@@ -1594,9 +1703,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         offlineInfo.setPadding(0, dp(4), 0, dp(12));
         offlineFull.addView(offlineInfo);
         LinearLayout r1 = new LinearLayout(this), r2 = new LinearLayout(this);
-        r1.addView(offBtn("Conectar", "Buscar al extendido", true, () -> {
-            hub.forceLink();
-            linkInfo = "Buscando al extendido en todo el WiFi…";
+        r1.addView(offBtn("Conectar", "Buscar al otro teléfono", true, () -> {
+            if (side == 1) { hub.forceLink(); linkInfo = "Buscando al extendido en todo el WiFi…"; }
+            else { hub.link.call(null); linkInfo = "Llamando al principal…"; }
             updateStatus();
             updateOffline();
         }), new LinearLayout.LayoutParams(dp(150), -2));
@@ -1605,9 +1714,13 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         r2.addView(offlineUpd, new LinearLayout.LayoutParams(dp(150), -2));
         r2.addView(offBtn("Teléfono normal", "Su inicio y su teclado", false, this::goNormal), offLp());
         offlineFull.addView(r1);
+        offlineSolo = (TextView) offBtn("Una pantalla", "ChronOS completo en este teléfono", false, () -> setSolo(true));
         LinearLayout.LayoutParams r2l = new LinearLayout.LayoutParams(-2, -2);
         r2l.topMargin = dp(10);
         offlineFull.addView(r2, r2l);
+        LinearLayout.LayoutParams r3l = new LinearLayout.LayoutParams(dp(310), -2);
+        r3l.topMargin = dp(10);
+        offlineFull.addView(offlineSolo, r3l);
         box.addView(offlineFull);
         // versión chica: una pastilla que se toca para volver a abrir la tarjeta
         offlinePill = new TextView(this);
@@ -1655,7 +1768,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     /** Se muestra en el principal mientras no esté el extendido (como el widget de baterías, que también lo sabe). */
     private void updateOffline() {
         if (offlinePanel == null) return;
-        boolean show = side == 1 && !hub.connected() && !PhoneMode.active(this)
+        boolean show = side >= 0 && !solo && !hub.connected() && !PhoneMode.active(this)
                 && android.os.SystemClock.uptimeMillis() - startedAt > 5000;   // al abrir, unos segundos para que se conecte solo
         if (!show) { offlinePanel.setVisibility(View.GONE); offlineCollapsed = false; return; }
         offlinePanel.setVisibility(View.VISIBLE);
@@ -1665,13 +1778,15 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         lp.gravity = offlineCollapsed ? Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL : Gravity.CENTER;
         lp.bottomMargin = offlineCollapsed ? dp(24) : 0;
         offlinePanel.setLayoutParams(lp);
-        offlineInfo.setText(linkInfo != null ? linkInfo : "El extendido no responde. Puedes buscarlo, abrir apps aquí o usar el teléfono normal.");
+        offlineTitle.setText(side == 1 ? "Sin teléfono extendido" : "Sin teléfono principal");
+        offlineInfo.setText(linkInfo != null ? linkInfo : side == 1 ? "El extendido no responde. Puedes buscarlo, abrir apps aquí, usar ChronOS en una pantalla o el teléfono normal."
+                : "El principal no responde. Puedes llamarlo, usar ChronOS en una pantalla en este teléfono o el teléfono normal.");
         if (Updater.updateAvailable(this)) offlineUpd.setText("Actualizar\nHay versión " + Updater.latestKnown(this));
         offlinePanel.bringToFront();
     }
 
     private final Runnable offlineTick = new Runnable() {
-        @Override public void run() { updateOffline(); if (side == 1 && !hub.connected()) main.postDelayed(this, 3000); }
+        @Override public void run() { updateOffline(); if (side >= 0 && !hub.connected()) main.postDelayed(this, 3000); }
     };
 
     private void offlineUpdate() {
@@ -1795,7 +1910,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             else if (hub.isPrincipal()) {
                 RecentApps.worker.execute(() -> {
                     org.json.JSONObject m = RecentApps.message(getApplicationContext());
-                    main.post(() -> desk.setRecents(m));
+                    main.post(() -> { desk.setRecents(m); if (recentsBar != null) recentsBar.set(m); });
                 });
             } else if (hub.connected()) {
                 String have = barRec ? recentsBar.sig() : desk.recentsSig();
@@ -2472,6 +2587,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (state == Link.WAITING && info == null) waitingSince = System.currentTimeMillis();
         if (state == Link.CONNECTED && side == 0) main.postDelayed(() -> AppsDialog.prefetch(this, hub), 1500);   // menú de apps al instante
         if (state == Link.CONNECTED) main.postDelayed(() -> { reportHome(); hub.send("homeAsk"); }, 2000);
+        if (state == Link.CONNECTED && solo) main.post(this::offerTwoScreens);
         if (state == Link.CONNECTED && phoneSheet != null && phoneSheet.isShowing()) {   // apareció el extendido: ya no hace falta la pregunta
             phoneSheet.dismiss();
             Toast.makeText(this, "Extendido conectado", Toast.LENGTH_SHORT).show();

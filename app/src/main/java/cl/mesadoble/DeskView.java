@@ -87,7 +87,7 @@ public class DeskView extends View {
         return false;
     }
 
-    public void setCamState(boolean open, boolean front, int flash) {
+    public void setCamState(boolean open, boolean front, int flash) { if (fwd()) { twin.twinCall = true; try { twin.setCamState(open, front, flash); } finally { twin.twinCall = false; } }
         camOpen = open; camFront = front; camFlash = flash;
         if (!open) camFrame = null;
         invalidate();
@@ -176,7 +176,7 @@ public class DeskView extends View {
     }
 
     /** Lista recibida del principal (o calculada aquí si este es el principal). */
-    public void setRecents(org.json.JSONObject m) {
+    public void setRecents(org.json.JSONObject m) { if (fwd()) { twin.twinCall = true; try { twin.setRecents(m); } finally { twin.twinCall = false; } }
         recentsLoaded = true;
         recentsAccess = m.optBoolean("access", true);
         String sig = m.optString("sig");
@@ -340,7 +340,7 @@ public class DeskView extends View {
     /** Alto de la franja superior de un widget (nombre y botones); el widget va debajo. */
     public float widgetBar() { return 38 * dp; }
 
-    public final List<Item> items = new ArrayList<>();
+    public List<Item> items = new ArrayList<>();
     private final Map<String, double[]> remoteDrags = new HashMap<>();
     private static final ExecutorService decoder = Executors.newSingleThreadExecutor();
     private Host host;
@@ -440,8 +440,29 @@ public class DeskView extends View {
 
     public void setHost(Host h) { host = h; }
 
+    // ---- modo una pantalla: dos mesas en el mismo teléfono (arriba la del principal, abajo la del extendido)
+    private DeskView twin;
+    boolean twinCall;
+    private boolean fwd() { return twin != null && !twinCall; }
+
+    /** La otra mitad: comparte los elementos y copia colores, escritorio y temas. */
+    public void setTwin(DeskView t) {
+        twin = t; t.twin = this;
+        t.items = items;
+        t.vertical = vertical;
+        t.pages = pages; t.page = page;
+        t.lockApps = lockApps; t.autoApps = autoApps; t.snapGrid = snapGrid;
+    }
+
+    public boolean hasTwin() { return twin != null; }
+
+    @Override public void invalidate() {
+        super.invalidate();
+        if (fwd()) { twin.twinCall = true; try { twin.invalidate(); } finally { twin.twinCall = false; } }
+    }
+
     /** Color de fondo elegido por el usuario (0 = el del tema). Se ajustan el brillo y los puntos para que se vean. */
-    public void setDeskColor(int c, boolean night) {
+    public void setDeskColor(int c, boolean night) { if (fwd()) { twin.twinCall = true; try { twin.setDeskColor(c, night); } finally { twin.twinCall = false; } }
         if (c == 0) c = night ? 0xFF18212B : 0xFFDDE3E8;
         deskColor = c;
         int r = Color.red(c), g = Color.green(c), b = Color.blue(c);
@@ -456,7 +477,7 @@ public class DeskView extends View {
         setCardTheme();   // el texto sobre cristal depende del fondo
     }
     /** Colores de las tarjetas (apps, enlaces, widgets, reloj, batería) según el tema elegido. */
-    public void setCardTheme() {
+    public void setCardTheme() { if (fwd()) { twin.twinCall = true; try { twin.setCardTheme(); } finally { twin.twinCall = false; } }
         linkBg = CardTheme.fill(night);
         fg = CardTheme.fg(night);
         muted = CardTheme.muted(night);
@@ -523,7 +544,7 @@ public class DeskView extends View {
     public int pages() { return pages; }
 
     /** Cambia la cantidad de escritorios y el actual. dir: de qué lado entra (1 desde la derecha, -1 desde la izquierda, 0 sin animación). */
-    public void setPages(int n, int cur, int dir) {
+    public void setPages(int n, int cur, int dir) { if (fwd()) { twin.twinCall = true; try { twin.setPages(n, cur, dir); } finally { twin.twinCall = false; } }
         pages = Math.max(1, Math.min(50, n));
         cur = Math.max(0, Math.min(pages - 1, cur));
         if (cur != page && dir != 0) animateSlide(dir * getWidth() * 0.6f);
@@ -534,6 +555,7 @@ public class DeskView extends View {
 
     private void goTo(int np, float from) {
         page = np;
+        if (twin != null) { twin.page = np; twin.editing = null; }
         if (editing != null && editing.page != page) editing = null;
         animateSlide(from);
         if (host != null) host.onPageChange(page, pages);
@@ -549,7 +571,7 @@ public class DeskView extends View {
         slideAnim.start();
     }
 
-    public void setAppsMode(boolean lock, boolean auto) {
+    public void setAppsMode(boolean lock, boolean auto) { if (fwd()) { twin.twinCall = true; try { twin.setAppsMode(lock, auto); } finally { twin.twinCall = false; } }
         lockApps = lock; autoApps = auto;
         if (editing != null && locked(editing)) editing = null;
         invalidate();
@@ -605,7 +627,7 @@ public class DeskView extends View {
 
     // ---------------- ordenar y alinear ----------------
 
-    public void setSnap(boolean s) { snapGrid = s; }
+    public void setSnap(boolean s) { if (fwd()) { twin.twinCall = true; try { twin.setSnap(s); } finally { twin.twinCall = false; } } snapGrid = s; }
 
     private float gridStep() { return 22 * dp; }   // la misma separación que los puntos de la mesa
 
@@ -777,7 +799,7 @@ public class DeskView extends View {
     private float bgFade = 1f;
     private final Paint bgPaint = new Paint(Paint.FILTER_BITMAP_FLAG), bgShade = new Paint();
 
-    public void setBgImage(Bitmap b) {
+    public void setBgImage(Bitmap b) { if (fwd()) { twin.twinCall = true; try { twin.setBgImage(b); } finally { twin.twinCall = false; } }
         if (b == bgImage) return;
         bgOld = bgImage;
         bgImage = b;
@@ -917,12 +939,12 @@ public class DeskView extends View {
             drawItem(c, it, left, top, width, h, it == dragging || rd != null);
             if (Item.WIDGET.equals(it.kind) && host != null) {
                 float bar = widgetBar();
-                host.onWidgetFrame(it, left, top + bar, width, h - bar, it.rot, width / 2, h / 2 - bar, true);
+                host.onWidgetFrame(it, left + getLeft(), top + bar + getTop(), width, h - bar, it.rot, width / 2, h / 2 - bar, true);
                 framed.add(it);
             }
         }
         if (host != null) for (Item it : items)
-            if (Item.WIDGET.equals(it.kind) && !framed.contains(it)) host.onWidgetFrame(it, 0, 0, 0, 0, 0, 0, 0, false);
+            if (Item.WIDGET.equals(it.kind) && !framed.contains(it) && (twin == null || screenOf(it) == side)) host.onWidgetFrame(it, 0, 0, 0, 0, 0, 0, 0, false);
         if (again) postInvalidateOnAnimation();
 
         // relojes: se vuelve a dibujar al cambiar el minuto
@@ -991,7 +1013,7 @@ public class DeskView extends View {
         }
     };
 
-    public void setNotified(org.json.JSONArray a) {
+    public void setNotified(org.json.JSONArray a) { if (fwd()) { twin.twinCall = true; try { twin.setNotified(a); } finally { twin.twinCall = false; } }
         java.util.Set<String> n = new java.util.HashSet<>();
         for (int i = 0; a != null && i < a.length(); i++) n.add(a.optString(i));
         if (n.equals(notified)) return;

@@ -152,7 +152,7 @@ public class Hub implements Link.Listener {
     }
     private final Runnable lostCheck = () -> {
         lostPending = false;
-        if (connected() || lostOffered || !isPrincipal()) return;
+        if (connected() || lostOffered || !isPrincipal() || MainActivity.soloMode(Hub.this.app)) return;   // en una pantalla no se ofrece nada
         lostOffered = true;
         PhoneMode.offer(Hub.this.app, this, PhoneMode.LOST);
     };
