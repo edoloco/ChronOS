@@ -71,6 +71,11 @@ public class DeskView extends View {
         /** Linternas: cada teléfono por separado (principal = true). */
         boolean torchOn(boolean principal);
         void onTorch(boolean principal);
+        /** Brillo (0..1) de cada pantalla; mover una perilla (done = al soltar) y el candado que las une. */
+        float bright(boolean principal);
+        boolean brightLock();
+        void onBright(boolean principal, float f, boolean done);
+        void onBrightLock();
     }
 
     // ---------------- widget de cámara: visor y botones de la cámara del principal ----------------
@@ -369,7 +374,8 @@ public class DeskView extends View {
     private final Paint glassEdge = new Paint(Paint.ANTI_ALIAS_FLAG), glassShine = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     // ---- estado del toque
-    private static final int NONE = 0, DRAG = 1, ROTATE = 2, RESIZE = 3, PINCH = 4, SWIPE = 5, SCRUB = 6;
+    private static final int NONE = 0, DRAG = 1, ROTATE = 2, RESIZE = 3, PINCH = 4, SWIPE = 5, SCRUB = 6, FADER = 7;
+    private boolean brLockTap;
 
     // ---- escritorios a los lados (páginas) y apps
     private int page = 0, pages = 1;
@@ -993,6 +999,8 @@ public class DeskView extends View {
             it.hPx = 26 * dp + width * 0.6f + camBar();
         } else if (Item.TORCH.equals(it.kind)) {
             it.hPx = 138 * dp;
+        } else if (Item.BRIGHT.equals(it.kind)) {
+            it.hPx = Math.max(220 * dp, width * 1.55f);   // vertical, como una mesa de audio
         } else {
             it.hPx = 132 * dp;
         }
@@ -1047,7 +1055,7 @@ public class DeskView extends View {
         RectF box = new RectF(0, 0, width, h);
 
         boolean isNote = Item.NOTE.equals(it.kind), isImg = Item.IMG.equals(it.kind), isApp = Item.APP.equals(it.kind),
-                isWidget = Item.WIDGET.equals(it.kind), isClock = Item.CLOCK.equals(it.kind), isBatt = Item.BATTERY.equals(it.kind), isRec = Item.RECENTS.equals(it.kind), isCam = Item.CAMERA.equals(it.kind), isTorch = Item.TORCH.equals(it.kind);
+                isWidget = Item.WIDGET.equals(it.kind), isClock = Item.CLOCK.equals(it.kind), isBatt = Item.BATTERY.equals(it.kind), isRec = Item.RECENTS.equals(it.kind), isCam = Item.CAMERA.equals(it.kind), isTorch = Item.TORCH.equals(it.kind), isBright = Item.BRIGHT.equals(it.kind);
         boolean glassCard = CardTheme.isGlass() && !isNote && !isImg;
         boolean aeroCard = glassCard && CardTheme.isAero();
         boolean intense = glassCard && CardTheme.isIntense();
@@ -1083,8 +1091,11 @@ public class DeskView extends View {
 
         int ink = isNote || isImg ? 0xFF2B2A22 : fg;
         label.setColor((ink & 0x00FFFFFF) | 0x77000000);
-        String tag = isNote ? "NOTA" : isImg ? "IMAGEN" : isApp ? "APP" : isWidget ? "WIDGET" : isClock ? "RELOJ" : isBatt ? "BATERÍA" : isRec ? "APPS RECIENTES" : isCam ? "CÁMARA" : isTorch ? "LINTERNAS" : "ENLACE";
-        if (isTorch) {
+        String tag = isNote ? "NOTA" : isImg ? "IMAGEN" : isApp ? "APP" : isWidget ? "WIDGET" : isClock ? "RELOJ" : isBatt ? "BATERÍA" : isRec ? "APPS RECIENTES" : isCam ? "CÁMARA" : isTorch ? "LINTERNAS" : isBright ? "BRILLO" : "ENLACE";
+        if (isBright) {
+            c.drawText(tag, 10 * dp, 18 * dp, label);
+            drawBright(c, width, h);
+        } else if (isTorch) {
             c.drawText(tag, 10 * dp, 18 * dp, label);
             drawTorch(c, width, h);
         } else if (isCam) {
@@ -1227,6 +1238,85 @@ public class DeskView extends View {
 
     /** Una fila del widget de batería: nombre, pila con su nivel y porcentaje (⚡ si está cargando). */
     /** Linternas: ícono de linterna, el texto y un interruptor grande a la derecha. */
+    // ---------------- brillo: dos perillas verticales (principal y extendido) y un candado que las une ----------------
+
+    private float brTop() { return 34 * dp; }
+    private float brBottom(float h) { return h - 58 * dp; }
+    private float brX(float width, boolean principal) { return width * (principal ? 0.27f : 0.73f); }
+
+    private void drawBright(Canvas c, float width, float h) {
+        float top = brTop(), bot = brBottom(h);
+        boolean lock = host != null && host.brightLock();
+        float fp = host != null ? host.bright(true) : 0.5f, fe = host != null ? host.bright(false) : 0.5f;
+        if (faderItem != null && Item.BRIGHT.equals(faderItem.kind)) { if (faderP || lock) fp = faderF; if (!faderP || lock) fe = faderF; }
+        float ky0 = 0, ky1 = 0;
+        for (int i = 0; i < 2; i++) {
+            boolean p = i == 0;
+            float f = p ? fp : fe, x = brX(width, p);
+            // ranura con marcas, como una consola de audio
+            battBody.setStyle(Paint.Style.FILL);
+            battBody.setColor((fg & 0x00FFFFFF) | 0x22000000);
+            c.drawRoundRect(new RectF(x - 4 * dp, top, x + 4 * dp, bot), 4 * dp, 4 * dp, battBody);
+            for (int t = 0; t <= 10; t++) {
+                float ty = bot - (bot - top) * t / 10f, len = t % 5 == 0 ? 10 * dp : 6 * dp;
+                battBody.setColor((fg & 0x00FFFFFF) | 0x44000000);
+                c.drawRect(x - 16 * dp - len, ty - 0.6f * dp, x - 16 * dp, ty + 0.6f * dp, battBody);
+            }
+            float ky = f < 0 ? bot : bot - (bot - top) * f;
+            if (f >= 0) {   // luz hasta la perilla
+                battFill.setColor(0xFFFFC53D);
+                c.drawRoundRect(new RectF(x - 4 * dp, ky, x + 4 * dp, bot), 4 * dp, 4 * dp, battFill);
+            }
+            // perilla: tapa rectangular con estrías
+            RectF cap = new RectF(x - 17 * dp, ky - 11 * dp, x + 17 * dp, ky + 11 * dp);
+            battFill.setColor(f < 0 ? 0xFF8A949E : 0xFFE9EDF1);
+            c.drawRoundRect(cap, 5 * dp, 5 * dp, battFill);
+            battBody.setColor(0x55000000);
+            for (int g = -1; g <= 1; g++) c.drawRect(x - 11 * dp, ky + g * 4 * dp - 0.7f * dp, x + 11 * dp, ky + g * 4 * dp + 0.7f * dp, battBody);
+            if (p) ky0 = ky; else ky1 = ky;
+            small.setColor(fg);
+            small.setTextSize(13 * dp);
+            String pct = f < 0 ? "—" : Math.round(f * 100) + "%";
+            c.drawText(pct, x - small.measureText(pct) / 2, bot + 22 * dp, small);
+            label.setColor((fg & 0x00FFFFFF) | 0x99000000);
+            String nm = p ? "PRINCIPAL" : "EXTENDIDO";
+            c.drawText(nm, x - label.measureText(nm) / 2, bot + 40 * dp, label);
+        }
+        // candado al centro: cerrado = las dos perillas se mueven juntas
+        float lx = width / 2, ly = (top + bot) / 2;
+        battBody.setStyle(Paint.Style.STROKE);
+        battBody.setStrokeWidth(2.2f * dp);
+        battBody.setColor(lock ? 0xFFFFB300 : muted);
+        if (lock) {
+            c.drawLine(brX(width, true) + 17 * dp, ky0, lx - 12 * dp, ly, battBody);
+            c.drawLine(lx + 12 * dp, ly, brX(width, false) - 17 * dp, ky1, battBody);
+        }
+        float bw = 9 * dp, bh = 8 * dp;
+        RectF body = new RectF(lx - bw, ly - bh * 0.2f, lx + bw, ly + bh * 1.3f);
+        c.drawArc(new RectF(lx - bw * 0.65f, ly - bh * 1.4f, lx + bw * 0.65f + (lock ? 0 : bw * 0.9f), ly + bh * 0.2f),
+                lock ? 180 : 200, lock ? 180 : 150, false, battBody);
+        battBody.setStyle(Paint.Style.FILL);
+        c.drawRoundRect(body, 2.5f * dp, 2.5f * dp, battBody);
+        battBody.setStyle(Paint.Style.STROKE);
+    }
+
+    private Item faderItem;
+    private boolean faderP;
+    private float faderF;
+
+    /** ¿El dedo cayó en una perilla o en el candado? 0 = nada, 1 = principal, 2 = extendido, 3 = candado. */
+    private int brightPart(Item it, float lx, float ly, float width, float h) {
+        float top = brTop(), bot = brBottom(h);
+        if (Math.hypot(lx - width / 2, ly - (top + bot) / 2) < 22 * dp) return 3;
+        if (ly < top - 16 * dp || ly > bot + 16 * dp) return 0;
+        return lx < width / 2 ? 1 : 2;
+    }
+
+    private float brightAt(float ly, float h) {
+        float top = brTop(), bot = brBottom(h);
+        return Math.max(0f, Math.min(1f, (bot - ly) / Math.max(1, bot - top)));
+    }
+
     /** Linternas: una fila por teléfono (principal arriba, extendido abajo), cada una con su interruptor. */
     private void drawTorch(Canvas c, float width, float h) {
         float top = 24 * dp, rowH = (h - top - 8 * dp) / 2;
@@ -1392,6 +1482,17 @@ public class DeskView extends View {
                     mode = SCRUB; scrubbing = true; scrubStart = recScroll; scrubItem = pressed;
                     return true;
                 }
+                if (Item.BRIGHT.equals(pressed.kind) && editing == null && host != null) {
+                    int part = brightPart(pressed, l[0], l[1], l[2], l[3]);
+                    if (part == 3) { mode = FADER; faderItem = null; brLockTap = true; return true; }
+                    if (part > 0) {
+                        mode = FADER; brLockTap = false;
+                        faderItem = pressed; faderP = part == 1; faderF = brightAt(l[1], l[3]);
+                        host.onBright(faderP, faderF, false);
+                        invalidate();
+                        return true;
+                    }
+                }
                 pressedBtn = locked(pressed) ? null : pressed == editing && pressed.delBtn.contains(l[0], l[1]) ? "del"
                         : Item.LINK.equals(pressed.kind) && pressed.openBtn.contains(l[0], l[1]) ? "open" : null;
                 ox = pressed.x; oy = pressed.y;
@@ -1414,6 +1515,15 @@ public class DeskView extends View {
                 return true;
             }
             case MotionEvent.ACTION_MOVE: {
+                if (mode == FADER) {
+                    if (faderItem != null) {
+                        float[] l = toLocal(faderItem, e.getX(), e.getY());
+                        faderF = brightAt(l[1], l[3]);
+                        host.onBright(faderP, faderF, false);
+                        invalidate();
+                    }
+                    return true;
+                }
                 if (mode == SCRUB && scrubItem != null) {
                     if (vt != null) vt.addMovement(e);
                     float dx = toLocal(scrubItem, e.getX(), e.getY())[0] - downLocal[0];
@@ -1497,6 +1607,14 @@ public class DeskView extends View {
                 edgeDir = 0;
                 Item it = pressed; pressed = null;
                 int m = mode; mode = NONE;
+                if (m == FADER) {
+                    if (vt != null) { vt.recycle(); vt = null; }
+                    if (brLockTap) { if (e.getActionMasked() == MotionEvent.ACTION_UP && host != null) host.onBrightLock(); }
+                    else if (faderItem != null && host != null) host.onBright(faderP, faderF, true);
+                    faderItem = null; brLockTap = false;
+                    invalidate();
+                    return true;
+                }
                 if (m == SCRUB) {
                     float vx = 0;
                     if (vt != null) { vt.addMovement(e); vt.computeCurrentVelocity(1000); vx = vt.getXVelocity(); vt.recycle(); vt = null; }

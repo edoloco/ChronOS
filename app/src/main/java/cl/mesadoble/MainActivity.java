@@ -1497,6 +1497,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .option(Ui.WIDGETS, "Widget", "Widgets de tus apps (clima, calendario, música...)", this::addWidget)
                 .option(Ui.FOLDER, "Archivos", "Pasar archivos entre los dos teléfonos", this::openFiles)
                 .option(Ui.IMAGE, "Cámara", "Widget con el visor y los botones de la cámara del principal", this::addCamera)
+                .option(Ui.PALETTE, "Brillo", "Dos perillas, como una mesa de audio: el brillo de cada pantalla, con candado para moverlas juntas", this::addBright)
                 .option(Ui.AUTO, "Linternas", "Un interruptor para la linterna del principal y otro para la del extendido", this::addTorch)
                 .option(Ui.HOME, "Modo teléfono normal", "El principal vuelve a su pantalla de inicio y su teclado de siempre", this::phoneModeNow)
                 .option(Ui.RECEIVE, "Actualizar app", Updater.updateAvailable(this) ? "Hay una versión nueva: " + Updater.latestKnown(this)
@@ -1531,6 +1532,72 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         it.x = p[0]; it.y = p[1];
         addItem(it);
         Torch.listen(this, hub);
+    }
+
+    private void addBright() {
+        Item it = new Item();
+        it.kind = Item.BRIGHT;
+        it.w = sized(0.36);
+        double[] p = desk.spot(it.w);
+        it.x = p[0]; it.y = p[1];
+        addItem(it);
+        if (hub.connected()) hub.send("brAsk");
+        if (!Bright.canWrite(this)) askBrightPerm();
+    }
+
+    private boolean brightAsked;
+
+    /** Android pide "Modificar ajustes del sistema" para cambiar el brillo (una vez por teléfono). */
+    private void askBrightPerm() {
+        if (brightAsked) return;
+        brightAsked = true;
+        new Ui.Sheet(this)
+                .title("Permiso para el brillo")
+                .message("Para cambiar el brillo de este teléfono, Android pide activar \"Modificar ajustes del sistema\" para ChronOS.")
+                .button("Ahora no", false, null)
+                .button("Activar", true, () -> { try { startActivity(Bright.permIntent(this)); } catch (Exception ignored) { } })
+                .show();
+    }
+
+    @Override public float bright(boolean principal) {
+        if (principal == hub.isPrincipal()) return Bright.mine(this);
+        return hub.connected() ? Bright.other : -1;
+    }
+
+    @Override public boolean brightLock() { return Bright.locked(this); }
+
+    private long brSentAt;
+
+    @Override public void onBright(boolean principal, float f, boolean done) {
+        boolean lock = Bright.locked(this);
+        boolean here = principal == hub.isPrincipal();
+        // aquí: directo; con el candado, las dos pantallas quedan con la misma intensidad
+        if (here || lock) {
+            if (!Bright.set(this, f)) {
+                android.view.WindowManager.LayoutParams lp = getWindow().getAttributes();   // sin permiso: al menos mientras se ve ChronOS
+                lp.screenBrightness = Math.max(0.02f, f * f);
+                getWindow().setAttributes(lp);
+                if (done) askBrightPerm();
+            }
+        }
+        if ((!here || lock) && hub.connected()) {
+            long now = android.os.SystemClock.uptimeMillis();
+            if (done || now - brSentAt > 70) { brSentAt = now; hub.send("brSet", "f", (double) f, "done", done); }
+            Bright.other = f;
+        }
+        desk.invalidate();
+    }
+
+    @Override public void onBrightLock() {
+        boolean on = !Bright.locked(this);
+        Bright.setLocked(this, on);
+        if (hub.connected()) hub.send("brLock", "on", on);
+        if (on) {   // al cerrar el candado, el extendido toma el brillo del principal
+            float base = hub.isPrincipal() ? Bright.mine(this) : (Bright.other >= 0 ? Bright.other : Bright.mine(this));
+            onBright(true, base, true);
+        }
+        Toast.makeText(this, on ? "Brillo unido: las dos pantallas iguales" : "Brillo independiente", Toast.LENGTH_SHORT).show();
+        desk.invalidate();
     }
 
     @Override public boolean torchOn(boolean principal) { return Torch.on(hub, principal); }
@@ -2642,6 +2709,15 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 break;
             case "phoneOffer":
                 main.post(() -> phoneOffer(m.optString("title")));
+                break;
+            case "brNow":
+                Bright.other = (float) m.optDouble("f", -1);
+                Bright.otherOk = m.optBoolean("ok", true);
+                main.post(() -> desk.invalidate());
+                break;
+            case "brLock":
+                Bright.setLocked(this, m.optBoolean("on"));
+                main.post(() -> desk.invalidate());
                 break;
             case "torchUi":
                 main.post(() -> desk.invalidate());

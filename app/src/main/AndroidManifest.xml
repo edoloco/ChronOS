@@ -33,6 +33,8 @@
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
+    <!-- brillo de las pantallas (widget de brillo): "Modificar ajustes del sistema" -->
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" tools:ignore="ProtectedPermissions" />
 
     <!-- para poder listar y abrir las apps instaladas (Android 11+) -->
     <queries>

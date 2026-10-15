@@ -140,6 +140,7 @@ public class Hub implements Link.Listener {
     public void remove(Link.Listener l) { listeners.remove(l); }
 
     private boolean battOffered, lostOffered, lostPending;
+    private boolean brPermAsked;
 
     /** Principal: buscar al extendido a la fuerza (última IP + todo el WiFi). */
     public void forceLink() {
@@ -245,6 +246,7 @@ public class Hub implements Link.Listener {
             lostPending = false;
             lostOffered = false;
             Torch.listen(app, this);
+            send("brNow", "f", (double) Bright.mine(app), "ok", Bright.canWrite(app));
             send("torchState", "on", Torch.mine);
             if (isPrincipal() && PhoneMode.active(app)) PhoneMode.extendedBack(app);   // en modo normal: solo un aviso
             else if (isPrincipal() && MesaAccess.instance != null) MesaAccess.instance.switchToMesa();
@@ -332,6 +334,17 @@ public class Hub implements Link.Listener {
                 } else if (otherChg || otherBatt >= 25) battOffered = false;
             }
         }
+        // brillo pedido desde el otro teléfono (widget de brillo)
+        if ("brSet".equals(t)) {
+            boolean ok = Bright.set(app, (float) m.optDouble("f"));
+            if (!ok && m.optBoolean("done") && !brPermAsked) {
+                brPermAsked = true;
+                startOrNotify(Bright.permIntent(app), 87, "Brillo desde el otro teléfono", "Toca y activa \"Modificar ajustes del sistema\" para ChronOS");
+            }
+            if (m.optBoolean("done")) send("brNow", "f", (double) Bright.mine(app), "ok", ok);
+            return;
+        }
+        if ("brAsk".equals(t)) { send("brNow", "f", (double) Bright.mine(app), "ok", Bright.canWrite(app)); return; }
         if ("torch".equals(t) || "torchState".equals(t)) { Torch.onMessage(app, this, m); return; }
         if ("notifTest".equals(t)) { if (isPrincipal()) NotifTest.run(app, this); return; }
         // el extendido pide activar las notificaciones: si ChronOS no está a la vista en el principal, un aviso para abrirlo
