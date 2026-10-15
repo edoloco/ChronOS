@@ -51,6 +51,35 @@ public class NotifService extends NotificationListenerService {
         return new JSONArray(s);
     }
 
+    /** Borra una notificación (se deslizó en la lista de ChronOS). */
+    void dismiss(String key) { try { cancelNotification(key); } catch (Exception ignored) { } }
+
+    /**
+     * Abre lo que abriría tocar la notificación (por ejemplo, ese chat de WhatsApp). false si no se pudo:
+     * entonces se abre la app.
+     */
+    boolean open(String key) {
+        try {
+            for (StatusBarNotification n : getActiveNotifications()) {
+                if (!n.getKey().equals(key)) continue;
+                android.app.PendingIntent pi = n.getNotification().contentIntent;
+                if (pi == null) return false;
+                Bundle opts = null;
+                if (android.os.Build.VERSION.SDK_INT >= 34) {   // Android 14: hay que permitir que abra una pantalla
+                    try {
+                        android.app.ActivityOptions ao = android.app.ActivityOptions.makeBasic();
+                        android.app.ActivityOptions.class.getMethod("setPendingIntentBackgroundActivityStartMode", int.class).invoke(ao, 1);
+                        opts = ao.toBundle();
+                    } catch (Exception ignored) { }
+                }
+                pi.send(this, 0, null, null, null, null, opts);
+                if ((n.getNotification().flags & Notification.FLAG_AUTO_CANCEL) != 0) dismiss(key);
+                return true;
+            }
+        } catch (Exception ignored) { }
+        return false;
+    }
+
     /** Para la banda tipo noticiero: las pendientes, la más nueva primero (una por conversación/clave). */
     JSONArray items() {
         JSONArray out = new JSONArray();

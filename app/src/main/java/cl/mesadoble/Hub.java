@@ -267,6 +267,9 @@ public class Hub implements Link.Listener {
         if ("media".equals(t)) { media(m.optString("k")); return; }
         if ("screen".equals(t)) { if (!isPrincipal()) ScreenSync.apply(app, this, m.optString("s")); return; }
         if ("scrSync".equals(t)) { prefs.edit().putBoolean("syncScreen", m.optBoolean("on", true)).apply(); }
+        // lista de notificaciones (desde la banda): borrar o abrir, siempre en el principal
+        if ("notifDel".equals(t)) { if (isPrincipal()) notifDel(m.optString("key")); return; }
+        if ("notifOpen".equals(t)) { if (isPrincipal()) notifOpen(m.optString("key"), m.optString("pkg")); return; }
         if ("launch".equals(t)) {
             int r = launchHere(m.optString("pkg"), m.optString("label"));
             send("launchAck", "r", r, "label", m.optString("label"));
@@ -739,6 +742,18 @@ public class Hub implements Link.Listener {
         try { m.put("t", "notifs"); m.put("p", new JSONArray(l)); } catch (JSONException ignored) { }
         if (connected()) send(m);
         main.post(() -> local(m));
+    }
+
+    void notifDel(String key) {
+        NotifService ns = NotifService.instance;
+        if (ns != null) ns.dismiss(key);
+        main.postDelayed(this::notifsChanged, 300);
+    }
+
+    void notifOpen(String key, String pkg) {
+        NotifService ns = NotifService.instance;
+        if (ns != null && ns.open(key)) return;
+        launchHere(pkg, "");
     }
 
     private String tickerSig = "";

@@ -166,7 +166,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         root.addView(floatNotif, fl);
         // banda tipo noticiero arriba del extendido (cuando el principal está en otra app)
         floatTicker = new TickerView(this, true);
-        floatTicker.setTap(this::onNotifTap);
+        floatTicker.setTap(pkg -> showNotifList());
         FrameLayout.LayoutParams tl = new FrameLayout.LayoutParams(-1, dp(34), Gravity.TOP);
         tl.setMargins(dp(12), dp(26), dp(12), 0);
         root.addView(floatTicker, tl);
@@ -843,6 +843,157 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         return phoneSq;
     }
 
+    // ---------------- lista de notificaciones (al tocar la banda) ----------------
+
+    private android.app.Dialog notifDlg;
+    private LinearLayout notifBox;
+
+    /** Ventana con las notificaciones pendientes: tocar abre, deslizar a un lado borra. */
+    private void showNotifList() {
+        if (tickerItems == null || tickerItems.length() == 0) return;
+        notifBox = new LinearLayout(this);
+        notifBox.setOrientation(LinearLayout.VERTICAL);
+        fillNotifList();
+        android.widget.ScrollView sc = new android.widget.ScrollView(this);
+        sc.addView(notifBox);
+        sc.setLayoutParams(new LinearLayout.LayoutParams(-1, Math.min(dp(420), getResources().getDisplayMetrics().heightPixels * 3 / 5)));
+        notifDlg = new Ui.Sheet(this)
+                .title("Notificaciones")
+                .message("Toca para abrir · desliza a un lado para borrar")
+                .view(sc)
+                .button("Borrar todas", false, () -> {
+                    for (int i = 0; tickerItems != null && i < tickerItems.length(); i++) notifAction("notifDel", tickerItems.optJSONObject(i));
+                })
+                .button("Cerrar", true, null)
+                .show();
+        notifDlg.setOnDismissListener(d -> { notifDlg = null; notifBox = null; });
+    }
+
+    private void fillNotifList() {
+        if (notifBox == null) return;
+        notifBox.removeAllViews();
+        boolean n = CardTheme.sheetNight(night);
+        if (tickerItems == null || tickerItems.length() == 0) {
+            TextView e = new TextView(this);
+            e.setText("No quedan notificaciones");
+            e.setTextColor(Ui.muted(n));
+            e.setPadding(dp(8), dp(16), dp(8), dp(16));
+            notifBox.addView(e);
+            return;
+        }
+        for (int i = 0; i < tickerItems.length(); i++) {
+            org.json.JSONObject o = tickerItems.optJSONObject(i);
+            if (o == null) continue;
+            notifBox.addView(notifRow(o, n));
+        }
+    }
+
+    private View notifRow(org.json.JSONObject o, boolean n) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(12), dp(10), dp(12), dp(10));
+        GradientDrawable g = new GradientDrawable();
+        g.setCornerRadius(dp(16));
+        g.setColor((Ui.fg(n) & 0x00FFFFFF) | 0x12000000);
+        row.setBackground(g);
+        android.widget.ImageView ic = new android.widget.ImageView(this);
+        try {
+            byte[] d = android.util.Base64.decode(o.optString("icon"), android.util.Base64.DEFAULT);
+            ic.setImageBitmap(android.graphics.BitmapFactory.decodeByteArray(d, 0, d.length));
+        } catch (Exception ignored) { }
+        row.addView(ic, new LinearLayout.LayoutParams(dp(34), dp(34)));
+        LinearLayout tx = new LinearLayout(this);
+        tx.setOrientation(LinearLayout.VERTICAL);
+        tx.setPadding(dp(12), 0, 0, 0);
+        TextView a = new TextView(this);
+        long mins = Math.max(0, (System.currentTimeMillis() - o.optLong("time")) / 60000);
+        a.setText(o.optString("app").toUpperCase() + "  ·  " + (mins < 1 ? "ahora" : mins < 60 ? "hace " + mins + " min" : "hace " + (mins / 60) + " h"));
+        a.setTextSize(11);
+        a.setLetterSpacing(0.05f);
+        a.setTextColor(Ui.muted(n));
+        TextView t = new TextView(this);
+        t.setText(o.optString("title"));
+        t.setTextSize(15);
+        t.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
+        t.setTextColor(Ui.fg(n));
+        t.setSingleLine(true);
+        t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        TextView b = new TextView(this);
+        b.setText(o.optString("text"));
+        b.setTextSize(13);
+        b.setTextColor(Ui.muted(n));
+        b.setMaxLines(2);
+        b.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        tx.addView(a);
+        if (!o.optString("title").isEmpty()) tx.addView(t);
+        if (!o.optString("text").isEmpty()) tx.addView(b);
+        row.addView(tx, new LinearLayout.LayoutParams(0, -2, 1));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.bottomMargin = dp(8);
+        row.setLayoutParams(lp);
+        // deslizar a un lado = borrar; tocar = abrir
+        final float[] st = new float[2];
+        final boolean[] dragging = {false};
+        final int slop = android.view.ViewConfiguration.get(this).getScaledTouchSlop();
+        row.setOnTouchListener((v, e) -> {
+            switch (e.getActionMasked()) {
+                case android.view.MotionEvent.ACTION_DOWN:
+                    st[0] = e.getRawX(); st[1] = e.getRawY(); dragging[0] = false;
+                    v.setPressed(true);
+                    return true;
+                case android.view.MotionEvent.ACTION_MOVE: {
+                    float dx = e.getRawX() - st[0], dy = e.getRawY() - st[1];
+                    if (!dragging[0] && Math.abs(dx) > slop && Math.abs(dx) > Math.abs(dy)) {
+                        dragging[0] = true;
+                        v.getParent().requestDisallowInterceptTouchEvent(true);
+                    }
+                    if (dragging[0]) {
+                        v.setTranslationX(dx);
+                        v.setAlpha(Math.max(0.2f, 1 - Math.abs(dx) / Math.max(1, v.getWidth())));
+                    }
+                    return true;
+                }
+                case android.view.MotionEvent.ACTION_UP: {
+                    v.setPressed(false);
+                    float dx = e.getRawX() - st[0];
+                    if (dragging[0]) {
+                        if (Math.abs(dx) > v.getWidth() * 0.35f) {
+                            v.animate().translationX(Math.signum(dx) * v.getWidth()).alpha(0).setDuration(160)
+                                    .withEndAction(() -> { notifAction("notifDel", o); removeFromList(o.optString("key")); }).start();
+                        } else v.animate().translationX(0).alpha(1).setDuration(160).start();
+                    } else {
+                        notifAction("notifOpen", o);
+                        if (notifDlg != null) notifDlg.dismiss();
+                    }
+                    return true;
+                }
+                case android.view.MotionEvent.ACTION_CANCEL:
+                    v.setPressed(false);
+                    v.animate().translationX(0).alpha(1).setDuration(160).start();
+                    return true;
+                default: return true;
+            }
+        });
+        return row;
+    }
+
+    /** Borrar o abrir: lo hace el principal (aquí mismo si este es el principal). */
+    private void notifAction(String what, org.json.JSONObject o) {
+        String key = o.optString("key"), pkg = o.optString("pkg");
+        if (hub.isPrincipal()) { if ("notifDel".equals(what)) hub.notifDel(key); else hub.notifOpen(key, pkg); }
+        else if (hub.connected()) hub.send(what, "key", key, "pkg", pkg);
+        else Toast.makeText(this, "El principal no está conectado", Toast.LENGTH_SHORT).show();
+    }
+
+    private void removeFromList(String key) {
+        if (tickerItems == null) return;
+        org.json.JSONArray left = new org.json.JSONArray();
+        for (int i = 0; i < tickerItems.length(); i++) if (!key.equals(tickerItems.optJSONObject(i).optString("key"))) left.put(tickerItems.optJSONObject(i));
+        tickerItems = left;
+        applyTicker();
+        fillNotifList();
+    }
+
     /** Banda de notificaciones: en la barra del reloj del principal; en el extendido solo si el principal está en otra app. */
     private void applyTicker() {
         if (side == 1) {
@@ -937,7 +1088,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             barNotif.setTap(this::onNotifTap);
             cbar.setNotif(barNotif);
             barTicker = new TickerView(this, false);
-            barTicker.setTap(this::onNotifTap);
+            barTicker.setTap(pkg -> showNotifList());
             barTicker.setInk(Ui.fg(CardTheme.sheetNight(night)));
             cbar.setTicker(barTicker);
             if (tickerItems != null) applyTicker();
@@ -2692,7 +2843,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             case "notif":   // ahora las notificaciones corren en la banda (ticker); la tarjeta ya no se usa
                 break;
             case "ticker":
-                main.post(() -> { tickerItems = m.optJSONArray("items"); tickerHere = m.optBoolean("here"); applyTicker(); });
+                main.post(() -> { tickerItems = m.optJSONArray("items"); tickerHere = m.optBoolean("here"); applyTicker(); fillNotifList(); });
                 break;
             case "notifTestR":
                 main.post(() -> notifResult(m));
