@@ -283,6 +283,10 @@ public class Hub implements Link.Listener {
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
         if ("media".equals(t)) { media(m.optString("k")); return; }
+        if ("handoffBack".equals(t)) {
+            main.post(() -> { if (Handoff.active()) Handoff.giveBack(app, this); else send("boostMsg", "msg", "En el extendido ya no hay una app lanzada"); });
+            return;
+        }
         if ("handoffSound".equals(t)) { prefs.edit().putBoolean("handoffSound", m.optBoolean("on", true)).apply(); return; }
         if ("handoff".equals(t)) { main.post(() -> Handoff.receive(app, this, m)); return; }
         if ("installReq".equals(t)) {

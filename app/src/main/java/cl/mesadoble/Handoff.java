@@ -148,6 +148,8 @@ final class Handoff {
         pause(c, pkg);
         Toast.makeText(c, "Pasando " + info.optString("label") + (hub.isPrincipal() ? " al extendido" : " al principal"), Toast.LENGTH_SHORT).show();
         if (!info.optBoolean("pip")) main.postDelayed(hub::goDesk, 250);   // aquí queda la mesa de ChronOS
+        if (hub.isPrincipal()) post(c, N_SENT, info.optString("label") + " está en el extendido", "Usa «Traer arriba» para devolverla al principal",
+                new String[][]{{"Traer arriba", "back"}});
     }
 
     /** Desde aquí: la app pkg (o la que suena, si es la ventana flotante) se va al otro teléfono. */
@@ -168,6 +170,51 @@ final class Handoff {
         am.dispatchMediaKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PAUSE));
     }
 
+    // ---------------- avisos con botones (respaldo si el botoncito no se puede dibujar) ----------------
+
+    static final int N_SENT = 9100, N_HERE = 9101;
+
+    private static android.app.PendingIntent act(Context c, String a, int code) {
+        return android.app.PendingIntent.getBroadcast(c, code, new Intent(c, Act.class).setAction(a),
+                android.app.PendingIntent.FLAG_IMMUTABLE | android.app.PendingIntent.FLAG_UPDATE_CURRENT);
+    }
+
+    private static void post(Context c, int id, String title, String text, String[][] actions) {
+        android.app.NotificationManager nm = (android.app.NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm == null) return;
+        if (nm.getNotificationChannel("lanzar") == null)
+            nm.createNotificationChannel(new android.app.NotificationChannel("lanzar", "Lanzar a la otra pantalla", android.app.NotificationManager.IMPORTANCE_LOW));
+        int icon = c.getResources().getIdentifier("ic_stat", "drawable", c.getPackageName());
+        android.app.Notification.Builder b = new android.app.Notification.Builder(c, "lanzar")
+                .setSmallIcon(icon != 0 ? icon : android.R.drawable.stat_notify_more)
+                .setContentTitle(title).setContentText(text).setOngoing(true);
+        int k = 0;
+        for (String[] a : actions) b.addAction(new android.app.Notification.Action.Builder(null, a[0], act(c, a[1], 9200 + id % 10 * 10 + k++)).build());
+        try { nm.notify(id, b.build()); } catch (Exception ignored) { }
+    }
+
+    static void cancel(Context c, int id) {
+        android.app.NotificationManager nm = (android.app.NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm != null) nm.cancel(id);
+    }
+
+    /** Botones de los avisos. */
+    public static class Act extends android.content.BroadcastReceiver {
+        @Override public void onReceive(Context c, Intent i) {
+            Hub hub = Hub.get(c);
+            String a = i.getAction() == null ? "" : i.getAction();
+            switch (a) {
+                case "back":   // en el principal: pedirle al extendido que la devuelva
+                    cancel(c, N_SENT);
+                    if (hub.connected()) hub.send("handoffBack"); else Toast.makeText(c, "El extendido no está conectado", Toast.LENGTH_SHORT).show();
+                    break;
+                case "give": giveBack(c, hub); break;
+                case "close": end(c, hub, true); break;
+                case "desk": hub.goDesk(); break;
+            }
+        }
+    }
+
     // ---------------- recibir ----------------
 
     static boolean installed(Context c, String pkg) {
@@ -176,6 +223,7 @@ final class Handoff {
 
     /** Llegó una app del otro teléfono: abrirla aquí. */
     static void receive(Context c, Hub hub, JSONObject m) {
+        cancel(c, N_SENT);
         String pkg = m.optString("pkg"), label = m.optString("label");
         boolean hasLink = !m.optString("url").isEmpty() || !m.optString("yt").isEmpty();
         if (!pkg.isEmpty() && !installed(c, pkg) && !hasLink) {
@@ -234,6 +282,8 @@ final class Handoff {
         if (m.optBoolean("pip") && MesaAccess.instance != null)
             main.postDelayed(() -> { if (MesaAccess.instance != null) MesaAccess.instance.performGlobalAction(2 /* HOME */); }, 3500);
         main.postDelayed(() -> HandoffUi.update(c, hub), 900);
+        if (!hub.isPrincipal()) post(c, N_HERE, label + " (lanzada desde el principal)", "Devolver arriba, volver a ChronOS o cerrarla",
+                new String[][]{{"⇧ Devolver arriba", "give"}, {"ChronOS", "desk"}, {"Cerrar", "close"}});
     }
 
     // ---------------- devolver / terminar (en el teléfono que la recibió) ----------------
@@ -267,6 +317,7 @@ final class Handoff {
         JSONObject h = here;
         here = null;
         HandoffUi.hideBubble();
+        cancel(c, N_HERE);
         if (CaptureService.up) CaptureService.stop(c);
         if (h == null) return;
         String pkg = h.optString("pkg");

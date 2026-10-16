@@ -239,6 +239,9 @@
             android:name=".Updater$InstallReceiver"
             android:exported="false" />
         <receiver
+            android:name=".Handoff$Act"
+            android:exported="false" />
+        <receiver
             android:name=".AppShare$Act"
             android:exported="false" />
         <receiver

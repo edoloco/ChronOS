@@ -180,16 +180,17 @@ final class HandoffUi {
                     return true;
                 case MotionEvent.ACTION_MOVE:
                     float d = land ? e.getRawY() - dy : e.getRawX() - dx;
-                    if (!fired && d > 10 * dp) { fired = true; go(); }
+                    // solo se marca: la acción va al soltar (quitar la ventana con el dedo encima puede dejar trabado el toque)
+                    if (!fired && d > 10 * dp) { fired = true; bg.setColor(0xFF2ECC71); invalidate(); }
                     return true;
                 case MotionEvent.ACTION_UP:
                     bg.setColor(0xB31E5BC6); invalidate();
-                    if (fired) return true;
+                    if (fired) { main.postDelayed(this::go, 60); return true; }
                     if (e.getEventTime() - downAt > 650) {   // dejar apretado: ocultar para esta app
                         hiddenFor = tabPkg;
-                        hideTab();
+                        main.postDelayed(HandoffUi::hideTab, 60);
                         android.widget.Toast.makeText(getContext(), "Flecha oculta para esta app", android.widget.Toast.LENGTH_SHORT).show();
-                    } else go();
+                    } else main.postDelayed(this::go, 60);
                     return true;
                 case MotionEvent.ACTION_CANCEL:
                     bg.setColor(0xB31E5BC6); invalidate();
