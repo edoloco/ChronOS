@@ -795,7 +795,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         startPanel.addView(head);
         // orden: lo más usado arriba
         SquareButton[] order = {byKind(SquareButton.APPS), settingsBtn, byKind(SquareButton.DESKS), statusBtn,
-                byKind(SquareButton.TOOLS), phoneSettingsBtn(), phoneBtn(), soloBtn(), null, null, null, aboutBtn()};   // Archivos está en Herramientas
+                byKind(SquareButton.TOOLS), phoneSettingsBtn(), phoneBtn(), soloBtn(), powerBtn(), null, null, aboutBtn()};   // Archivos está en Herramientas
         LinearLayout row = null;
         for (int i = 0; i < order.length; i++) {
             if (i % 4 == 0) {
@@ -828,6 +828,65 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     private SquareButton filesBtn, aboutSq;
+
+    private SquareButton powerSq;
+
+    /** Menú inicio: centro de apagado. */
+    private SquareButton powerBtn() {
+        if (powerSq == null) {
+            powerSq = new SquareButton(this, SquareButton.POWER, "Apagar", false, night);
+            powerSq.setOnClickListener(v -> { showStart(false); powerCenter(); });
+            squares.add(powerSq);
+        }
+        if (powerSq.getParent() instanceof android.view.ViewGroup) ((android.view.ViewGroup) powerSq.getParent()).removeView(powerSq);
+        return powerSq;
+    }
+
+    /** Centro de apagado: primero cuál teléfono, después apagar, reiniciar o bloquear. */
+    private void powerCenter() {
+        Ui.Sheet sh = new Ui.Sheet(this).title("Centro de apagado").message("¿Qué teléfono?");
+        sh.option(Ui.LOCK, "Los dos", "Principal y extendido", () -> powerWhat(true, true));
+        sh.option(Ui.LOCK, "Principal", hub.isPrincipal() ? "Este teléfono" : "El de las apps", () -> powerWhat(true, false));
+        if (!solo) sh.option(Ui.LOCK, "Extendido", hub.isPrincipal() ? "El de los controles" : "Este teléfono", () -> powerWhat(false, true));
+        sh.button("Cancelar", false, null).show();
+    }
+
+    private void powerWhat(boolean p, boolean e) {
+        String who = p && e ? "los dos teléfonos" : p ? "el principal" : "el extendido";
+        new Ui.Sheet(this)
+                .title("¿Qué hacer con " + who + "?")
+                .message("Android no deja que una app apague o reinicie sola: se abre el menú de apagado de Android en cada teléfono "
+                        + "y ahí tocas Apagar o Reiniciar.")
+                .option(Ui.LOCK, "Apagar", "Abre el menú de apagado: toca \"Apagar\"", () -> powerDo(p, e, "menu", "Apagar"))
+                .option(Ui.AUTO, "Reiniciar", "Abre el menú de apagado: toca \"Reiniciar\"", () -> powerDo(p, e, "menu", "Reiniciar"))
+                .option(Ui.LOCK, "Bloquear pantalla", "Apaga la pantalla (sin apagar el teléfono)", () -> powerDo(p, e, "lock", null))
+                .button("Cancelar", false, null)
+                .show();
+    }
+
+    /** Primero el otro teléfono (si va), después este. */
+    private void powerDo(boolean p, boolean e, String a, String tap) {
+        boolean meP = hub.isPrincipal() || solo;
+        boolean other = (p && !meP) || (e && meP && !solo), me = (p && meP) || (e && !meP);
+        if (other) {
+            if (hub.connected()) hub.send("power", "a", a);
+            else Toast.makeText(this, "El otro teléfono no está conectado", Toast.LENGTH_SHORT).show();
+        }
+        if (me) main.postDelayed(() -> {
+            if (!Power.run(this, a)) powerFail(a);
+            else if (tap != null) Toast.makeText(this, "Toca \"" + tap + "\" en el menú de Android", Toast.LENGTH_LONG).show();
+        }, other ? 700 : 0);
+    }
+
+    private void powerFail(String a) {
+        new Ui.Sheet(this)
+                .title("No se pudo en este teléfono")
+                .message("menu".equals(a)
+                        ? "Abrir el menú de apagado necesita la versión completa de ChronOS (usa accesibilidad). Con la liviana, apágalo con su botón de encendido."
+                        : "Para bloquear la pantalla, activa \"Bloquear pantalla\" en Ajustes → Revisar configuración.")
+                .button("Entendido", true, null)
+                .show();
+    }
 
     private SquareButton phoneSetSq;
 
@@ -3189,6 +3248,12 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 break;
             case "phoneOffer":
                 main.post(() -> phoneOffer(m.optString("title")));
+                break;
+            case "powerR":
+                if (!m.optBoolean("ok")) main.post(() -> Toast.makeText(this, "lock".equals(m.optString("a"))
+                        ? "El otro teléfono no pudo bloquearse (falta el permiso de bloquear pantalla allá)"
+                        : "El otro teléfono necesita la versión completa para abrir su menú de apagado", Toast.LENGTH_LONG).show());
+                else if ("menu".equals(m.optString("a"))) main.post(() -> Toast.makeText(this, "En el otro teléfono se abrió el menú de apagado", Toast.LENGTH_SHORT).show());
                 break;
             case "callLog":
                 main.post(() -> onCallLog(m));

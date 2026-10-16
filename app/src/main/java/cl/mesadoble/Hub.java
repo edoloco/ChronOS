@@ -271,6 +271,13 @@ public class Hub implements Link.Listener {
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
         if ("media".equals(t)) { media(m.optString("k")); return; }
+        // centro de apagado: el otro teléfono pide abrir aquí el menú de apagado o bloquear
+        if ("power".equals(t)) {
+            String a = m.optString("a");
+            boolean ok = Power.run(app, a);
+            send("powerR", "a", a, "ok", ok);
+            return;
+        }
         // widget de llamadas: todo pasa en el principal
         if ("callLogReq".equals(t)) { if (isPrincipal()) RecentApps.worker.execute(() -> send(Phone.callLog(app))); return; }
         if ("contactsReq".equals(t)) { if (isPrincipal()) { String q = m.optString("q"); RecentApps.worker.execute(() -> send(Phone.contacts(app, q))); } return; }

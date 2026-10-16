@@ -18,7 +18,7 @@ import android.view.View;
 public class SquareButton extends View {
 
     public static final int NOTE = 0, IMAGE = 1, APPS = 2, KEYBOARD = 3, SETTINGS = 4, STATUS = 5,
-            BACK = 6, HOME = 7, RECENTS = 8, MENU = 9, DESKS = 10, WIDGET = 11, FILES = 12, TOOLS = 13;
+            BACK = 6, HOME = 7, RECENTS = 8, MENU = 9, DESKS = 10, WIDGET = 11, FILES = 12, TOOLS = 13, POWER = 14;
 
     private final int kind;
     public int kind() { return kind; }
@@ -233,6 +233,10 @@ public class SquareButton extends View {
                 c.restore();
                 break;
             }
+            case POWER:   // botón de encendido: círculo abierto arriba y una raya
+                c.drawArc(new RectF(cx - u * 0.95f, cy - u * 0.85f, cx + u * 0.95f, cy + u * 1.05f), -55, 290, false, stroke);
+                c.drawLine(cx, cy - u * 1.15f, cx, cy + u * 0.05f, stroke);
+                break;
             case WIDGET:
                 c.drawRoundRect(new RectF(cx - u * 1.2f, cy - u, cx + u * 0.1f, cy - u * 0.05f), 2 * dp, 2 * dp, stroke);
                 c.drawRoundRect(new RectF(cx + u * 0.35f, cy - u, cx + u * 1.2f, cy + u), 2 * dp, 2 * dp, stroke);
