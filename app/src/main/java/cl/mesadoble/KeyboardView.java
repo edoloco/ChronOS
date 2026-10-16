@@ -114,9 +114,7 @@ public class KeyboardView extends View {
                 mod("Mayús", SHIFT, 1.25f), c("<", ">", null), l("z"), l("x"), l("c"), l("v"), l("b"), l("n"),
                 l("m"), c(",", ";", null), c(".", ":", null), c("-", "_", null), mod("Mayús", SHIFT, 2.75f)});
         rows.add(new Key[]{
-                mod("Ctrl", CTRL, 1.5f), mod("AltGr", ALTGR, 1.5f), c(" ", null, null, 5f),
-                key("←", KeyEvent.KEYCODE_DPAD_LEFT, 1.25f), key("↑", KeyEvent.KEYCODE_DPAD_UP, 1.25f),
-                key("↓", KeyEvent.KEYCODE_DPAD_DOWN, 1.25f), key("→", KeyEvent.KEYCODE_DPAD_RIGHT, 1.25f),
+                mod("Ctrl", CTRL, 1.5f), mod("AltGr", ALTGR, 1.5f), c(" ", null, null, 10f),   // espacio ancho (sin flechas)
                 sendKey()});   // Enviar: esquina inferior derecha
     }
 

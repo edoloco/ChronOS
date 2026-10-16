@@ -24,6 +24,10 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
 
     private Hub hub;
     private TextView label;
+    private LinearLayout fixRow;
+    private android.widget.HorizontalScrollView fixScroll;
+    private long lastEditAt;
+    private static boolean userSent;
     private boolean night;
 
     @Override public void onCreate() {
@@ -54,6 +58,14 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
         label.setTextSize(13);
         label.setSingleLine(true);
         bar.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
+        // palabra tocada: las sugerencias del corrector aparecen aquí como botones
+        fixScroll = new android.widget.HorizontalScrollView(this);
+        fixScroll.setHorizontalScrollBarEnabled(false);
+        fixRow = new LinearLayout(this);
+        fixRow.setGravity(Gravity.CENTER_VERTICAL);
+        fixScroll.addView(fixRow);
+        fixScroll.setVisibility(View.GONE);
+        bar.addView(fixScroll, new LinearLayout.LayoutParams(0, -1, 1));
         Button sw = new Button(this);
         sw.setText("Cambiar teclado");
         sw.setAllCaps(false);
@@ -83,6 +95,80 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
         super.onStartInputView(info, restarting);
         hub.setImeReady(true);
         updateLabel();
+        hideFix();
+        // el diccionario personal del teléfono (solo el teclado activo puede leerlo) va al extendido una vez
+        if (!userSent && hub.connected() && hub.isPrincipal()) {
+            userSent = true;
+            new Thread(() -> hub.send("userDict", "w", Speller.userWords(this))).start();
+        }
+    }
+
+    // ---------------- palabra tocada: sugerencias de ortografía ----------------
+
+    @Override public void onUpdateSelection(int os, int oe, int ns, int ne, int cs, int ce) {
+        super.onUpdateSelection(os, oe, ns, ne, cs, ce);
+        if (ns != ne || SystemClock.uptimeMillis() - lastEditAt < 600) return;   // escribiendo: no
+        InputConnection ic = getCurrentInputConnection();
+        if (ic == null) return;
+        CharSequence b = ic.getTextBeforeCursor(48, 0), a = ic.getTextAfterCursor(48, 0);
+        if (b == null) b = "";
+        if (a == null) a = "";
+        int i = b.length();
+        while (i > 0 && Character.isLetter(b.charAt(i - 1))) i--;
+        int j = 0;
+        while (j < a.length() && Character.isLetter(a.charAt(j))) j++;
+        final String w = b.subSequence(i, b.length()).toString() + a.subSequence(0, j);
+        final int nb = b.length() - i, na = j;
+        if (w.length() < 2) { hideFix(); return; }
+        Speller.check(this, w, list -> {
+            java.util.List<String> all = new java.util.ArrayList<>();
+            for (String x : list) if (!x.equals(w) && !all.contains(x)) all.add(x);
+            for (String x : Dict.get(this).suggest(w, 3)) if (!x.equals(w) && !all.contains(x) && all.size() < 5) all.add(x);
+            showFix(w, all, nb, na);
+            if (hub.connected()) hub.send("wordFix", "w", w, "s", new org.json.JSONArray(all), "b", nb, "a", na);
+        });
+    }
+
+    private void showFix(String w, java.util.List<String> s, int nb, int na) {
+        if (fixRow == null) return;
+        fixRow.removeAllViews();
+        if (s.isEmpty()) { hideFix(); return; }
+        for (String v : s) {
+            TextView c = new TextView(this);
+            c.setText(v);
+            c.setTextSize(14);
+            c.setTextColor(night ? 0xFFE6EDF3 : 0xFF1D2733);
+            c.setPadding(dp(12), 0, dp(12), 0);
+            c.setGravity(Gravity.CENTER);
+            GradientDrawable g = new GradientDrawable();
+            g.setColor(night ? 0xFF2A3848 : 0xFFFFFFFF);
+            g.setCornerRadius(dp(10));
+            g.setStroke(dp(1), night ? 0xFF5CC3CF : 0xFF1F7F8C);
+            c.setBackground(g);
+            c.setOnClickListener(v2 -> { replace(nb, na, v); hideFix(); });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, dp(32));
+            lp.setMarginEnd(dp(6));
+            fixRow.addView(c, lp);
+        }
+        label.setVisibility(View.GONE);
+        fixScroll.setVisibility(View.VISIBLE);
+    }
+
+    private void hideFix() {
+        if (fixScroll == null) return;
+        fixScroll.setVisibility(View.GONE);
+        label.setVisibility(View.VISIBLE);
+    }
+
+    /** Cambia la palabra donde está el cursor (nb letras antes, na después) por otra. */
+    private void replace(int nb, int na, String s) {
+        InputConnection ic = getCurrentInputConnection();
+        if (ic == null) return;
+        lastEditAt = SystemClock.uptimeMillis();
+        ic.beginBatchEdit();
+        ic.deleteSurroundingText(nb, na);
+        ic.commitText(s, 1);
+        ic.endBatchEdit();
     }
 
     @Override public void onFinishInputView(boolean finishing) {
@@ -120,7 +206,12 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
         if (!"kb".equals(m.optString("t"))) return;
         InputConnection ic = getCurrentInputConnection();
         if (ic == null) return;
+        lastEditAt = SystemClock.uptimeMillis();
+        hideFix();
         switch (m.optString("a")) {
+            case "replace":   // sugerencia elegida en el extendido para la palabra tocada
+                replace(m.optInt("b"), m.optInt("af"), m.optString("s"));
+                break;
             case "text":
                 ic.commitText(m.optString("s"), 1);
                 break;

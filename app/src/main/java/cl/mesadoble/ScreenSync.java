@@ -70,7 +70,7 @@ public class ScreenSync {
     /** Extendido: hace lo mismo que el principal. */
     static void apply(Context app, Hub hub, String s) {
         if (!enabled(app)) return;
-        if ("off".equals(s)) { lock(app, hub); return; }
+        if ("off".equals(s)) { MainActivity.dropOverLock(); lock(app, hub); return; }
         SleepActivity.close();
         wake(app, "unlock".equals(s));
     }
@@ -105,8 +105,12 @@ public class ScreenSync {
             } catch (Exception ignored) { }
         }
         if (!unlock && !off) return;
-        Intent i = new Intent(app, WakeActivity.class).putExtra("unlock", unlock)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_USER_ACTION);
+        // con PIN o huella el extendido no se puede desbloquear desde una app: ChronOS se muestra encima del bloqueo
+        boolean secure = km != null && km.isKeyguardSecure();
+        Intent i = unlock && secure
+                ? new Intent(app, MainActivity.class).putExtra("overLock", true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                : new Intent(app, WakeActivity.class).putExtra("unlock", unlock)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_USER_ACTION);
         // la notificación de pantalla completa es la forma permitida de abrir algo con la pantalla bloqueada
         NotificationManager nm = (NotificationManager) app.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm != null) {

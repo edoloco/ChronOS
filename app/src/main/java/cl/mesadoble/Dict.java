@@ -59,15 +59,66 @@ public class Dict {
         return b.toString();
     }
 
+    // ---- palabras habituales: las del diccionario personal del teléfono principal y las que se escriben seguido
+    private final java.util.Map<String, Integer> learned = new java.util.HashMap<>();
+    private final java.util.Map<String, Integer> userWords = new java.util.HashMap<>();
+    private android.content.SharedPreferences prefs;
+
+    void attach(Context c) {
+        if (prefs != null) return;
+        prefs = c.getSharedPreferences("dict", Context.MODE_PRIVATE);
+        try {
+            org.json.JSONObject o = new org.json.JSONObject(prefs.getString("learned", "{}"));
+            for (java.util.Iterator<String> it = o.keys(); it.hasNext(); ) { String k = it.next(); learned.put(k, o.optInt(k)); }
+            org.json.JSONArray u = new org.json.JSONArray(prefs.getString("user", "[]"));
+            for (int i = 0; i < u.length(); i++) userWords.put(u.optString(i).toLowerCase(), u.length() - i);
+        } catch (Exception ignored) { }
+    }
+
+    /** El diccionario personal del principal (llega por la conexión). */
+    void setUser(org.json.JSONArray a) {
+        userWords.clear();
+        for (int i = 0; a != null && i < a.length(); i++) userWords.put(a.optString(i).toLowerCase(), a.length() - i);
+        if (prefs != null) prefs.edit().putString("user", a == null ? "[]" : a.toString()).apply();
+    }
+
+    /** Una palabra escrita completa: cuenta para las sugerencias. */
+    void learn(String w) {
+        if (w == null || w.length() < 2) return;
+        String k = w.toLowerCase();
+        learned.put(k, learned.getOrDefault(k, 0) + 1);
+        if (learned.size() > 3000) {   // se olvidan las menos usadas
+            String min = null; int mv = Integer.MAX_VALUE;
+            for (java.util.Map.Entry<String, Integer> e : learned.entrySet()) if (e.getValue() < mv) { mv = e.getValue(); min = e.getKey(); }
+            if (min != null) learned.remove(min);
+        }
+        if (prefs != null) prefs.edit().putString("learned", new org.json.JSONObject(learned).toString()).apply();
+    }
+
+    /** Palabras habituales que empiezan como lo escrito (las más usadas primero). */
+    private List<String> habitual(String key, int n) {
+        java.util.Map<String, Integer> score = new java.util.HashMap<>();
+        for (java.util.Map.Entry<String, Integer> e : learned.entrySet())
+            if (e.getValue() >= 2 && plain(e.getKey()).startsWith(key) && plain(e.getKey()).length() > key.length()) score.put(e.getKey(), e.getValue() * 10);
+        for (java.util.Map.Entry<String, Integer> e : userWords.entrySet())
+            if (plain(e.getKey()).startsWith(key) && plain(e.getKey()).length() > key.length()) score.merge(e.getKey(), 5 + Math.min(20, e.getValue()), Integer::sum);
+        List<String> l = new ArrayList<>(score.keySet());
+        java.util.Collections.sort(l, (x, y) -> score.get(y) - score.get(x));
+        return l.size() > n ? l.subList(0, n) : l;
+    }
+
     /** Hasta n sugerencias para la palabra que se está escribiendo. */
     public List<String> suggest(String typed, int n) {
         List<String> out = new ArrayList<>();
-        if (!ready || typed.isEmpty()) return out;
+        if (typed.isEmpty()) return out;
+        if (!ready) { for (String h : habitual(plain(typed), n)) out.add(matchCase(typed, h)); return out; }
         String low = typed.toLowerCase(), key = plain(typed);
         Set<String> res = new LinkedHashSet<>();
+        // 0) las palabras habituales del teléfono van primero
+        res.addAll(habitual(key, n));
         // 1) misma palabra con tildes correctas ("esta" → "está"), si es más común
-        for (int i = 0; i < keys.length && res.size() < 1; i++)
-            if (keys[i].equals(key) && !words[i].equals(low)) res.add(words[i]);
+        for (int i = 0; i < keys.length; i++)
+            if (keys[i].equals(key)) { if (!words[i].equals(low)) res.add(words[i]); break; }
         // 2) palabras que empiezan igual (las más usadas primero)
         for (int i = 0; i < keys.length && res.size() < n; i++)
             if (keys[i].length() > key.length() && keys[i].startsWith(key)) res.add(words[i]);

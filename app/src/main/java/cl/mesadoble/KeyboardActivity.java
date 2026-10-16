@@ -82,6 +82,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         mode = Math.min(CAMERA, Math.max(KB, prefs.getInt("kbMode3", KB)));
         mode = startMode(getIntent(), mode);
         dict = Dict.get(this);
+        dict.attach(this);
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -123,7 +124,22 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         outBtn = chip("", v -> toggleOutput());
         pairBtn = chip("Vincular", v -> pairBluetooth());
         top.addView(sendBtn); top.addView(pairBtn); top.addView(outBtn); top.addView(resetBtn); top.addView(editBtn); top.addView(modeBtn);
-        top.addView(chip("Cerrar", v -> close()));
+        // cerrar: un círculo con una X
+        TextView x = new TextView(this);
+        x.setText("✕");
+        x.setTextSize(15);
+        x.setGravity(Gravity.CENTER);
+        x.setTextColor(th.fg);
+        GradientDrawable xg = new GradientDrawable();
+        xg.setShape(GradientDrawable.OVAL);
+        xg.setColor(th.chip);
+        if (th.stroke != 0) xg.setStroke(dp(1), th.stroke);
+        x.setBackground(xg);
+        x.setContentDescription("Cerrar");
+        x.setOnClickListener(v -> close());
+        LinearLayout.LayoutParams xl = new LinearLayout.LayoutParams(dp(36), dp(36));
+        xl.setMarginStart(dp(4));
+        top.addView(x, xl);
         root.addView(bar3, new LinearLayout.LayoutParams(-1, dp(44)));
 
         content = new LinearLayout(this);
@@ -586,6 +602,15 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         if ("navAck".equals(t) && !m.optBoolean("ok"))
             android.widget.Toast.makeText(this, "Recientes necesita la versión completa en el principal", android.widget.Toast.LENGTH_SHORT).show();
         if ("kbState".equals(t) || "kbAck".equals(t)) updateStatus();
+        if ("spellR".equals(t) && m.optInt("id") == spellId) {
+            phoneFor = m.optString("w");
+            phoneSugg = new java.util.ArrayList<>();
+            org.json.JSONArray a = m.optJSONArray("s");
+            for (int i = 0; a != null && i < a.length(); i++) phoneSugg.add(a.optString(i));
+            h.post(this::refreshSuggestions);
+        }
+        if ("wordFix".equals(t) && suggestBar != null) h.post(() -> showFix(m));
+        if ("userDict".equals(t)) dict.setUser(m.optJSONArray("w"));
         if (mediaView != null && (t.startsWith("m") || "volNow".equals(t))) mediaView.onMessage(m);
         if (cameraView != null && t.startsWith("cam")) cameraView.onMessage(m);
         // abierto solo (al tocar un campo en el principal): se cierra solo cuando ya no hay dónde escribir
@@ -604,12 +629,15 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         sendText(s);
         boolean letters = !s.isEmpty();
         for (int i = 0; i < s.length(); i++) if (!Character.isLetter(s.charAt(i))) { letters = false; break; }
-        if (letters) word.append(s); else word.setLength(0);
+        if (letters) word.append(s); else { dict.learn(word.toString()); word.setLength(0); }
+        fix = null;
         refreshSuggestions();
     }
 
     @Override public void key(int code, int meta) {
         sendKey(code, meta, 1);
+        fix = null;
+        if (code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_TAB) dict.learn(word.toString());
         if (code == KeyEvent.KEYCODE_DEL && meta == 0 && word.length() > 0) word.setLength(word.length() - 1);
         else word.setLength(0);
         refreshSuggestions();
@@ -618,9 +646,39 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     @Override public void action(String what) { hub.send("kb", "a", "act", "x", what); word.setLength(0); refreshSuggestions(); }
     @Override public void media(String what) { hub.send("media", "k", what); }
 
+    // sugerencias del corrector del propio principal (Gboard / Xiaomi) para la palabra que se escribe
+    private List<String> phoneSugg = new java.util.ArrayList<>();
+    private String phoneFor = "";
+    private int spellId;
+    private final Runnable askSpell = () -> {
+        String w = word.toString();
+        if (w.length() < 2 || !hub.connected()) return;
+        spellId++;
+        hub.send("spell", "w", w, "id", spellId);
+    };
+
+    // palabra tocada en el principal: sugerencias para reemplazarla
+    private JSONObject fix;
+
+    private void showFix(JSONObject m) {
+        fix = m;
+        org.json.JSONArray a = m.optJSONArray("s");
+        for (int i = 0; i < 3; i++) {
+            TextView t = (TextView) suggestBar.getChildAt(i);
+            String v = a != null && i < a.length() ? a.optString(i) : "";
+            t.setText(v);
+            t.setVisibility(v.isEmpty() ? View.INVISIBLE : View.VISIBLE);
+        }
+    }
+
     private void refreshSuggestions() {
         if (suggestBar == null) return;
-        List<String> s = dict.suggest(word.toString(), 3);
+        if (fix != null) return;
+        h.removeCallbacks(askSpell);
+        if (word.length() >= 2) h.postDelayed(askSpell, 120);
+        List<String> s = new java.util.ArrayList<>();
+        if (phoneFor.equals(word.toString())) for (String p : phoneSugg) if (!s.contains(p) && s.size() < 3) s.add(p);
+        for (String d : dict.suggest(word.toString(), 3)) if (!s.contains(d) && s.size() < 3) s.add(d);
         for (int i = 0; i < 3; i++) {
             TextView t = (TextView) suggestBar.getChildAt(i);
             String v = i < s.size() ? s.get(i) : "";
@@ -633,6 +691,14 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     private void pickSuggestion(String s) {
         if (s.isEmpty()) return;
         suggestBar.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+        if (fix != null) {   // reemplazar la palabra tocada en el principal
+            hub.send("kb", "a", "replace", "b", fix.optInt("b"), "af", fix.optInt("a"), "s", s);
+            dict.learn(s);
+            fix = null;
+            refreshSuggestions();
+            return;
+        }
+        dict.learn(s);
         int n = word.codePointCount(0, word.length());
         if (n > 0) sendKey(KeyEvent.KEYCODE_DEL, 0, n);
         sendText(s + " ");

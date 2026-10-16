@@ -265,6 +265,22 @@ public class Hub implements Link.Listener {
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
         if ("media".equals(t)) { media(m.optString("k")); return; }
+        // corrector del propio principal para la palabra que se escribe en el extendido
+        if ("spell".equals(t)) {
+            if (isPrincipal()) {
+                final int id = m.optInt("id");
+                final String w = m.optString("w");
+                Speller.check(app, w, list -> send("spellR", "id", id, "w", w, "s", new JSONArray(list)));
+            }
+            return;
+        }
+        if ("userDict".equals(t) && !isPrincipal()) { Dict d = Dict.get(app); d.attach(app); d.setUser(m.optJSONArray("w")); }
+        if ("openSettings".equals(t)) {   // Ajustes de Android de este teléfono, pedidos desde el otro
+            Intent si = new Intent(m.optString("a", Settings.ACTION_SETTINGS));
+            if (si.resolveActivity(app.getPackageManager()) == null) si = new Intent(Settings.ACTION_SETTINGS);
+            startExternal(si, "com.android.settings", "Ajustes", true);
+            return;
+        }
         if ("screen".equals(t)) { if (!isPrincipal()) ScreenSync.apply(app, this, m.optString("s")); return; }
         if ("scrSync".equals(t)) { prefs.edit().putBoolean("syncScreen", m.optBoolean("on", true)).apply(); }
         // lista de notificaciones (desde la banda): borrar o abrir, siempre en el principal

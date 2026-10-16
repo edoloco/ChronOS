@@ -152,6 +152,12 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             squares.add(nb);
             navPill.addView(nb);
         }
+        SquareButton kbNav = new SquareButton(this, SquareButton.KEYBOARD, "Teclado", false, night);
+        kbNav.setCompact(true);
+        kbNav.setOnClickListener(v -> startActivity(new Intent(this, KeyboardActivity.class).putExtra("manual", true)
+                .putExtra("mode", KeyboardActivity.KB).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)));
+        squares.add(kbNav);
+        navPill.addView(kbNav);
         dock = new LinearLayout(this);
         dock.addView(bar);
         // ChronOS: gestor de archivos (detrás de las barras), action bars y menú inicio
@@ -219,6 +225,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             prefs.edit().putBoolean("askedNotif", true).apply();
             requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 3);
         }
+        if (getIntent().getBooleanExtra("overLock", false)) showOverLock(true);
         handleShare(getIntent());
         String bw = getIntent().getStringExtra("bindWidget");
         if (bw != null) bindRequested(bw, 0);
@@ -231,6 +238,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        if (intent.getBooleanExtra("overLock", false)) showOverLock(true);
         String bw = intent.getStringExtra("bindWidget");
         if (bw != null) { intent.removeExtra("bindWidget"); bindRequested(bw, 0); }
         if (intent.hasExtra("homeSet")) { boolean on = intent.getBooleanExtra("homeSet", true); intent.removeExtra("homeSet"); main.post(() -> { if (on) forceHome(); else releaseHome(); }); }
@@ -245,6 +253,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         super.onResume();
         immersive();
         hub.foreground = true;
+        live = this;
         hub.notifsChanged();
         main.removeCallbacks(offlineTick);
         main.postDelayed(offlineTick, 600);
@@ -783,7 +792,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         startPanel.addView(head);
         // orden: lo más usado arriba
         SquareButton[] order = {byKind(SquareButton.APPS), settingsBtn, byKind(SquareButton.DESKS), statusBtn,
-                byKind(SquareButton.TOOLS), byKind(SquareButton.KEYBOARD), filesBtn, aboutBtn(), phoneBtn(), soloBtn(), null, null};
+                byKind(SquareButton.TOOLS), filesBtn, phoneSettingsBtn(), phoneBtn(), soloBtn(), null, null, aboutBtn()};
         LinearLayout row = null;
         for (int i = 0; i < order.length; i++) {
             if (i % 4 == 0) {
@@ -816,6 +825,65 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     private SquareButton filesBtn, aboutSq;
+
+    private SquareButton phoneSetSq;
+
+    /** Menú inicio: los ajustes de Android del teléfono que se elija. */
+    private SquareButton phoneSettingsBtn() {
+        if (phoneSetSq == null) {
+            phoneSetSq = new SquareButton(this, SquareButton.SETTINGS, "Ajustes del teléfono", false, night);
+            phoneSetSq.setOnClickListener(v -> { showStart(false); phoneSettings(); });
+            squares.add(phoneSetSq);
+        }
+        if (phoneSetSq.getParent() instanceof android.view.ViewGroup) ((android.view.ViewGroup) phoneSetSq.getParent()).removeView(phoneSetSq);
+        return phoneSetSq;
+    }
+
+    private static final String[][] ANDROID_SETTINGS = {
+            {"WiFi", android.provider.Settings.ACTION_WIFI_SETTINGS},
+            {"Bluetooth", android.provider.Settings.ACTION_BLUETOOTH_SETTINGS},
+            {"Pantalla y brillo", android.provider.Settings.ACTION_DISPLAY_SETTINGS},
+            {"Sonido", android.provider.Settings.ACTION_SOUND_SETTINGS},
+            {"Batería", "android.intent.action.POWER_USAGE_SUMMARY"},
+            {"Aplicaciones", android.provider.Settings.ACTION_APPLICATION_SETTINGS},
+            {"Notificaciones", "android.settings.ALL_APPS_NOTIFICATION_SETTINGS"},
+            {"Almacenamiento", android.provider.Settings.ACTION_INTERNAL_STORAGE_SETTINGS},
+            {"Ubicación", android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS},
+            {"Seguridad y bloqueo", android.provider.Settings.ACTION_SECURITY_SETTINGS},
+            {"Idioma y teclado", android.provider.Settings.ACTION_INPUT_METHOD_SETTINGS},
+            {"Fecha y hora", android.provider.Settings.ACTION_DATE_SETTINGS},
+            {"Accesibilidad", android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS},
+            {"Datos móviles", android.provider.Settings.ACTION_DATA_ROAMING_SETTINGS},
+            {"Acerca del teléfono", android.provider.Settings.ACTION_DEVICE_INFO_SETTINGS},
+            {"Todos los ajustes", android.provider.Settings.ACTION_SETTINGS}};
+
+    /** Ajustes del teléfono: primero de cuál, después qué parte. */
+    private void phoneSettings() {
+        boolean principal = hub.isPrincipal();
+        Ui.Sheet sh = new Ui.Sheet(this).title("Ajustes del teléfono").message("¿De qué teléfono?");
+        sh.option(Ui.GEAR, "Principal", principal ? "Este teléfono" : "Se abren en el principal", () -> settingsList(true));
+        if (!solo) sh.option(Ui.GEAR, "Extendido", principal ? "Se abren en el extendido" : "Este teléfono", () -> settingsList(false));
+        sh.button("Cerrar", false, null).show();
+    }
+
+    private void settingsList(boolean onPrincipal) {
+        boolean here = onPrincipal == hub.isPrincipal() || solo;
+        if (!here && !hub.connected()) { Toast.makeText(this, "El otro teléfono no está conectado", Toast.LENGTH_SHORT).show(); return; }
+        Ui.Sheet sh = new Ui.Sheet(this).title("Ajustes del " + (onPrincipal ? "principal" : "extendido"));
+        for (String[] it : ANDROID_SETTINGS) {
+            final String action = it[1];
+            sh.option(Ui.GEAR, it[0], "", () -> {
+                if (here) openAndroidSettings(this, action);
+                else { hub.send("openSettings", "a", action); Toast.makeText(this, "Abriendo en el " + (onPrincipal ? "principal" : "extendido"), Toast.LENGTH_SHORT).show(); }
+            });
+        }
+        sh.button("Cerrar", false, null).show();
+    }
+
+    static void openAndroidSettings(android.content.Context c, String action) {
+        try { c.startActivity(new Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); }
+        catch (Exception e) { try { c.startActivity(new Intent(android.provider.Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); } catch (Exception ignored) { } }
+    }
 
     private SquareButton soloSq;
 
@@ -1788,6 +1856,23 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         }
         sh.button("Seguir en ChronOS", false, null);
         phoneSheet = sh.show();
+    }
+
+    // ---------------- pantalla unida: ChronOS sobre el bloqueo del extendido ----------------
+    static volatile MainActivity live;
+
+    /** El principal se desbloqueó: si el extendido tiene PIN o huella, ChronOS se muestra encima del bloqueo. */
+    void showOverLock(boolean on) {
+        try {
+            setShowWhenLocked(on);
+            setTurnScreenOn(on);
+        } catch (Exception ignored) { }
+    }
+
+    /** El principal se bloqueó: ChronOS deja de verse sobre el bloqueo. */
+    static void dropOverLock() {
+        MainActivity a = live;
+        if (a != null) a.runOnUiThread(() -> a.showOverLock(false));
     }
 
     // ---------------- modo una pantalla ----------------
