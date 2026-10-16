@@ -248,6 +248,12 @@ public class Hub implements Link.Listener {
             Torch.listen(app, this);
             send("brNow", "f", (double) Bright.mine(app), "ok", Bright.canWrite(app));
             send("torchState", "on", Torch.mine);
+            // si la conexión volvió justo al desbloquear el principal, el extendido igual se entera
+            if (isPrincipal() && ScreenSync.enabled(app)) {
+                android.os.PowerManager pm = (android.os.PowerManager) app.getSystemService(Context.POWER_SERVICE);
+                android.app.KeyguardManager km = (android.app.KeyguardManager) app.getSystemService(Context.KEYGUARD_SERVICE);
+                if (pm != null && pm.isInteractive() && km != null && !km.isKeyguardLocked()) send("screen", "s", "unlock");
+            }
             if (isPrincipal() && PhoneMode.active(app)) PhoneMode.extendedBack(app);   // en modo normal: solo un aviso
             else if (isPrincipal() && MesaAccess.instance != null) MesaAccess.instance.switchToMesa();
             else if (isPrincipal() && !imeSelected(app)) notifySwitch();   // versión liviana: un toque en el aviso

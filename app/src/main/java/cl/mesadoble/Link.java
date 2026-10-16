@@ -68,6 +68,15 @@ public class Link {
         WifiManager wm = (WifiManager) ctx.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         lock = wm != null ? wm.createMulticastLock("mesadoble") : null;
         if (lock != null) lock.setReferenceCounted(false);
+        // pantalla apagada / encendida: se avisa enseguida al otro teléfono con un latido
+        android.content.IntentFilter f = new android.content.IntentFilter(android.content.Intent.ACTION_SCREEN_OFF);
+        f.addAction(android.content.Intent.ACTION_SCREEN_ON);
+        ctx.getApplicationContext().registerReceiver(new android.content.BroadcastReceiver() {
+            @Override public void onReceive(Context c, android.content.Intent i) {
+                asleep = android.content.Intent.ACTION_SCREEN_OFF.equals(i.getAction());
+                beat();
+            }
+        }, f);
     }
 
     public boolean isConnected() { return conn != null; }
@@ -199,6 +208,18 @@ public class Link {
         state(IDLE, null);
     }
 
+    private volatile boolean asleep;
+
+    /** Latido: con la pantalla apagada lleva "z" (duermo: no me des por perdido). */
+    private void beat() {
+        final String line = asleep ? "{\"t\":\"hb\",\"z\":1}" : "{\"t\":\"hb\"}";
+        writer.execute(() -> {
+            Conn c = conn;
+            if (c == null) return;
+            try { c.w.write(line); c.w.write('\n'); c.w.flush(); } catch (IOException e) { drop(c); }
+        });
+    }
+
     public void send(JSONObject msg) {
         final String line = msg.toString();
         writer.execute(() -> {
@@ -317,12 +338,12 @@ public class Link {
         state(CONNECTED, null);
         // latido: cada 5 s un mensaje corto. Si el otro teléfono se apaga o pierde el WiFi de golpe, sin esto la
         // conexión parecería abierta para siempre; con él, a los 20 s sin noticias se da por perdida.
-        final JSONObject hb = new JSONObject();
-        try { hb.put("t", "hb"); } catch (Exception ignored) { }
+        // Con la pantalla apagada Android duerme el teléfono y los latidos se detienen: por eso cada teléfono avisa
+        // "me voy a dormir" (z) y el otro deja de contar el silencio hasta que vuelva a latir normal.
         main.postDelayed(new Runnable() {
             @Override public void run() {
                 if (conn != c) return;
-                send(hb);
+                beat();
                 main.postDelayed(this, 5000);
             }
         }, 1000);
@@ -333,8 +354,10 @@ public class Link {
                 boolean beats = false;
                 while ((line = in.readLine()) != null) {
                     if (line.startsWith("{\"t\":\"hb\"")) {
-                        // el otro teléfono también late: desde ahora, 20 s de silencio = conexión perdida
-                        if (!beats) { beats = true; try { s.setSoTimeout(20000); } catch (Exception ignored) { } }
+                        // el otro teléfono late: 20 s de silencio = conexión perdida; si avisó que duerme, sin límite
+                        beats = true;
+                        boolean napping = line.contains("\"z\"");
+                        try { s.setSoTimeout(napping ? 0 : 20000); } catch (Exception ignored) { }
                         continue;
                     }
                     try {
