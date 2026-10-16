@@ -65,12 +65,28 @@ final class HandoffUi {
     private static TabView tab;
 
     /** Prueba desde Ajustes: muestra la flecha unos segundos. false si Android no deja dibujarla. */
+    static String lastError;
+
     static boolean test(Context c, Hub hub) {
         hideTab();
         tabPkg = "test";
+        lastError = null;
         showTab(c, hub, "test", true);
-        if (tab == null) { tabPkg = null; return false; }
-        main.postDelayed(() -> { if ("test".equals(tabPkg)) hideTab(); }, 8000);
+        if (tab == null) {
+            tabPkg = null;
+            android.widget.Toast.makeText(c, "No se pudo dibujar la flecha: " + (lastError != null ? lastError : "sin permiso"), android.widget.Toast.LENGTH_LONG).show();
+            return true;
+        }
+        final TabView v = tab;
+        main.postDelayed(() -> {
+            String how = MesaAccess.instance != null ? "accesibilidad" : "superposición";
+            String r = v.isAttachedToWindow() && v.getWidth() > 0
+                    ? "Flecha puesta (" + how + "): búscala en el borde " + (v.land ? "de abajo" : "derecho") + ", parpadeando"
+                    : "Android quitó la flecha (" + how + ")";
+            android.widget.Toast.makeText(c, r, android.widget.Toast.LENGTH_LONG).show();
+            v.blink = true; v.invalidate();
+        }, 500);
+        main.postDelayed(() -> { if ("test".equals(tabPkg)) hideTab(); }, 10000);
         return true;
     }
     private static String tabPkg, hiddenFor;
@@ -103,14 +119,14 @@ final class HandoffUi {
         if (tab != null && tab.land == land) { tab.exact = exact; tab.invalidate(); return; }
         if (tab != null) { try { tab.wm.removeView(tab); } catch (Exception ignored) { } tab = null; }
         WindowManager.LayoutParams lp = params(c);
-        if (lp == null) return;
+        if (lp == null) { lastError = "falta la accesibilidad o \"mostrar sobre otras apps\""; return; }
         float dp = c.getResources().getDisplayMetrics().density;
         TabView v = new TabView(host(c), land, hub);
         v.exact = exact;
-        if (land) { lp.width = (int) (64 * dp); lp.height = (int) (22 * dp); lp.gravity = Gravity.BOTTOM | Gravity.START; lp.x = (int) (c.getResources().getDisplayMetrics().widthPixels * 0.30f); }
-        else { lp.width = (int) (22 * dp); lp.height = (int) (64 * dp); lp.gravity = Gravity.END | Gravity.TOP; lp.y = (int) (c.getResources().getDisplayMetrics().heightPixels * 0.38f); }
+        if (land) { lp.width = (int) (76 * dp); lp.height = (int) (26 * dp); lp.gravity = Gravity.BOTTOM | Gravity.START; lp.x = (int) (c.getResources().getDisplayMetrics().widthPixels * 0.30f); }
+        else { lp.width = (int) (26 * dp); lp.height = (int) (76 * dp); lp.gravity = Gravity.END | Gravity.TOP; lp.y = (int) (c.getResources().getDisplayMetrics().heightPixels * 0.38f); }
         v.wm = wm(c);
-        try { v.wm.addView(v, lp); tab = v; } catch (Exception e) { return; }
+        try { v.wm.addView(v, lp); tab = v; } catch (Exception e) { lastError = e.getClass().getSimpleName() + (e.getMessage() != null ? ": " + e.getMessage() : ""); return; }
         if (!prefs(c).getBoolean("tabHint", false)) {
             prefs(c).edit().putBoolean("tabHint", true).apply();
             hint(c, land ? "Desliza la flecha hacia abajo y esta app pasa al extendido" : "Desliza la flecha hacia la derecha y esta app pasa al extendido", land);
@@ -120,7 +136,7 @@ final class HandoffUi {
     private static final class TabView extends View {
         final boolean land;
         final Hub hub;
-        boolean exact;
+        boolean exact, blink;
         WindowManager wm;
         private final Paint bg = new Paint(Paint.ANTI_ALIAS_FLAG), ar = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final float dp;
@@ -133,7 +149,7 @@ final class HandoffUi {
             this.land = land;
             this.hub = hub;
             dp = c.getResources().getDisplayMetrics().density;
-            bg.setColor(0x8C10202A);
+            bg.setColor(0xB31E5BC6);
             ar.setColor(0xF2FFFFFF);
             ar.setStrokeWidth(1.8f * dp);
             ar.setStrokeJoin(Paint.Join.ROUND);
@@ -141,6 +157,11 @@ final class HandoffUi {
 
         @Override protected void onDraw(Canvas c) {
             float w = getWidth(), h = getHeight(), r = Math.min(w, h) / 2;
+            if (blink) {   // prueba: parpadea en azul para que se note
+                boolean on = (android.os.SystemClock.uptimeMillis() / 400) % 2 == 0;
+                bg.setColor(on ? 0xFF2E7DFF : 0xFFFF8A00);
+                postInvalidateDelayed(400);
+            }
             c.drawRoundRect(new RectF(0, 0, w, h), r, r, bg);
             Path p = new Path();
             float cx = w / 2, cy = h / 2, s = Math.min(w, h) * 0.32f;
@@ -162,7 +183,7 @@ final class HandoffUi {
                     if (!fired && d > 10 * dp) { fired = true; go(); }
                     return true;
                 case MotionEvent.ACTION_UP:
-                    bg.setColor(0x8C10202A); invalidate();
+                    bg.setColor(0xB31E5BC6); invalidate();
                     if (fired) return true;
                     if (e.getEventTime() - downAt > 650) {   // dejar apretado: ocultar para esta app
                         hiddenFor = tabPkg;
@@ -171,7 +192,7 @@ final class HandoffUi {
                     } else go();
                     return true;
                 case MotionEvent.ACTION_CANCEL:
-                    bg.setColor(0x8C10202A); invalidate();
+                    bg.setColor(0xB31E5BC6); invalidate();
                     return true;
             }
             return true;

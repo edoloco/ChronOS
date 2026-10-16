@@ -1442,7 +1442,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 + (acc || (over && usage) ? "" : "\nFalta: la accesibilidad, o bien \"mostrar sobre otras apps\" + \"datos de uso\".");
         Ui.Sheet sh = new Ui.Sheet(this).title("Lanzar a la otra pantalla").message(st);
         sh.option(Ui.SEND, "Probar la flecha", "Aparece unos segundos: tócala", () -> {
-            if (!HandoffUi.test(this, hub)) Toast.makeText(this, "Android no deja dibujar la flecha: activa la accesibilidad o \"mostrar sobre otras apps\"", Toast.LENGTH_LONG).show();
+            HandoffUi.test(this, hub);
         });
         if (!acc && MesaAccess.available(this)) sh.option(Ui.OPEN, "Activar accesibilidad", "Ajustes → Accesibilidad → ChronOS", () -> {
             try { startActivity(new Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)); } catch (Exception ignored) { }
