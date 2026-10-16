@@ -283,6 +283,7 @@ public class Hub implements Link.Listener {
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
         if ("media".equals(t)) { media(m.optString("k")); return; }
+        if ("handoffSound".equals(t)) { prefs.edit().putBoolean("handoffSound", m.optBoolean("on", true)).apply(); return; }
         if ("handoff".equals(t)) { main.post(() -> Handoff.receive(app, this, m)); return; }
         if ("installReq".equals(t)) {
             if (isPrincipal()) RecentApps.worker.execute(() -> {
@@ -700,10 +701,11 @@ public class Hub implements Link.Listener {
             RecentApps.worker.execute(() -> GameBg.poll(app, Hub.this));   // ¿empezó un juego? → fondo en el extendido
             RecentApps.worker.execute(Hub.this::pollNotifs);                // apps con notificaciones nuevas → punto rojo
             RecentApps.worker.execute(() -> {                                 // ¿hay una app de video al frente? (YouTube, Netflix…)
+                if (!RecentApps.hasAccess(app) && MesaAccess.instance != null) HandoffUi.front(app, Hub.this, MesaAccess.instance.frontPkg());
                 if (RecentApps.hasAccess(app)) {
                     String front = RecentApps.active(app);
                     videoApp = isVideoApp(app, front);
-                    if (MesaAccess.instance == null) HandoffUi.front(app, Hub.this, front);   // sin accesibilidad: la flecha sigue a la app así
+                    HandoffUi.front(app, Hub.this, front);   // la flecha sigue a la app del frente (también sin accesibilidad)
                 }
             });
             // audífonos o Bluetooth conectados/desconectados: la música y el video cambian de modo (Boost no aplica)

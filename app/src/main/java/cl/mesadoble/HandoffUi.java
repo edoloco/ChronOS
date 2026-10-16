@@ -61,7 +61,18 @@ final class HandoffUi {
 
     // ======================= PESTAÑA (principal) =======================
 
+    private static final java.util.concurrent.ExecutorService bg = java.util.concurrent.Executors.newSingleThreadExecutor();
     private static TabView tab;
+
+    /** Prueba desde Ajustes: muestra la flecha unos segundos. false si Android no deja dibujarla. */
+    static boolean test(Context c, Hub hub) {
+        hideTab();
+        tabPkg = "test";
+        showTab(c, hub, "test", true);
+        if (tab == null) { tabPkg = null; return false; }
+        main.postDelayed(() -> { if ("test".equals(tabPkg)) hideTab(); }, 8000);
+        return true;
+    }
     private static String tabPkg, hiddenFor;
 
     /** Cambió la app del frente en el principal. "" o null = la mesa o el inicio: sin pestaña. */
@@ -69,10 +80,11 @@ final class HandoffUi {
         main.post(() -> {
             boolean ok = pkg != null && !pkg.isEmpty() && !pkg.startsWith("@") && !pkg.equals(c.getPackageName())
                     && hub.isPrincipal() && hub.connected() && !MainActivity.soloMode(c) && !pkg.equals(hiddenFor);
+            if ("test".equals(tabPkg)) return;   // la prueba de Ajustes se deja ver
             if (!ok) { hideTab(); return; }
             if (pkg.equals(tabPkg) && tab != null) return;
             tabPkg = pkg;
-            RecentApps.worker.execute(() -> {
+            bg.execute(() -> {
                 boolean exact = Handoff.exact(c, pkg);
                 main.post(() -> showTab(c, hub, pkg, exact));
             });
@@ -168,6 +180,7 @@ final class HandoffUi {
         private void go() {
             String pkg = tabPkg;
             if (pkg == null) return;
+            if ("test".equals(pkg)) { hideTab(); android.widget.Toast.makeText(getContext(), "¡La flecha funciona! Aparece sola en las apps que se pueden lanzar", android.widget.Toast.LENGTH_LONG).show(); return; }
             hiddenFor = null;
             hideTab();
             Handoff.launchOther(getContext(), hub, pkg, false);

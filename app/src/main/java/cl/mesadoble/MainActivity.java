@@ -1431,6 +1431,35 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     // ---------------- ajustes y apps ----------------
 
+    /** Lanzar a la otra pantalla: qué le falta a este teléfono y una prueba de la flecha. */
+    private void handoffSetup() {
+        boolean acc = MesaAccess.instance != null, over = android.provider.Settings.canDrawOverlays(this), usage = RecentApps.hasAccess(this);
+        boolean snd = Handoff.soundUp(this);
+        String st = "Accesibilidad de ChronOS: " + (acc ? "activa ✓" : MesaAccess.available(this) ? "apagada ✗" : "no (versión liviana)")
+                + "\nMostrar sobre otras apps: " + (over ? "sí ✓" : "no ✗")
+                + "\nAcceso a datos de uso: " + (usage ? "sí ✓" : "no ✗")
+                + "\n\nLa flecha aparece en el principal, solo dentro de otras apps (no en la mesa de ChronOS)."
+                + (acc || (over && usage) ? "" : "\nFalta: la accesibilidad, o bien \"mostrar sobre otras apps\" + \"datos de uso\".");
+        Ui.Sheet sh = new Ui.Sheet(this).title("Lanzar a la otra pantalla").message(st);
+        sh.option(Ui.SEND, "Probar la flecha", "Aparece unos segundos: tócala", () -> {
+            if (!HandoffUi.test(this, hub)) Toast.makeText(this, "Android no deja dibujar la flecha: activa la accesibilidad o \"mostrar sobre otras apps\"", Toast.LENGTH_LONG).show();
+        });
+        if (!acc && MesaAccess.available(this)) sh.option(Ui.OPEN, "Activar accesibilidad", "Ajustes → Accesibilidad → ChronOS", () -> {
+            try { startActivity(new Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)); } catch (Exception ignored) { }
+        });
+        if (!over) sh.option(Ui.OPEN, "Permitir mostrar sobre otras apps", null, () -> {
+            try { startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()))); } catch (Exception ignored) { }
+        });
+        if (!usage) sh.option(Ui.OPEN, "Permitir datos de uso", null, () -> {
+            try { startActivity(new Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS)); } catch (Exception ignored) { }
+        });
+        sh.option(Ui.AUTO, -1, "Sonido por el principal: " + (snd ? "sí" : "no"), "Lo que suena en una app lanzada al extendido sale por el principal (y su Bluetooth)", snd, () -> {
+            prefs.edit().putBoolean("handoffSound", !snd).apply();
+            hub.send("handoffSound", "on", !snd);
+        });
+        sh.button("Cerrar", false, null).show();
+    }
+
     private void settingsMenu() {
         boolean auto = hub.autoKeyboard(), principal = side == 1;
         boolean h = prefs.getBoolean("orientH", true);
@@ -1476,6 +1505,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                         })
                 .option(Ui.HOME, "Pantalla de inicio", (principal ? "Principal: " + homeLabel(homeDefault(this)) + " · Extendido: " + (otherHomeKnown ? homeLabel(otherHome) : "…")
                         : "Principal: " + (otherHomeKnown ? homeLabel(otherHome) : "…") + " · Extendido: " + homeLabel(homeDefault(this))), this::launcherMenu)
+                .option(Ui.SEND, "Lanzar a la otra pantalla", "Probar la flecha, permisos y sonido", this::handoffSetup)
                 .option(Ui.GEAR, "Revisar configuración", principal ? "Permisos del principal" : "Permisos del extendido", () -> checkSetup(true))
                 .option(Ui.WIFI, "Conexión", statusText, this::showConnection)
                 .option(Ui.NOTE, "Acerca de la app", Updater.updateAvailable(this)

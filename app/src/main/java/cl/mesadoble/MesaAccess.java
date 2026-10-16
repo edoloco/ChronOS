@@ -153,6 +153,17 @@ public class MesaAccess extends AccessibilityService {
         URL_BARS.put("com.android.browser", "com.android.browser:id/url");
     }
 
+    /** App al frente según la ventana activa ("" = ChronOS o el inicio). */
+    String frontPkg() {
+        try {
+            android.view.accessibility.AccessibilityNodeInfo r = getRootInActiveWindow();
+            if (r == null || r.getPackageName() == null) return null;
+            String p = r.getPackageName().toString();
+            if (p.equals(getPackageName()) || RecentApps.homes(this).contains(p)) return "";
+            return getPackageManager().getLaunchIntentForPackage(p) != null ? p : null;
+        } catch (Exception e) { return null; }
+    }
+
     static boolean isBrowser(String pkg) { return pkg != null && URL_BARS.containsKey(pkg); }
 
     /** Dirección de la página abierta en el navegador pkg (o null). */
