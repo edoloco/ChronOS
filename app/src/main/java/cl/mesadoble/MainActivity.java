@@ -792,7 +792,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         startPanel.addView(head);
         // orden: lo más usado arriba
         SquareButton[] order = {byKind(SquareButton.APPS), settingsBtn, byKind(SquareButton.DESKS), statusBtn,
-                byKind(SquareButton.TOOLS), filesBtn, phoneSettingsBtn(), phoneBtn(), soloBtn(), null, null, aboutBtn()};
+                byKind(SquareButton.TOOLS), phoneSettingsBtn(), phoneBtn(), soloBtn(), null, null, null, aboutBtn()};   // Archivos está en Herramientas
         LinearLayout row = null;
         for (int i = 0; i < order.length; i++) {
             if (i % 4 == 0) {
