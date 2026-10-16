@@ -879,13 +879,18 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     private void powerFail(String a) {
-        new Ui.Sheet(this)
-                .title("No se pudo en este teléfono")
-                .message("menu".equals(a)
-                        ? "Abrir el menú de apagado necesita la versión completa de ChronOS (usa accesibilidad). Con la liviana, apágalo con su botón de encendido."
-                        : "Para bloquear la pantalla, activa \"Bloquear pantalla\" en Ajustes → Revisar configuración.")
-                .button("Entendido", true, null)
-                .show();
+        if (!"menu".equals(a)) {
+            new Ui.Sheet(this).title("No se pudo en este teléfono")
+                    .message("Para bloquear la pantalla, activa \"Bloquear pantalla\" en Ajustes → Revisar configuración.")
+                    .button("Entendido", true, null).show();
+            return;
+        }
+        String why = Power.why(this);
+        Ui.Sheet sh = new Ui.Sheet(this).title("No se abrió el menú de apagado").message(Power.explain(why == null ? "dead" : why, true));
+        if (!"lite".equals(why)) sh.option(Ui.OPEN, "Abrir Accesibilidad", "En este teléfono", () -> {
+            try { startActivity(new Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)); } catch (Exception ignored) { }
+        });
+        sh.button("Entendido", true, null).show();
     }
 
     private SquareButton phoneSetSq;
@@ -3265,9 +3270,14 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 main.post(() -> phoneOffer(m.optString("title")));
                 break;
             case "powerR":
-                if (!m.optBoolean("ok")) main.post(() -> Toast.makeText(this, "lock".equals(m.optString("a"))
-                        ? "El otro teléfono no pudo bloquearse (falta el permiso de bloquear pantalla allá)"
-                        : "El otro teléfono necesita la versión completa para abrir su menú de apagado", Toast.LENGTH_LONG).show());
+                if (!m.optBoolean("ok")) main.post(() -> {
+                    if ("lock".equals(m.optString("a"))) { Toast.makeText(this, "El otro teléfono no pudo bloquearse (falta el permiso de bloquear pantalla allá)", Toast.LENGTH_LONG).show(); return; }
+                    String why = m.optString("why");
+                    Ui.Sheet sh = new Ui.Sheet(this).title("No se abrió el menú de apagado").message(Power.explain(why.isEmpty() ? "dead" : why, false));
+                    if (!"lite".equals(why)) sh.option(Ui.OPEN, "Abrir Accesibilidad allá", "Se abre en el otro teléfono",
+                            () -> hub.send("openSettings", "a", android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS));
+                    sh.button("Entendido", true, null).show();
+                });
                 else if ("menu".equals(m.optString("a"))) main.post(() -> Toast.makeText(this, "En el otro teléfono se abrió el menú de apagado", Toast.LENGTH_SHORT).show());
                 break;
             case "callLog":

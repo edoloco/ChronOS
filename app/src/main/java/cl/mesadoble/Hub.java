@@ -287,7 +287,8 @@ public class Hub implements Link.Listener {
         if ("power".equals(t)) {
             String a = m.optString("a");
             boolean ok = Power.run(app, a);
-            send("powerR", "a", a, "ok", ok);
+            String why = Power.why(app);
+            send("powerR", "a", a, "ok", ok, "why", why == null ? "" : why);
             return;
         }
         // widget de llamadas: todo pasa en el principal
