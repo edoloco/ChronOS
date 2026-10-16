@@ -1820,52 +1820,92 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         main.postDelayed(this::refreshCalls, 4000);
     }
 
-    /** Teclado numérico para marcar. */
+    /** Teclado numérico para marcar: en horizontal, el número y los botones a la izquierda y las teclas a la derecha. */
     private void dialPad() {
         boolean n = CardTheme.sheetNight(night);
+        boolean land = getResources().getConfiguration().orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE;
+        android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+        // tamaño de tecla según el espacio: que las 4 filas quepan en la altura de la pantalla
+        int avail = dm.heightPixels - dp(land ? 120 : 330);
+        int key = Math.max(dp(36), Math.min(dp(64), avail / 4 - dp(8)));
         final StringBuilder num = new StringBuilder();
         LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
+        box.setOrientation(land ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+        box.setGravity(Gravity.CENTER);
+        // número y botones
+        LinearLayout side = new LinearLayout(this);
+        side.setOrientation(LinearLayout.VERTICAL);
+        side.setGravity(Gravity.CENTER);
         TextView disp = new TextView(this);
-        disp.setTextSize(28);
+        disp.setTextSize(land ? 26 : 28);
         disp.setGravity(Gravity.CENTER);
         disp.setTextColor(Ui.fg(n));
-        disp.setPadding(0, dp(4), 0, dp(10));
+        disp.setSingleLine(true);
+        disp.setEllipsize(android.text.TextUtils.TruncateAt.START);
+        disp.setPadding(dp(8), dp(4), dp(8), dp(10));
         disp.setText(" ");
-        box.addView(disp, new LinearLayout.LayoutParams(-1, -2));
+        side.addView(disp, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout acts = new LinearLayout(this);
+        acts.setGravity(Gravity.CENTER);
+        TextView del = padBtn("⌫", n, false);
+        TextView call = padBtn("Llamar", n, true);
+        acts.addView(del, new LinearLayout.LayoutParams(dp(64), dp(44)));
+        LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(dp(120), dp(44));
+        cl.setMarginStart(dp(10));
+        acts.addView(call, cl);
+        side.addView(acts);
+        // teclas
+        LinearLayout grid = new LinearLayout(this);
+        grid.setOrientation(LinearLayout.VERTICAL);
         String[] keys = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"};
         for (int r = 0; r < 4; r++) {
             LinearLayout row = new LinearLayout(this);
             row.setGravity(Gravity.CENTER);
             for (int k = 0; k < 3; k++) {
-                final String key = keys[r * 3 + k];
+                final String kk = keys[r * 3 + k];
                 TextView b = new TextView(this);
-                b.setText(key);
-                b.setTextSize(24);
+                b.setText(kk);
+                b.setTextSize(Math.max(16, key / dm.density * 0.36f));
                 b.setGravity(Gravity.CENTER);
                 b.setTextColor(Ui.fg(n));
                 GradientDrawable g = new GradientDrawable();
                 g.setShape(GradientDrawable.OVAL);
                 g.setColor((Ui.fg(n) & 0x00FFFFFF) | 0x14000000);
                 b.setBackground(g);
-                b.setOnClickListener(v -> { v.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY); num.append(key); disp.setText(num); });
-                if ("0".equals(key)) b.setOnLongClickListener(v -> { num.append("+"); disp.setText(num); return true; });
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(64), dp(64));
-                lp.setMargins(dp(8), dp(4), dp(8), dp(4));
+                b.setOnClickListener(v -> { v.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY); num.append(kk); disp.setText(num); });
+                if ("0".equals(kk)) b.setOnLongClickListener(v -> { num.append("+"); disp.setText(num); return true; });
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(key, key);
+                lp.setMargins(dp(6), dp(3), dp(6), dp(3));
                 row.addView(b, lp);
             }
-            box.addView(row);
+            grid.addView(row);
         }
-        final android.app.Dialog[] dlg = new android.app.Dialog[1];
-        dlg[0] = new Ui.Sheet(this)
-                .title("Marcar")
-                .view(box)
-                .button("⌫", false, null)
-                .button("Llamar", true, () -> dial(num.toString()))
-                .show();
-        // ⌫ borra sin cerrar la ventana
-        View back = findButton(dlg[0].getWindow().getDecorView(), "⌫");
-        if (back != null) back.setOnClickListener(v -> { if (num.length() > 0) num.setLength(num.length() - 1); disp.setText(num.length() == 0 ? " " : num); });
+        if (land) {
+            box.addView(side, new LinearLayout.LayoutParams(dp(220), -2));
+            LinearLayout.LayoutParams gl = new LinearLayout.LayoutParams(-2, -2);
+            gl.setMarginStart(dp(16));
+            box.addView(grid, gl);
+        } else {
+            box.addView(side, new LinearLayout.LayoutParams(-1, -2));
+            box.addView(grid);
+        }
+        final android.app.Dialog dlg = new Ui.Sheet(this).title("Marcar").view(box).button("Cerrar", false, null).show();
+        del.setOnClickListener(v -> { if (num.length() > 0) num.setLength(num.length() - 1); disp.setText(num.length() == 0 ? " " : num); });
+        del.setOnLongClickListener(v -> { num.setLength(0); disp.setText(" "); return true; });
+        call.setOnClickListener(v -> { if (num.length() == 0) return; dlg.dismiss(); dial(num.toString()); });
+    }
+
+    private TextView padBtn(String t, boolean n, boolean green) {
+        TextView b = new TextView(this);
+        b.setText(t);
+        b.setTextSize(16);
+        b.setGravity(Gravity.CENTER);
+        b.setTextColor(green ? 0xFFFFFFFF : Ui.fg(n));
+        GradientDrawable g = new GradientDrawable();
+        g.setCornerRadius(dp(22));
+        g.setColor(green ? 0xFF2EA043 : (Ui.fg(n) & 0x00FFFFFF) | 0x14000000);
+        b.setBackground(g);
+        return b;
     }
 
     private View findButton(View v, String text) {
