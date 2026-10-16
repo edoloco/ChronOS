@@ -76,6 +76,10 @@ public class DeskView extends View {
         boolean brightLock();
         void onBright(boolean principal, float f, boolean done);
         void onBrightLock();
+        /** Llamadas: últimas del principal ({name,num,type,time}); acciones: dial (num), pad, contacts, perm. */
+        org.json.JSONArray calls();
+        boolean callsAllowed();
+        void onCalls(String what, String num);
     }
 
     // ---------------- widget de cámara: visor y botones de la cámara del principal ----------------
@@ -999,6 +1003,8 @@ public class DeskView extends View {
             it.hPx = 26 * dp + width * 0.6f + camBar();
         } else if (Item.TORCH.equals(it.kind)) {
             it.hPx = 138 * dp;
+        } else if (Item.CALLS.equals(it.kind)) {
+            it.hPx = 24 * dp + CALL_ROWS * 46 * dp + 56 * dp;
         } else if (Item.BRIGHT.equals(it.kind)) {
             it.hPx = Math.max(220 * dp, width * 1.55f);   // vertical, como una mesa de audio
         } else {
@@ -1055,7 +1061,7 @@ public class DeskView extends View {
         RectF box = new RectF(0, 0, width, h);
 
         boolean isNote = Item.NOTE.equals(it.kind), isImg = Item.IMG.equals(it.kind), isApp = Item.APP.equals(it.kind),
-                isWidget = Item.WIDGET.equals(it.kind), isClock = Item.CLOCK.equals(it.kind), isBatt = Item.BATTERY.equals(it.kind), isRec = Item.RECENTS.equals(it.kind), isCam = Item.CAMERA.equals(it.kind), isTorch = Item.TORCH.equals(it.kind), isBright = Item.BRIGHT.equals(it.kind);
+                isWidget = Item.WIDGET.equals(it.kind), isClock = Item.CLOCK.equals(it.kind), isBatt = Item.BATTERY.equals(it.kind), isRec = Item.RECENTS.equals(it.kind), isCam = Item.CAMERA.equals(it.kind), isTorch = Item.TORCH.equals(it.kind), isBright = Item.BRIGHT.equals(it.kind), isCalls = Item.CALLS.equals(it.kind);
         boolean glassCard = CardTheme.isGlass() && !isNote && !isImg;
         boolean aeroCard = glassCard && CardTheme.isAero();
         boolean intense = glassCard && CardTheme.isIntense();
@@ -1091,8 +1097,11 @@ public class DeskView extends View {
 
         int ink = isNote || isImg ? 0xFF2B2A22 : fg;
         label.setColor((ink & 0x00FFFFFF) | 0x77000000);
-        String tag = isNote ? "NOTA" : isImg ? "IMAGEN" : isApp ? "APP" : isWidget ? "WIDGET" : isClock ? "RELOJ" : isBatt ? "BATERÍA" : isRec ? "APPS RECIENTES" : isCam ? "CÁMARA" : isTorch ? "LINTERNAS" : isBright ? "BRILLO" : "ENLACE";
-        if (isBright) {
+        String tag = isNote ? "NOTA" : isImg ? "IMAGEN" : isApp ? "APP" : isWidget ? "WIDGET" : isClock ? "RELOJ" : isBatt ? "BATERÍA" : isRec ? "APPS RECIENTES" : isCam ? "CÁMARA" : isTorch ? "LINTERNAS" : isBright ? "BRILLO" : isCalls ? "LLAMADAS" : "ENLACE";
+        if (isCalls) {
+            c.drawText(tag, 10 * dp, 18 * dp, label);
+            drawCalls(c, width, h);
+        } else if (isBright) {
             c.drawText(tag, 10 * dp, 18 * dp, label);
             drawBright(c, width, h);
         } else if (isTorch) {
@@ -1238,6 +1247,90 @@ public class DeskView extends View {
 
     /** Una fila del widget de batería: nombre, pila con su nivel y porcentaje (⚡ si está cargando). */
     /** Linternas: ícono de linterna, el texto y un interruptor grande a la derecha. */
+    // ---------------- llamadas: últimas llamadas del principal y botones para marcar o buscar contactos ----------------
+
+    private static final int CALL_ROWS = 4;
+
+    private void drawCalls(Canvas c, float width, float h) {
+        org.json.JSONArray a = host != null ? host.calls() : null;
+        boolean ok = host == null || host.callsAllowed();
+        float top = 26 * dp, rowH = 46 * dp;
+        if (!ok || a == null || a.length() == 0) {
+            small.setColor(muted);
+            small.setTextSize(13 * dp);
+            String m = !ok ? "Toca para permitir las llamadas en el principal" : "Sin llamadas recientes";
+            c.drawText(ellipsize(m, small, width - 28 * dp), 14 * dp, top + rowH, small);
+        } else {
+            long now = System.currentTimeMillis();
+            for (int i = 0; i < Math.min(CALL_ROWS, a.length()); i++) {
+                org.json.JSONObject o = a.optJSONObject(i);
+                float cy = top + rowH * i + rowH / 2;
+                int type = o.optInt("type");
+                boolean missed = type == 3 || type == 5, out = type == 2;
+                int col = missed ? 0xFFE5534B : out ? 0xFF4A90E2 : 0xFF3FB950;
+                // flecha: entrante (abajo a la izquierda) o saliente (arriba a la derecha)
+                battBody.setStyle(Paint.Style.STROKE);
+                battBody.setStrokeWidth(2 * dp);
+                battBody.setColor(col);
+                float ax = 22 * dp, s = 6 * dp;
+                Path p = new Path();
+                if (out) { p.moveTo(ax - s, cy + s); p.lineTo(ax + s, cy - s); p.moveTo(ax, cy - s); p.lineTo(ax + s, cy - s); p.lineTo(ax + s, cy); }
+                else { p.moveTo(ax + s, cy - s); p.lineTo(ax - s, cy + s); p.moveTo(ax - s, cy); p.lineTo(ax - s, cy + s); p.lineTo(ax, cy + s); }
+                c.drawPath(p, battBody);
+                String name = o.optString("name").isEmpty() ? o.optString("num") : o.optString("name");
+                long mins = Math.max(0, (now - o.optLong("time")) / 60000);
+                String when = mins < 1 ? "ahora" : mins < 60 ? mins + " min" : mins < 1440 ? (mins / 60) + " h" : (mins / 1440) + " d";
+                small.setTextSize(15 * dp);
+                small.setColor(missed ? 0xFFE5534B : fg);
+                float tx = 40 * dp, maxT = width - tx - 54 * dp;
+                c.drawText(ellipsize(name, small, maxT), tx, cy - 1 * dp, small);
+                label.setColor((fg & 0x00FFFFFF) | 0x99000000);
+                c.drawText((missed ? "Perdida · " : out ? "Saliente · " : "Entrante · ") + when, tx, cy + 14 * dp, label);
+                // botón verde de llamar
+                battFill.setColor(0xFF2EA043);
+                float bx = width - 30 * dp;
+                c.drawCircle(bx, cy, 15 * dp, battFill);
+                drawHandset(c, bx, cy, 0xFFFFFFFF);
+                if (i < Math.min(CALL_ROWS, a.length()) - 1) {
+                    battBody.setStyle(Paint.Style.FILL);
+                    battBody.setColor((fg & 0x00FFFFFF) | 0x18000000);
+                    c.drawRect(tx, top + rowH * (i + 1) - 0.5f * dp, width - 12 * dp, top + rowH * (i + 1) + 0.5f * dp, battBody);
+                }
+            }
+        }
+        // abajo: Marcar y Contactos
+        float by = h - 36 * dp, bw = (width - 36 * dp) / 2;
+        String[] names = {"Marcar", "Contactos"};
+        for (int i = 0; i < 2; i++) {
+            RectF r = new RectF(12 * dp + i * (bw + 12 * dp), by, 12 * dp + i * (bw + 12 * dp) + bw, by + 28 * dp);
+            battFill.setColor((accent & 0x00FFFFFF) | 0x33000000);
+            c.drawRoundRect(r, 14 * dp, 14 * dp, battFill);
+            small.setColor(accent);
+            small.setTextSize(13 * dp);
+            c.drawText(names[i], r.centerX() - small.measureText(names[i]) / 2, r.centerY() + 4.5f * dp, small);
+        }
+    }
+
+    /** Auricular de teléfono (ícono). */
+    private void drawHandset(Canvas c, float cx, float cy, int col) {
+        battBody.setStyle(Paint.Style.STROKE);
+        battBody.setStrokeWidth(3 * dp);
+        battBody.setStrokeCap(Paint.Cap.ROUND);
+        battBody.setColor(col);
+        c.drawArc(new RectF(cx - 7 * dp, cy - 7 * dp, cx + 7 * dp, cy + 7 * dp), 100, 160, false, battBody);
+        battBody.setStrokeCap(Paint.Cap.BUTT);
+    }
+
+    /** Toque en el widget de llamadas: una fila llama, abajo Marcar o Contactos. */
+    private void tapCalls(float lx, float ly, float width, float h) {
+        if (host == null) return;
+        if (!host.callsAllowed()) { host.onCalls("perm", null); return; }
+        if (ly > h - 44 * dp) { host.onCalls(lx < width / 2 ? "pad" : "contacts", null); return; }
+        org.json.JSONArray a = host.calls();
+        int row = (int) ((ly - 26 * dp) / (46 * dp));
+        if (a != null && row >= 0 && row < Math.min(CALL_ROWS, a.length())) host.onCalls("dial", a.optJSONObject(row).optString("num"));
+    }
+
     // ---------------- brillo: dos perillas verticales (principal y extendido) y un candado que las une ----------------
 
     private float brTop() { return 34 * dp; }
@@ -1701,6 +1794,7 @@ public class DeskView extends View {
             else host.onWidgetTap(it);
         }
         else if (Item.CLOCK.equals(it.kind)) { if (host != null) host.onOpenAlarms(); }
+        else if (Item.CALLS.equals(it.kind)) { if (downLocal != null) tapCalls(downLocal[0], downLocal[1], downLocal[2], downLocal[3]); }
         else if (Item.TORCH.equals(it.kind)) {   // fila de arriba = principal, de abajo = extendido
             if (host == null || downLocal == null) return;
             float top = 24 * dp;

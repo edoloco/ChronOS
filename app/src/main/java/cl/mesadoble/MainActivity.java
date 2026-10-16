@@ -230,6 +230,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         String bw = getIntent().getStringExtra("bindWidget");
         if (bw != null) bindRequested(bw, 0);
         if (getIntent().hasExtra("homeSet")) { boolean on = getIntent().getBooleanExtra("homeSet", true); getIntent().removeExtra("homeSet"); main.post(() -> { if (on) forceHome(); else releaseHome(); }); }
+        if (getIntent().getBooleanExtra("callPerm", false)) { getIntent().removeExtra("callPerm"); requestPermissions(CallHub.PERMS, 61); }
         if (getIntent().getBooleanExtra("notifSetup", false)) { getIntent().removeExtra("notifSetup"); main.post(this::guideNotifs); }
         if (getIntent().hasExtra("phoneAsk")) { String pt = getIntent().getStringExtra("phoneAsk"); getIntent().removeExtra("phoneAsk"); main.post(() -> phoneOffer(pt)); }
         if (getIntent().getBooleanExtra("forceLink", false)) { getIntent().removeExtra("forceLink"); main.post(() -> { hub.forceLink(); Toast.makeText(this, "Buscando al extendido…", Toast.LENGTH_SHORT).show(); }); }
@@ -242,6 +243,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         String bw = intent.getStringExtra("bindWidget");
         if (bw != null) { intent.removeExtra("bindWidget"); bindRequested(bw, 0); }
         if (intent.hasExtra("homeSet")) { boolean on = intent.getBooleanExtra("homeSet", true); intent.removeExtra("homeSet"); main.post(() -> { if (on) forceHome(); else releaseHome(); }); }
+        if (intent.getBooleanExtra("callPerm", false)) { intent.removeExtra("callPerm"); requestPermissions(CallHub.PERMS, 61); }
         if (intent.getBooleanExtra("notifSetup", false)) { intent.removeExtra("notifSetup"); main.post(this::guideNotifs); }
         if (intent.hasExtra("phoneAsk")) { String pt = intent.getStringExtra("phoneAsk"); intent.removeExtra("phoneAsk"); main.post(() -> phoneOffer(pt)); }
         if (intent.getBooleanExtra("forceLink", false)) { intent.removeExtra("forceLink"); main.post(() -> { hub.forceLink(); Toast.makeText(this, "Buscando al extendido…", Toast.LENGTH_SHORT).show(); }); }
@@ -269,6 +271,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         main.removeCallbacks(updatePoll);
         main.postDelayed(updatePoll, 10 * 60_000L);
         main.postDelayed(pollRecents, 300);
+        main.postDelayed(callsTick, 800);
         main.postDelayed(camKeepAlive, 500);
         if (!hub.isPrincipal()) desk.setBgImage(GameBg.current);
         if (orient.canDetectOrientation()) orient.enable();
@@ -1716,6 +1719,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .option(Ui.WIDGETS, "Widget", "Widgets de tus apps (clima, calendario, música...)", this::addWidget)
                 .option(Ui.FOLDER, "Archivos", "Pasar archivos entre los dos teléfonos", this::openFiles)
                 .option(Ui.IMAGE, "Cámara", "Widget con el visor y los botones de la cámara del principal", this::addCamera)
+                .option(Ui.RECEIVE, "Llamadas", "Últimas llamadas del principal, marcar un número o buscar un contacto", this::addCalls)
                 .option(Ui.PALETTE, "Brillo", "Dos perillas, como una mesa de audio: el brillo de cada pantalla, con candado para moverlas juntas", this::addBright)
                 .option(Ui.AUTO, "Linternas", "Un interruptor para la linterna del principal y otro para la del extendido", this::addTorch)
                 .option(Ui.HOME, "Modo teléfono normal", "El principal vuelve a su pantalla de inicio y su teclado de siempre", this::phoneModeNow)
@@ -1751,6 +1755,206 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         it.x = p[0]; it.y = p[1];
         addItem(it);
         Torch.listen(this, hub);
+    }
+
+    // ---------------- llamadas ----------------
+
+    private org.json.JSONArray callItems = new org.json.JSONArray();
+    private boolean callsOk = true;
+
+    private void addCalls() {
+        Item it = new Item();
+        it.kind = Item.CALLS;
+        it.w = sized(0.62);
+        double[] p = desk.spot(it.w);
+        it.x = p[0]; it.y = p[1];
+        addItem(it);
+        refreshCalls();
+    }
+
+    /** Pide las últimas llamadas al principal (o las lee aquí si este es el principal). */
+    private void refreshCalls() {
+        if (hub.isPrincipal()) RecentApps.worker.execute(() -> { org.json.JSONObject m = Phone.callLog(getApplicationContext()); main.post(() -> onCallLog(m)); });
+        else if (hub.connected()) hub.send("callLogReq");
+    }
+
+    private void onCallLog(org.json.JSONObject m) {
+        callItems = m.optJSONArray("items") != null ? m.optJSONArray("items") : new org.json.JSONArray();
+        callsOk = m.optBoolean("perm", true);
+        desk.invalidate();
+    }
+
+    private final Runnable callsTick = new Runnable() {
+        @Override public void run() {
+            main.removeCallbacks(this);
+            if (!resumed) return;
+            boolean any = false;
+            for (Item it : desk.items) if (Item.CALLS.equals(it.kind)) { any = true; break; }
+            if (any) refreshCalls();
+            main.postDelayed(this, 30_000);
+        }
+    };
+
+    @Override public org.json.JSONArray calls() { return callItems; }
+    @Override public boolean callsAllowed() { return callsOk; }
+
+    @Override public void onCalls(String what, String num) {
+        switch (what) {
+            case "dial": dial(num); break;
+            case "pad": dialPad(); break;
+            case "contacts": contactsSheet(); break;
+            case "perm":
+                if (hub.isPrincipal()) requestPermissions(CallHub.PERMS, 61);
+                else if (hub.connected()) { hub.send("callPerm"); Toast.makeText(this, "Acepta los permisos en el principal", Toast.LENGTH_LONG).show(); }
+                break;
+            default: break;
+        }
+    }
+
+    private void dial(String num) {
+        if (num == null || num.trim().isEmpty()) return;
+        if (hub.isPrincipal()) Phone.dial(this, hub, num);
+        else if (hub.connected()) hub.send("dial", "num", num);
+        else { Toast.makeText(this, "El principal no está conectado", Toast.LENGTH_SHORT).show(); return; }
+        Toast.makeText(this, "Llamando a " + num + "…", Toast.LENGTH_SHORT).show();
+        main.postDelayed(this::refreshCalls, 4000);
+    }
+
+    /** Teclado numérico para marcar. */
+    private void dialPad() {
+        boolean n = CardTheme.sheetNight(night);
+        final StringBuilder num = new StringBuilder();
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        TextView disp = new TextView(this);
+        disp.setTextSize(28);
+        disp.setGravity(Gravity.CENTER);
+        disp.setTextColor(Ui.fg(n));
+        disp.setPadding(0, dp(4), 0, dp(10));
+        disp.setText(" ");
+        box.addView(disp, new LinearLayout.LayoutParams(-1, -2));
+        String[] keys = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "*", "0", "#"};
+        for (int r = 0; r < 4; r++) {
+            LinearLayout row = new LinearLayout(this);
+            row.setGravity(Gravity.CENTER);
+            for (int k = 0; k < 3; k++) {
+                final String key = keys[r * 3 + k];
+                TextView b = new TextView(this);
+                b.setText(key);
+                b.setTextSize(24);
+                b.setGravity(Gravity.CENTER);
+                b.setTextColor(Ui.fg(n));
+                GradientDrawable g = new GradientDrawable();
+                g.setShape(GradientDrawable.OVAL);
+                g.setColor((Ui.fg(n) & 0x00FFFFFF) | 0x14000000);
+                b.setBackground(g);
+                b.setOnClickListener(v -> { v.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY); num.append(key); disp.setText(num); });
+                if ("0".equals(key)) b.setOnLongClickListener(v -> { num.append("+"); disp.setText(num); return true; });
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(64), dp(64));
+                lp.setMargins(dp(8), dp(4), dp(8), dp(4));
+                row.addView(b, lp);
+            }
+            box.addView(row);
+        }
+        final android.app.Dialog[] dlg = new android.app.Dialog[1];
+        dlg[0] = new Ui.Sheet(this)
+                .title("Marcar")
+                .view(box)
+                .button("⌫", false, null)
+                .button("Llamar", true, () -> dial(num.toString()))
+                .show();
+        // ⌫ borra sin cerrar la ventana
+        View back = findButton(dlg[0].getWindow().getDecorView(), "⌫");
+        if (back != null) back.setOnClickListener(v -> { if (num.length() > 0) num.setLength(num.length() - 1); disp.setText(num.length() == 0 ? " " : num); });
+    }
+
+    private View findButton(View v, String text) {
+        if (v instanceof TextView && text.contentEquals(((TextView) v).getText())) return v;
+        if (v instanceof android.view.ViewGroup) {
+            android.view.ViewGroup g = (android.view.ViewGroup) v;
+            for (int i = 0; i < g.getChildCount(); i++) { View r = findButton(g.getChildAt(i), text); if (r != null) return r; }
+        }
+        return null;
+    }
+
+    private LinearLayout contactList;
+    private String contactQuery = "";
+
+    /** Buscar un contacto del principal y llamarlo. */
+    private void contactsSheet() {
+        boolean n = CardTheme.sheetNight(night);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        EditText q = field("Buscar nombre o número");
+        box.addView(q, new LinearLayout.LayoutParams(-1, -2));
+        contactList = new LinearLayout(this);
+        contactList.setOrientation(LinearLayout.VERTICAL);
+        android.widget.ScrollView sc = new android.widget.ScrollView(this);
+        sc.addView(contactList);
+        LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(-1, Math.min(dp(340), getResources().getDisplayMetrics().heightPixels / 2));
+        sl.topMargin = dp(8);
+        box.addView(sc, sl);
+        final Runnable search = () -> askContacts(q.getText().toString());
+        q.addTextChangedListener(new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence a, int b, int c, int d) { }
+            @Override public void onTextChanged(CharSequence a, int b, int c, int d) { }
+            @Override public void afterTextChanged(android.text.Editable e) { main.removeCallbacks(search); main.postDelayed(search, 250); }
+        });
+        android.app.Dialog d = new Ui.Sheet(this).title("Contactos").view(box).button("Cerrar", false, null).show();
+        d.setOnDismissListener(x -> contactList = null);
+        askContacts("");
+    }
+
+    private void askContacts(String q) {
+        contactQuery = q;
+        if (hub.isPrincipal()) RecentApps.worker.execute(() -> { org.json.JSONObject m = Phone.contacts(getApplicationContext(), q); main.post(() -> fillContacts(m)); });
+        else if (hub.connected()) hub.send("contactsReq", "q", q);
+    }
+
+    private void fillContacts(org.json.JSONObject m) {
+        if (contactList == null || !contactQuery.equals(m.optString("q"))) return;
+        contactList.removeAllViews();
+        boolean n = CardTheme.sheetNight(night);
+        org.json.JSONArray a = m.optJSONArray("items");
+        if (a == null || a.length() == 0) {
+            TextView e = new TextView(this);
+            e.setText("Sin resultados");
+            e.setTextColor(Ui.muted(n));
+            e.setPadding(dp(8), dp(12), dp(8), dp(12));
+            contactList.addView(e);
+            return;
+        }
+        for (int i = 0; i < a.length(); i++) {
+            org.json.JSONObject o = a.optJSONObject(i);
+            LinearLayout row = new LinearLayout(this);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(10), dp(8), dp(10), dp(8));
+            LinearLayout tx = new LinearLayout(this);
+            tx.setOrientation(LinearLayout.VERTICAL);
+            TextView t1 = new TextView(this);
+            t1.setText(o.optString("name"));
+            t1.setTextSize(15);
+            t1.setTextColor(Ui.fg(n));
+            TextView t2 = new TextView(this);
+            t2.setText(o.optString("num"));
+            t2.setTextSize(12);
+            t2.setTextColor(Ui.muted(n));
+            tx.addView(t1);
+            tx.addView(t2);
+            row.addView(tx, new LinearLayout.LayoutParams(0, -2, 1));
+            TextView call = new TextView(this);
+            call.setText("Llamar");
+            call.setTextColor(0xFFFFFFFF);
+            call.setTextSize(13);
+            call.setPadding(dp(14), dp(6), dp(14), dp(6));
+            GradientDrawable g = new GradientDrawable();
+            g.setColor(0xFF2EA043);
+            g.setCornerRadius(dp(16));
+            call.setBackground(g);
+            call.setOnClickListener(v -> dial(o.optString("num")));
+            row.addView(call);
+            contactList.addView(row);
+        }
     }
 
     private void addBright() {
@@ -2945,6 +3149,12 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 break;
             case "phoneOffer":
                 main.post(() -> phoneOffer(m.optString("title")));
+                break;
+            case "callLog":
+                main.post(() -> onCallLog(m));
+                break;
+            case "contacts":
+                main.post(() -> fillContacts(m));
                 break;
             case "brNow":
                 Bright.other = (float) m.optDouble("f", -1);

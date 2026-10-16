@@ -13,7 +13,7 @@ import java.util.UUID;
 
 /** Un elemento del escritorio. x va de 0 a 2 (anchos de pantalla), y de 0 a 1 (alto de pantalla). */
 public class Item {
-    public static final String NOTE = "note", IMG = "img", LINK = "link", APP = "app", WIDGET = "widget", CLOCK = "clock", BATTERY = "battery", RECENTS = "recents", CAMERA = "camera", TORCH = "torch", BRIGHT = "bright";
+    public static final String NOTE = "note", IMG = "img", LINK = "link", APP = "app", WIDGET = "widget", CLOCK = "clock", BATTERY = "battery", RECENTS = "recents", CAMERA = "camera", TORCH = "torch", BRIGHT = "bright", CALLS = "calls";
 
     public String id = UUID.randomUUID().toString();
     public String kind = NOTE;

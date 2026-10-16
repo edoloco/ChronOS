@@ -271,6 +271,15 @@ public class Hub implements Link.Listener {
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
         if ("media".equals(t)) { media(m.optString("k")); return; }
+        // widget de llamadas: todo pasa en el principal
+        if ("callLogReq".equals(t)) { if (isPrincipal()) RecentApps.worker.execute(() -> send(Phone.callLog(app))); return; }
+        if ("contactsReq".equals(t)) { if (isPrincipal()) { String q = m.optString("q"); RecentApps.worker.execute(() -> send(Phone.contacts(app, q))); } return; }
+        if ("dial".equals(t)) { if (isPrincipal()) Phone.dial(app, this, m.optString("num")); return; }
+        if ("callPerm".equals(t)) {
+            if (isPrincipal()) startOrNotify(new Intent(app, MainActivity.class).putExtra("callPerm", true)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP), 88, "Llamadas", "Toca para permitir llamadas y contactos");
+            return;
+        }
         // corrector del propio principal para la palabra que se escribe en el extendido
         if ("spell".equals(t)) {
             if (isPrincipal()) {

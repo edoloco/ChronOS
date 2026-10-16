@@ -25,7 +25,7 @@ import org.json.JSONObject;
 final class CallHub {
 
     static final String[] PERMS = {Manifest.permission.READ_PHONE_STATE, Manifest.permission.ANSWER_PHONE_CALLS,
-            Manifest.permission.READ_CONTACTS, Manifest.permission.READ_CALL_LOG};
+            Manifest.permission.READ_CONTACTS, Manifest.permission.READ_CALL_LOG, Manifest.permission.CALL_PHONE};
 
     /** Último estado conocido (en el extendido, para la pantalla de llamada). */
     static volatile JSONObject last;
