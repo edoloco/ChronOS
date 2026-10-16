@@ -199,9 +199,12 @@ final class Boost {
     private static volatile Thread sink;
     private static volatile Socket sinkSocket;
 
-    static void listen(Context c, Hub hub, boolean on) {
+    static void listen(Context c, Hub hub, boolean on) { listen(c, hub, on, true); }
+
+    /** sync=false: sonido de las apps del extendido que suena en el principal (sin igualar volúmenes). */
+    static void listen(Context c, Hub hub, boolean on, boolean sync) {
         Thread cur = sink;
-        syncVolume(c, hub, on);
+        if (sync) syncVolume(c, hub, on);
         if (on && cur != null && cur.isAlive()) return;   // ya está escuchando
         stopSink();
         if (!on) return;

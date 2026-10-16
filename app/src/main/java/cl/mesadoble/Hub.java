@@ -274,6 +274,7 @@ public class Hub implements Link.Listener {
             if (isPrincipal()) { main.removeCallbacks(restoreIme); main.postDelayed(restoreIme, 6000); }
             // el extendido no aparece por un minuto: se ofrece volver al teléfono normal
             Torch.other = false;
+            main.post(HandoffUi::hideTab);
             if (isPrincipal() && !lostOffered && !lostPending) { lostPending = true; main.postDelayed(lostCheck, 10_000); }
         }
         for (Link.Listener l : listeners) l.onState(st, inf);
@@ -282,6 +283,17 @@ public class Hub implements Link.Listener {
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
         if ("media".equals(t)) { media(m.optString("k")); return; }
+        if ("handoff".equals(t)) { main.post(() -> Handoff.receive(app, this, m)); return; }
+        if ("installReq".equals(t)) {
+            if (isPrincipal()) RecentApps.worker.execute(() -> {
+                JSONObject o = AppShare.info(app, m.optString("pkg"));
+                if (o == null) return;
+                try { o.put("t", "installApp"); } catch (JSONException ignored) { }
+                send(o);
+            });
+            return;
+        }
+        if ("boostUp".equals(t)) { if (isPrincipal()) Boost.listen(app, this, m.optBoolean("on"), false); return; }
         if ("installApp".equals(t)) { if (!isPrincipal()) main.post(() -> AppShare.install(app, this, m)); return; }
         // centro de apagado: el otro teléfono pide abrir aquí el menú de apagado o bloquear
         if ("power".equals(t)) {
@@ -688,7 +700,11 @@ public class Hub implements Link.Listener {
             RecentApps.worker.execute(() -> GameBg.poll(app, Hub.this));   // ¿empezó un juego? → fondo en el extendido
             RecentApps.worker.execute(Hub.this::pollNotifs);                // apps con notificaciones nuevas → punto rojo
             RecentApps.worker.execute(() -> {                                 // ¿hay una app de video al frente? (YouTube, Netflix…)
-                if (RecentApps.hasAccess(app)) videoApp = isVideoApp(app, RecentApps.active(app));
+                if (RecentApps.hasAccess(app)) {
+                    String front = RecentApps.active(app);
+                    videoApp = isVideoApp(app, front);
+                    if (MesaAccess.instance == null) HandoffUi.front(app, Hub.this, front);   // sin accesibilidad: la flecha sigue a la app así
+                }
             });
             // audífonos o Bluetooth conectados/desconectados: la música y el video cambian de modo (Boost no aplica)
             boolean hp = Boost.headphones(app);

@@ -90,7 +90,7 @@ final class RecentApps {
         return out;
     }
 
-    private static Set<String> homes(Context c) {
+    static Set<String> homes(Context c) {
         Set<String> skip = new HashSet<>();
         for (ResolveInfo ri : c.getPackageManager().queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0))
             skip.add(ri.activityInfo.packageName);   // pantallas de inicio

@@ -21,6 +21,11 @@ import android.os.IBinder;
 public class CaptureService extends Service {
 
     static volatile boolean running;
+    /** Modo "sonido arriba" (en el extendido): lo de las apps de aquí suena en el principal y aquí se silencia. */
+    static volatile boolean up;
+    private int savedVol = -1;
+    private boolean muted;
+    private long mutedAt, heardAt;
     private static final int RATE = 48000;
     private MediaProjection projection;
     private AudioRecord rec;
@@ -32,6 +37,7 @@ public class CaptureService extends Service {
     @Override public IBinder onBind(Intent i) { return null; }
 
     @Override public int onStartCommand(Intent i, int flags, int id) {
+        if (i != null && !running && !"stop".equals(i.getAction())) up = i.getBooleanExtra("up", false);
         foreground();
         if (i != null && "stop".equals(i.getAction())) { stopSelf(); return START_NOT_STICKY; }
         if (i == null || running) return START_NOT_STICKY;
@@ -47,9 +53,14 @@ public class CaptureService extends Service {
         running = true;
         Hub hub = Hub.get(this);
         Boost.serve();
-        hub.send("boost", "on", true);
-        Boost.syncVolume(this, hub, true);
-        if (hub.connected()) hub.send("boostMsg", "msg", "Boost activo: el sonido sale por los dos teléfonos");
+        if (up) {
+            hub.send("boostUp", "on", true);
+            android.widget.Toast.makeText(this, "El sonido de esta app sale por el principal", android.widget.Toast.LENGTH_SHORT).show();
+        } else {
+            hub.send("boost", "on", true);
+            Boost.syncVolume(this, hub, true);
+            if (hub.connected()) hub.send("boostMsg", "msg", "Boost activo: el sonido sale por los dos teléfonos");
+        }
         new Thread(this::loop, "captura").start();
         return START_NOT_STICKY;
     }
@@ -90,15 +101,52 @@ public class CaptureService extends Service {
                     mono[k * 2] = (byte) m; mono[k * 2 + 1] = (byte) (m >> 8);
                 }
                 long now = System.currentTimeMillis();
+                if (up) { Boost.send(RATE, mono, f * 2, 0L); muteCheck(mono, f, now); continue; }
                 if (now - btCheck > 1000) { btCheck = now; quiet = Boost.headphones(this) || Boost.gameInFront; }
                 if (!quiet) Boost.send(RATE, mono, f * 2, 0L);   // con audífonos o en un juego no se manda
             }
         } catch (Exception ignored) { }
     }
 
+    /**
+     * Modo arriba: cuando ya llega sonido, el parlante de aquí se baja a cero (el sonido sale por el principal).
+     * Si en este teléfono bajar el volumen también apaga la captura (queda en silencio), se devuelve el volumen
+     * y se recuerda para no volver a intentarlo.
+     */
+    private void muteCheck(byte[] pcm, int frames, long now) {
+        int peak = 0;
+        for (int k = 0; k < frames; k += 8) peak = Math.max(peak, Math.abs((short) ((pcm[k * 2] & 0xff) | (pcm[k * 2 + 1] << 8))));
+        if (peak > 120) heardAt = now;
+        android.media.AudioManager am = (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
+        if (am == null) return;
+        android.content.SharedPreferences p = getSharedPreferences("mesa", MODE_PRIVATE);
+        if (!muted && heardAt == now && !p.getBoolean("upMuteBad", false)) {
+            savedVol = am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC);
+            try { am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, 0, 0); muted = true; mutedAt = now; } catch (Exception ignored) { }
+        } else if (muted && savedVol >= 0 && now - mutedAt > 1800 && heardAt < mutedAt && am.isMusicActive()) {
+            try { am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, savedVol, 0); } catch (Exception ignored) { }
+            savedVol = -1;
+            p.edit().putBoolean("upMuteBad", true).apply();
+            Hub hub = Hub.get(this);
+            if (hub.connected()) hub.send("boostMsg", "msg", "En este teléfono el sonido sale por los dos: baja el volumen del extendido a mano");
+        }
+    }
+
     @Override public void onDestroy() {
         stop = true;
         running = false;
+        if (up) {
+            up = false;
+            if (savedVol >= 0) {
+                android.media.AudioManager am = (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
+                try { if (am != null) am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, savedVol, 0); } catch (Exception ignored) { }
+            }
+            try { if (rec != null) { rec.stop(); rec.release(); } } catch (Exception ignored) { }
+            try { if (projection != null) projection.stop(); } catch (Exception ignored) { }
+            Hub.get(this).send("boostUp", "on", false);
+            super.onDestroy();
+            return;
+        }
         try { if (rec != null) { rec.stop(); rec.release(); } } catch (Exception ignored) { }
         try { if (projection != null) projection.stop(); } catch (Exception ignored) { }
         Hub hub = Hub.get(this);
@@ -116,8 +164,8 @@ public class CaptureService extends Service {
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         Notification n = new Notification.Builder(this, "boost")
                 .setSmallIcon(getResources().getIdentifier("ic_stat", "drawable", getPackageName()))
-                .setContentTitle("Boost activo")
-                .setContentText("El sonido de las apps también sale por el extendido")
+                .setContentTitle(up ? "Sonido por el principal" : "Boost activo")
+                .setContentText(up ? "El sonido de las apps de este teléfono sale por el principal" : "El sonido de las apps también sale por el extendido")
                 .addAction(new Notification.Action.Builder(null, "Detener", off).build())
                 .setOngoing(true)
                 .build();

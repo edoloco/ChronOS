@@ -32,7 +32,8 @@ import java.util.Set;
  * 1) cambia el método de entrada a ChronOS (y lo devuelve al anterior al desconectarse);
  * 2) avisa al extendido cuando se abre una app de chat, para mostrar el teclado allá;
  * 3) ejecuta el touchpad (puntero, clic, desplazar, atrás/inicio) y el gamepad (toques en pantalla).
- * No lee el contenido de las pantallas.
+ * 4) lanzar a la otra pantalla: sigue qué app está al frente y la ventana flotante (PiP), y lee la dirección
+ *    del navegador para abrir la misma página en el otro teléfono. No lee nada más de las pantallas.
  */
 public class MesaAccess extends AccessibilityService {
 
@@ -62,11 +63,16 @@ public class MesaAccess extends AccessibilityService {
     }
 
     @Override public void onAccessibilityEvent(AccessibilityEvent e) {
+        if (e.getEventType() == AccessibilityEvent.TYPE_WINDOWS_CHANGED) { pipCheck(); return; }
         if (e.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || e.getPackageName() == null) return;
         String pkg = e.getPackageName().toString();
         if (pkg.equals(lastPkg)) return;
-        lastPkg = pkg;
         Hub h = Hub.get(this);
+        // lanzar a la otra pantalla: la flecha sigue a la app del frente (teclados y avisos del sistema no cuentan)
+        if (pkg.equals(getPackageName()) || RecentApps.homes(this).contains(pkg)) HandoffUi.front(this, h, "");
+        else if (getPackageManager().getLaunchIntentForPackage(pkg) != null) HandoffUi.front(this, h, pkg);
+        else if (!"com.android.systemui".equals(pkg)) return;
+        lastPkg = pkg;
         if (!h.isPrincipal() || !h.connected()) return;
         if (CHAT_APPS.contains(pkg)) {
             switchToMesa();
@@ -75,6 +81,104 @@ public class MesaAccess extends AccessibilityService {
     }
 
     @Override public void onInterrupt() { }
+
+    // ---------------- lanzar a la otra pantalla ----------------
+
+    private android.graphics.Rect pipRect;
+    private long pipMovedAt;
+    private String pipPkg;
+    private volatile JSONObject pipInfo;
+    private long pipInfoAt;
+
+    /** Se guarda cómo abrir la ventana flotante (al cerrarse ya no se puede leer). */
+    private void pipSnapshot(long now) {
+        if (now - pipInfoAt < 1000) return;
+        pipInfoAt = now;
+        final String pkg = pipPkg;
+        RecentApps.worker.execute(() -> { JSONObject o = Handoff.describe(this, pkg, true); if (o != null && o.has("pkg")) pipInfo = o; });
+    }
+
+    /** Ventana flotante (PiP): si se arrastra hasta abajo y se cierra ahí (la ✕), pasa al otro teléfono. */
+    private void pipCheck() {
+        Hub hub = Hub.get(this);
+        if (!hub.isPrincipal() || !hub.connected()) { pipRect = null; return; }
+        android.view.accessibility.AccessibilityWindowInfo pip = null;
+        try {
+            for (android.view.accessibility.AccessibilityWindowInfo w : getWindows())
+                if (w.isInPictureInPictureMode()) { pip = w; break; }
+        } catch (Exception ignored) { }
+        long now = android.os.SystemClock.uptimeMillis();
+        if (pip != null) {
+            android.graphics.Rect r = new android.graphics.Rect();
+            pip.getBoundsInScreen(r);
+            if (pipRect == null) {
+                HandoffUi.pipHint(this);
+                try { android.view.accessibility.AccessibilityNodeInfo root = pip.getRoot(); if (root != null && root.getPackageName() != null) pipPkg = root.getPackageName().toString(); } catch (Exception ignored) { }
+                if (pipPkg == null) pipPkg = Handoff.YT.equals(lastPkg) ? lastPkg : null;
+                pipInfo = null;
+                pipInfoAt = 0;
+            } else if (!r.equals(pipRect)) pipMovedAt = now;
+            pipRect = r;
+            pipSnapshot(now);
+            return;
+        }
+        if (pipRect == null) return;
+        android.graphics.Rect last = pipRect;
+        pipRect = null;
+        int H = screen().y;
+        // se cerró recién arrastrada y abajo: es el gesto de "pásala al extendido"
+        if (now - pipMovedAt < 2000 && last.bottom > H * 0.80f) {
+            JSONObject o = pipInfo;
+            if (o != null) Handoff.send(this, hub, o);
+            else Handoff.launchOther(this, hub, pipPkg, true);
+        }
+        pipPkg = null;
+        pipInfo = null;
+    }
+
+    static final java.util.Map<String, String> URL_BARS = new java.util.HashMap<>();
+    static {
+        URL_BARS.put("com.android.chrome", "com.android.chrome:id/url_bar");
+        URL_BARS.put("com.chrome.beta", "com.chrome.beta:id/url_bar");
+        URL_BARS.put("com.brave.browser", "com.brave.browser:id/url_bar");
+        URL_BARS.put("com.microsoft.emmx", "com.microsoft.emmx:id/url_bar");
+        URL_BARS.put("com.vivaldi.browser", "com.vivaldi.browser:id/url_bar");
+        URL_BARS.put("com.kiwibrowser.browser", "com.kiwibrowser.browser:id/url_bar");
+        URL_BARS.put("org.mozilla.firefox", "org.mozilla.firefox:id/mozac_browser_toolbar_url_view");
+        URL_BARS.put("org.mozilla.focus", "org.mozilla.focus:id/mozac_browser_toolbar_url_view");
+        URL_BARS.put("com.sec.android.app.sbrowser", "com.sec.android.app.sbrowser:id/location_bar_edit_text");
+        URL_BARS.put("com.opera.browser", "com.opera.browser:id/url_field");
+        URL_BARS.put("com.duckduckgo.mobile.android", "com.duckduckgo.mobile.android:id/omnibarTextInput");
+        URL_BARS.put("com.mi.globalbrowser", "com.mi.globalbrowser:id/url");
+        URL_BARS.put("com.android.browser", "com.android.browser:id/url");
+    }
+
+    static boolean isBrowser(String pkg) { return pkg != null && URL_BARS.containsKey(pkg); }
+
+    /** Dirección de la página abierta en el navegador pkg (o null). */
+    String readUrl(String pkg) {
+        String id = URL_BARS.get(pkg);
+        if (id == null) return null;
+        try {
+            android.view.accessibility.AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root == null || root.getPackageName() == null || !pkg.equals(root.getPackageName().toString())) {
+                root = null;
+                for (android.view.accessibility.AccessibilityWindowInfo w : getWindows()) {
+                    android.view.accessibility.AccessibilityNodeInfo r = w.getRoot();
+                    if (r != null && r.getPackageName() != null && pkg.equals(r.getPackageName().toString())) { root = r; break; }
+                }
+            }
+            if (root == null) return null;
+            for (android.view.accessibility.AccessibilityNodeInfo n : root.findAccessibilityNodeInfosByViewId(id)) {
+                CharSequence t = n.getText();
+                if (t == null) continue;
+                String u = t.toString().trim();
+                if (u.isEmpty() || u.contains(" ") || !u.contains(".")) continue;   // vacía o es una búsqueda a medio escribir
+                return u.matches("^[a-zA-Z][a-zA-Z0-9+.-]*://.*") ? u : "https://" + u;
+            }
+        } catch (Exception ignored) { }
+        return null;
+    }
 
     // ---------------- touchpad y gamepad ----------------
 

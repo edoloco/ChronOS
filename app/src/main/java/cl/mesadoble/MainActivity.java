@@ -276,6 +276,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (!hub.isPrincipal()) desk.setBgImage(GameBg.current);
         if (orient.canDetectOrientation()) orient.enable();
         if (hub.isPrincipal() && hub.connected() && MesaAccess.instance != null) MesaAccess.instance.switchToMesa();
+        HandoffUi.update(this, hub);   // ChronOS al frente: sin el botoncito de la app lanzada
     }
 
     @Override protected void onPause() {
@@ -286,6 +287,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         main.removeCallbacks(camKeepAlive);
         if (!hub.isPrincipal() && hub.connected() && desk.hasCameraWidget()) hub.send("camCmd", "a", "stream", "v", false);
         orient.disable();
+        main.postDelayed(() -> HandoffUi.update(this, hub), 400);   // la app lanzada aquí quedó al frente: el botoncito
         super.onPause();
     }
 
