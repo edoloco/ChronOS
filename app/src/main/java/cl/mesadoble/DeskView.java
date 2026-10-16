@@ -1183,7 +1183,7 @@ public class DeskView extends View {
                 badge.setColor(0xFFE53935);
                 c.drawCircle(bx, by, br, badge);
             }
-        } else if (!isWidget && !isClock && !isBatt) {
+        } else if (Item.LINK.equals(it.kind)) {   // solo los enlaces llevan "Abrir"
             small.setColor(muted);
             small.setTextSize(12 * dp);
             String dom = host(it.url);
