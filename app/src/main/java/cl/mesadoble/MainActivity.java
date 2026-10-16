@@ -2570,6 +2570,18 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         }
     }
 
+    /** Se instaló una app nueva en el principal: ¿también en el extendido? */
+    private void appAdded(org.json.JSONObject m) {
+        String label = m.optString("label");
+        new Ui.Sheet(this)
+                .title("Se instaló " + label + " en el principal")
+                .message(m.optBoolean("play") ? "Se abre su página de Play Store en el extendido: solo toca \"Instalar\"."
+                        : "Se copia desde el principal y Android te pide confirmar.")
+                .option(Ui.STORE, "Instalar en ambos", "También en el extendido", () -> AppShare.install(this, hub, m))
+                .button("Solo en el principal", false, null)
+                .show();
+    }
+
     /** Las apps corren en el principal: desde el extendido se le pide que la abra. */
     private void openOnPrincipal(String pkg, String label) {
         if (hub.isPrincipal()) { openApp(pkg, label); return; }
@@ -3245,6 +3257,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 break;
             case "homeAsk":
                 main.post(this::reportHome);
+                break;
+            case "appAdded":
+                if (side != 1 && !AppShare.installedHere(this, m.optString("pkg"))) main.post(() -> appAdded(m));
                 break;
             case "phoneOffer":
                 main.post(() -> phoneOffer(m.optString("title")));

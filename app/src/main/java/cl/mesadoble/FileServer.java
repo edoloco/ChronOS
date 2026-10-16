@@ -511,6 +511,7 @@ public class FileServer {
             if (!Arrays.equals(token.getBytes(StandardCharsets.UTF_8), h.optString("k").getBytes(StandardCharsets.UTF_8))) {
                 r.put("ok", false); r.put("err", "clave"); writeLine(out, r); return;
             }
+            if (h.has("apk")) { AppShare.serve(app, h, out); return; }   // instalar en ambos: APK de una app del principal
             if (!hasAccess(app)) { askAccess(); r.put("ok", false); r.put("err", "permiso"); writeLine(out, r); return; }
             // el gestor de archivos solo administra el principal: no se copian archivos entre teléfonos
             r.put("ok", false); r.put("err", "no disponible"); writeLine(out, r);

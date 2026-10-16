@@ -85,7 +85,18 @@ public class Hub implements Link.Listener {
                 if (isPrincipal()) send(m);
             }
         }, pf);
+        // instalar en ambos: al instalarse una app nueva en el principal, se ofrece también en el extendido
+        android.content.IntentFilter af = new android.content.IntentFilter(Intent.ACTION_PACKAGE_ADDED);
+        af.addDataScheme("package");
+        c.registerReceiver(new android.content.BroadcastReceiver() {
+            @Override public void onReceive(Context cx, Intent i) {
+                if (i.getBooleanExtra(Intent.EXTRA_REPLACING, false) || i.getData() == null) return;
+                AppShare.added(app, Hub.this, i.getData().getSchemeSpecificPart());
+            }
+        }, af);
     }
+
+    public String peerIp() { return link.peerIp(); }
 
     public int side() { return side; }
     /** Lado 1 = derecha = PRINCIPAL (donde corren las apps). Lado 0 = izquierda = EXTENDIDO. */
@@ -271,6 +282,7 @@ public class Hub implements Link.Listener {
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
         if ("media".equals(t)) { media(m.optString("k")); return; }
+        if ("installApp".equals(t)) { if (!isPrincipal()) main.post(() -> AppShare.install(app, this, m)); return; }
         // centro de apagado: el otro teléfono pide abrir aquí el menú de apagado o bloquear
         if ("power".equals(t)) {
             String a = m.optString("a");

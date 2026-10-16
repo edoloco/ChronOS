@@ -223,6 +223,12 @@
         <receiver
             android:name=".Updater$InstallReceiver"
             android:exported="false" />
+        <receiver
+            android:name=".AppShare$Act"
+            android:exported="false" />
+        <receiver
+            android:name=".AppShare$Done"
+            android:exported="false" />
 
         <receiver
             android:name=".LockAdmin"
