@@ -83,12 +83,22 @@ public class SketchActivity extends Activity implements Link.Listener {
         TextView view = btn("⤢", v -> pickView());
         view.setTextSize(18);
         view.setBackground(circle(0xCC1E5BC6));
+        TextView turn = btn("⟳", v -> {
+            int rf = (prefs.getInt("skRot", 0) + 90) % 360;
+            prefs.edit().putInt("skRot", rf).apply();
+            pad.resetImage();
+            say("Giro corregido: el dibujo debe verse igual que arriba", 2500);
+            requestZoom();
+        });
+        turn.setTextSize(18);
+        turn.setBackground(circle(0xCC3A4A55));
         TextView exit = btn("✕", v -> { dismissed = true; finish(); });
         exit.setTextSize(16);
         exit.setBackground(circle(0xCC7A2430));
         LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(dp(42), dp(42));
         cl.leftMargin = dp(8);
-        corner.addView(view, cl);
+        corner.addView(turn, cl);
+        corner.addView(view, new LinearLayout.LayoutParams(cl));
         corner.addView(exit, new LinearLayout.LayoutParams(cl));
         android.widget.FrameLayout.LayoutParams kl = new android.widget.FrameLayout.LayoutParams(
                 android.widget.FrameLayout.LayoutParams.WRAP_CONTENT, android.widget.FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.END);
@@ -182,20 +192,20 @@ public class SketchActivity extends Activity implements Link.Listener {
     void requestZoom() {
         if (!hub.connected()) return;
         if (pad.getWidth() == 0) { h.postDelayed(this::requestZoom, 200); return; }
-        hub.send("skShot", "r", rectJson(), "w", pad.getWidth(), "h", pad.getHeight());
+        hub.send("skShot", "r", rectJson(), "w", pad.getWidth(), "h", pad.getHeight(), "rf", prefs.getInt("skRot", 0));
     }
 
-    private void requestFull() { if (hub.connected()) hub.send("skShot", "full", true, "w", pad.getWidth(), "h", pad.getHeight()); }
+    private void requestFull() { if (hub.connected()) hub.send("skShot", "full", true, "w", pad.getWidth(), "h", pad.getHeight(), "rf", prefs.getInt("skRot", 0)); }
 
     void sendStroke(float[] pts, int n, long dur) {
         if (!hub.connected()) { Toast.makeText(this, "El principal no está conectado", Toast.LENGTH_SHORT).show(); return; }
         JSONArray a = new JSONArray();
         try { for (int i = 0; i < n; i++) a.put(Math.round(pts[i] * 100000) / 100000.0); } catch (Exception ignored) { }
-        hub.send("skStroke", "p", a, "d", dur, "r", rectJson(), "w", pad.getWidth(), "h", pad.getHeight());
+        hub.send("skStroke", "p", a, "d", dur, "r", rectJson(), "w", pad.getWidth(), "h", pad.getHeight(), "rf", prefs.getInt("skRot", 0));
     }
 
     void sendTap(double x, double y) {
-        if (hub.connected()) hub.send("skTap", "x", x, "y", y, "r", rectJson(), "w", pad.getWidth(), "h", pad.getHeight());
+        if (hub.connected()) hub.send("skTap", "x", x, "y", y, "r", rectJson(), "w", pad.getWidth(), "h", pad.getHeight(), "rf", prefs.getInt("skRot", 0));
     }
 
     // ---------------- vista completa ----------------
@@ -232,6 +242,8 @@ public class SketchActivity extends Activity implements Link.Listener {
             int sw = m.optInt("sw"), sh = m.optInt("sh");
             boolean full = m.optBoolean("full");
             h.post(() -> pad.image(b, rr, sw, sh, full));
+        } else if ("skNote".equals(t)) {
+            h.post(() -> say(m.optString("msg"), 4000));
         } else if ("sketchOff".equals(t)) {
             h.post(this::finish);
         }
@@ -292,6 +304,9 @@ public class SketchActivity extends Activity implements Link.Listener {
         boolean busy() { return cur != null || two; }
 
         void setFullMode(boolean f) { fullMode = f; invalidate(); }
+
+        /** Cambió el giro: la imagen vieja ya no sirve. */
+        void resetImage() { img = null; imgRect = null; fullImg = null; beforeImg = null; lastPts = null; sent.clear(); invalidate(); }
 
         @Override protected void onSizeChanged(int w, int h, int ow, int oh) { fit(); }
 

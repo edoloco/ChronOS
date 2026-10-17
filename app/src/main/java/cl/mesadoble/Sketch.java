@@ -56,6 +56,7 @@ final class Sketch {
             } catch (Exception ignored) { }
         }
         on = false;
+        stopOrientation();
         Hub h = MesaAccess.instance != null ? Hub.get(MesaAccess.instance) : null;
         if (h != null && h.connected()) h.send("sketchOff");
         hideFrame();
@@ -66,6 +67,7 @@ final class Sketch {
         if (!hub.isPrincipal()) return;
         if (isSketchbook(pkg)) {
             main.removeCallbacks(offLater);
+            if (MesaAccess.instance != null) listenOrientation(MesaAccess.instance);
             if (!on && hub.connected()) { on = true; hub.send("sketchOn"); }
         } else if (on) {
             main.removeCallbacks(offLater);
@@ -79,12 +81,57 @@ final class Sketch {
     // ---------------- mensajes del extendido ----------------
 
     private static double[] rect = {0, 0, 1, 1};
+
+    // ---------------- giro: la tableta trabaja en "lo que ves" ----------------
+    // Sketchbook se ve vertical, pero los teléfonos están en horizontal: arriba el dibujo se ve de lado.
+    // La tableta trabaja con la imagen girada tal como se ve físicamente; aquí se gira la captura igual y los
+    // trazos se devuelven a las coordenadas de la pantalla. rot = grados (horario) para pasar de pantalla a vista.
+
+    private static int rotFix;          // corrección manual desde la tableta (botón ⟳)
+    private static volatile int orient = -1;
+    private static android.view.OrientationEventListener orientL;
+
+    private static void listenOrientation(MesaAccess s) {
+        if (orientL != null) return;
+        orientL = new android.view.OrientationEventListener(s) {
+            @Override public void onOrientationChanged(int o) { if (o != ORIENTATION_UNKNOWN) orient = o; }
+        };
+        if (orientL.canDetectOrientation()) orientL.enable();
+    }
+
+    private static void stopOrientation() { if (orientL != null) { orientL.disable(); orientL = null; } }
+
+    /** Giro de la vista respecto de la pantalla: lo que el teléfono está girado de verdad menos lo que giró la pantalla. */
+    private static int rot(MesaAccess s) {
+        int disp = 0;
+        Point sc = screen(s);
+        try { disp = ((WindowManager) s.getSystemService(android.content.Context.WINDOW_SERVICE)).getDefaultDisplay().getRotation() * 90; } catch (Exception ignored) { }
+        int phys;
+        if (orient >= 0) phys = ((360 - orient + 45) / 90 * 90) % 360;
+        else phys = sc.x < sc.y ? 90 : disp;   // teléfono plano (sin dato): ChronOS se usa en horizontal
+        int delta = (phys - disp + 360) % 360;
+        return ((360 - delta) % 360 + rotFix) % 360;
+    }
+
+    /** Punto de la vista (0..1) → punto de la pantalla (0..1). */
+    private static double[] toScreen(double vx, double vy, int r) {
+        switch (r) {
+            case 90: return new double[]{vy, 1 - vx};
+            case 180: return new double[]{1 - vx, 1 - vy};
+            case 270: return new double[]{1 - vy, vx};
+            default: return new double[]{vx, vy};
+        }
+    }
+
+    private static int curRot;
     private static int outW = 1280, outH = 720;
 
     static void handle(MesaAccess s, Hub hub, JSONObject m) {
         String t = m.optString("t");
         JSONArray r = m.optJSONArray("r");
         if (r != null && r.length() == 4) rect = new double[]{r.optDouble(0), r.optDouble(1), r.optDouble(2), r.optDouble(3)};
+        if (m.has("rf")) rotFix = ((m.optInt("rf") % 360) + 360) % 360;
+        curRot = rot(s);
         if (m.has("w")) { outW = Math.max(64, Math.min(1600, m.optInt("w"))); outH = Math.max(64, Math.min(1600, m.optInt("h"))); }
         switch (t) {
             case "skStroke": stroke(s, hub, m.optJSONArray("p"), m.optLong("d", 300)); break;
@@ -110,7 +157,8 @@ final class Sketch {
         Point sc = screen(s);
         Path path = new Path();
         for (int i = 0; i + 1 < p.length(); i += 2) {
-            float x = clamp((float) p.optDouble(i) * sc.x, sc.x), y = clamp((float) p.optDouble(i + 1) * sc.y, sc.y);
+            double[] q = toScreen(p.optDouble(i), p.optDouble(i + 1), curRot);
+            float x = clamp((float) q[0] * sc.x, sc.x), y = clamp((float) q[1] * sc.y, sc.y);
             if (i == 0) path.moveTo(x, y); else path.lineTo(x, y);
         }
         long d = Math.max(p.length() <= 2 ? 40 : 80, Math.min(dur, 20000));
@@ -120,7 +168,8 @@ final class Sketch {
     private static void tap(MesaAccess s, Hub hub, double nx, double ny) {
         Point sc = screen(s);
         Path path = new Path();
-        path.moveTo(clamp((float) nx * sc.x, sc.x), clamp((float) ny * sc.y, sc.y));
+        double[] q = toScreen(nx, ny, curRot);
+        path.moveTo(clamp((float) q[0] * sc.x, sc.x), clamp((float) q[1] * sc.y, sc.y));
         dispatch(s, hub, path, 50);
     }
 
@@ -131,7 +180,10 @@ final class Sketch {
             boolean ok = s.dispatchGesture(new GestureDescription.Builder().addStroke(new GestureDescription.StrokeDescription(path, 0, d)).build(),
                     new AccessibilityService.GestureResultCallback() {
                         @Override public void onCompleted(GestureDescription g) { main.postDelayed(() -> shot(s, hub, rect, false), 280); }
-                        @Override public void onCancelled(GestureDescription g) { main.postDelayed(() -> shot(s, hub, rect, false), 280); }
+                        @Override public void onCancelled(GestureDescription g) {
+                            hub.send("skNote", "msg", "El trazo se interrumpió en el principal (¿se tocó la pantalla de arriba?)");
+                            main.postDelayed(() -> shot(s, hub, rect, false), 280);
+                        }
                     }, main);
             if (!ok) main.postDelayed(() -> shot(s, hub, rect, false), 200);
         } catch (Exception e) { main.postDelayed(() -> shot(s, hub, rect, false), 200); }
@@ -164,12 +216,19 @@ final class Sketch {
                 hub.send("skImg", "err", android.os.Build.VERSION.SDK_INT < 30
                         ? "Este principal tiene Android 10 o anterior: no puede capturar la imagen (el dibujo sí funciona)"
                         : "No se pudo capturar la pantalla del principal");
-            } else RecentApps.worker.execute(() -> send(hub, b, r, full));
+            } else { final int rr = curRot; RecentApps.worker.execute(() -> send(hub, rotate(b, rr), r, full)); }
             main.postDelayed(() -> {
                 busy = false;
                 if (again) { again = false; shot(s, hub, againRect, againFull); }
             }, 30);
         });
+    }
+
+    private static Bitmap rotate(Bitmap b, int r) {
+        if (r == 0) return b;
+        android.graphics.Matrix mx = new android.graphics.Matrix();
+        mx.postRotate(r);
+        try { return Bitmap.createBitmap(b, 0, 0, b.getWidth(), b.getHeight(), mx, true); } catch (Exception e) { return b; }
     }
 
     private static void send(Hub hub, Bitmap b, double[] r, boolean full) {
@@ -187,7 +246,7 @@ final class Sketch {
             m.put("t", "skImg");
             m.put("img", android.util.Base64.encodeToString(bos.toByteArray(), android.util.Base64.NO_WRAP));
             m.put("r", new JSONArray().put(r[0]).put(r[1]).put(r[2]).put(r[3]));
-            m.put("sw", sw); m.put("sh", sh); m.put("full", full);
+            m.put("sw", sw); m.put("sh", sh); m.put("full", full); m.put("rot", curRot);
             hub.send(m);
         } catch (Exception ignored) { }
     }
@@ -241,7 +300,9 @@ final class Sketch {
         @Override protected void onDraw(Canvas c) {
             float W = getWidth(), H = getHeight(), o = 2 * dp;   // por fuera de la zona: no sale en la imagen
             if (rect[0] <= 0.001 && rect[1] <= 0.001 && rect[2] >= 0.999 && rect[3] >= 0.999) return;
-            c.drawRect((float) rect[0] * W - o, (float) rect[1] * H - o, (float) rect[2] * W + o, (float) rect[3] * H + o, p);
+            double[] a = toScreen(rect[0], rect[1], curRot), b = toScreen(rect[2], rect[3], curRot);
+            c.drawRect((float) Math.min(a[0], b[0]) * W - o, (float) Math.min(a[1], b[1]) * H - o,
+                    (float) Math.max(a[0], b[0]) * W + o, (float) Math.max(a[1], b[1]) * H + o, p);
         }
     }
 
