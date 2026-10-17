@@ -2383,11 +2383,19 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         final android.content.Context app = getApplicationContext();
         main.postDelayed(() -> {
             if (MesaAccess.instance == null) return;
-            MesaAccess.instance.performGlobalAction(7 /* GLOBAL_ACTION_TOGGLE_SPLIT_SCREEN: la app queda arriba */);
+            boolean asked = MesaAccess.instance.performGlobalAction(7 /* GLOBAL_ACTION_TOGGLE_SPLIT_SCREEN: la app queda arriba */);
             main.postDelayed(() -> {
+                // solo si Android de verdad partió la pantalla se trae ChronOS abajo; si no, la app se queda completa
+                if (!asked || !MesaAccess.isSplit(pkg)) {
+                    if (!prefs.getBoolean("soloSplitFail", false)) {
+                        prefs.edit().putBoolean("soloSplitFail", true).apply();
+                        Toast.makeText(app, "Este teléfono no dejó partir la pantalla: la app queda completa. Puedes cambiarlo en Ajustes → Apps", Toast.LENGTH_LONG).show();
+                    }
+                    return;
+                }
                 try { app.startActivity(new Intent(app, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT)); }
                 catch (Exception ignored) { }
-            }, 900);
+            }, 1000);
         }, 900);
     }
 

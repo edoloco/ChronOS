@@ -82,6 +82,24 @@ public class MesaAccess extends AccessibilityService {
 
     @Override public void onInterrupt() { }
 
+    /** ¿La app pkg quedó en pantalla partida (su ventana ocupa menos de lo que mide la pantalla)? */
+    static boolean isSplit(String pkg) {
+        MesaAccess s = instance;
+        if (s == null) return false;
+        try {
+            Point sc = s.screen();
+            for (android.view.accessibility.AccessibilityWindowInfo w : s.getWindows()) {
+                if (w.getType() != android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+                android.view.accessibility.AccessibilityNodeInfo r = w.getRoot();
+                if (r == null || r.getPackageName() == null || !pkg.equals(r.getPackageName().toString())) continue;
+                android.graphics.Rect b = new android.graphics.Rect();
+                w.getBoundsInScreen(b);
+                return b.height() < sc.y * 0.8f && b.width() >= sc.x * 0.8f;
+            }
+        } catch (Exception ignored) { }
+        return false;
+    }
+
     // ---------------- touchpad y gamepad ----------------
 
     private final Handler h = new Handler(Looper.getMainLooper());
