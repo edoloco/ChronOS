@@ -200,17 +200,17 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         setContentView(root);
         hub = Hub.get(this);
         loadItems();
-        boolean savedStacked = prefs.getBoolean("savedStacked", false);
-        if (!prefs.getBoolean("layoutV2", false)) {
+        boolean savedStacked = prefs.getBoolean(sk("savedStacked"), solo);
+        if (!solo && !prefs.getBoolean("layoutV2", false)) {
             // versiones anteriores tenían el principal a la derecha: se intercambian las mitades una vez
             if (!savedStacked) desk.swapHalves();
             prefs.edit().putBoolean("layoutV2", true).apply();
             scheduleSave();
         }
         desk.setVertical(savedStacked);
-        if (savedStacked != stacked()) { desk.convertAll(stacked()); prefs.edit().putBoolean("savedStacked", stacked()).apply(); scheduleSave(); }
+        if (savedStacked != stacked()) { desk.convertAll(stacked()); prefs.edit().putBoolean(sk("savedStacked"), stacked()).apply(); scheduleSave(); }
         for (Item it : desk.items) desk.normalize(it);
-        desk.setPages(Math.max(prefs.getInt("pages", 1), maxPage() + 1), prefs.getInt("page", 0), 0);
+        desk.setPages(Math.max(prefs.getInt(sk("pages"), 1), maxPage() + 1), prefs.getInt(sk("page"), 0), 0);
         desk.setAppsMode(prefs.getBoolean("appsLock", false), prefs.getBoolean("appsAuto", false));
         desk.setSnap(prefs.getBoolean("snapGrid", false));
         cleanWidgets();
@@ -352,7 +352,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         hub.send("bg", "c", prefs.getInt("deskColor", 0));
         hub.send("cardTheme", "c", CardTheme.color, "g", CardTheme.glass, "k", CardTheme.console);
         hub.send("flip", "p", prefs.getBoolean("flipP", false), "e", prefs.getBoolean("flipE", false));
-        hub.send("pages", "n", desk.pages(), "cur", desk.page());
+        if (!solo) hub.send("pages", "n", desk.pages(), "cur", desk.page());
         hub.send("apps", "lock", prefs.getBoolean("appsLock", false), "auto", prefs.getBoolean("appsAuto", false));
         hub.send("snap", "on", prefs.getBoolean("snapGrid", false));
     }
@@ -1256,7 +1256,23 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             nbar.setTranslationY(H - nbar.barHeight());
             pBottom = nbar.visualHeight();
         }
-        pane.setPadding(0, pTop, 0, pBottom);
+        if (solo && pane2 != null) {
+            // una pantalla: la mitad de arriba (bajo la barra del reloj) y la de abajo (sobre la barra del logo)
+            FrameLayout.LayoutParams a1 = (FrameLayout.LayoutParams) pane.getLayoutParams(), a2 = (FrameLayout.LayoutParams) pane2.getLayoutParams();
+            if (a1.height != H / 2 || a2.height != H - H / 2) {
+                a1.height = H / 2; a1.gravity = Gravity.TOP;
+                a2.height = H - H / 2; a2.gravity = Gravity.BOTTOM;
+                pane.setLayoutParams(a1); pane2.setLayoutParams(a2);
+            }
+            pane.setPadding(0, pTop, 0, dp(3));
+            pane2.setPadding(0, dp(3), 0, pBottom);
+            if (!animate) { pane2.setVisibility(fileMode ? View.VISIBLE : View.GONE); pane2.setTranslationY(0); }
+            else if (fileMode) {
+                pane2.setVisibility(View.VISIBLE);
+                pane2.setTranslationY(H);
+                pane2.animate().translationY(0).setDuration(380).setInterpolator(new android.view.animation.DecelerateInterpolator(1.4f)).start();
+            } else pane2.animate().translationY(H).setDuration(320).withEndAction(() -> { if (!fileMode) pane2.setVisibility(View.GONE); }).start();
+        } else pane.setPadding(0, pTop, 0, pBottom);
         // la tarjeta de notificación del extendido va arriba a la izquierda, sin taparse con la barra
         FrameLayout.LayoutParams fl = (FrameLayout.LayoutParams) floatNotif.getLayoutParams();
         fl.topMargin = top ? vh + dp(8) : dp(14);
@@ -1290,6 +1306,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (fileMode == on) return;
         fileMode = on;
         if (on) pane.start(); else pane.stop();
+        if (pane2 != null) { if (on) pane2.start(); else pane2.stop(); }
         if (cbar != null) cbar.showRecents(!on);   // las apps recientes se esconden con el gestor
         if (!on) main.postDelayed(pollRecents, 300);
         layoutChrono(true);
@@ -1319,11 +1336,18 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         return m;
     }
 
-    private void savePages() { prefs.edit().putInt("pages", desk.pages()).putInt("page", desk.page()).apply(); }
+    private void savePages() { prefs.edit().putInt(sk("pages"), desk.pages()).putInt(sk("page"), desk.page()).apply(); }
+
+    /**
+     * Una pantalla y dos pantallas tienen escritorios separados: cada modo guarda sus elementos y escritorios aparte
+     * (desk.json / desk_solo.json) y en una pantalla nada se sincroniza con el otro teléfono.
+     */
+    private String sk(String k) { return solo ? "solo_" + k : k; }
+    private String deskFile() { return solo ? "desk_solo.json" : "desk.json"; }
 
     @Override public void onPageChange(int page, int pages) {
         savePages();
-        hub.send("pages", "n", pages, "cur", page);
+        if (!solo) hub.send("pages", "n", pages, "cur", page);
     }
 
     private void desksMenu() {
@@ -2256,8 +2280,16 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         recentsBar.setPick(this::onRecent);
         nbar.setRecents(recentsBar);
         root.addView(nbar, root.indexOfChild(startOverlay), new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
+        // gestor de archivos en dos mitades (arriba y abajo), como si fueran las dos pantallas
+        pane2 = new FilePane(this, hub(), night);
+        pane2.setVisibility(View.GONE);
+        root.addView(pane2, root.indexOfChild(pane) + 1, new FrameLayout.LayoutParams(-1, 0, Gravity.BOTTOM));
+        pane.setPeer(pane2);
+        pane2.setPeer(pane);
         root.post(() -> layoutChrono(false));
     }
+
+    private FilePane pane2;
 
     /** En una pantalla, el otro teléfono volvió: ¿volver a dos pantallas? */
     private void offerTwoScreens() {
@@ -2906,7 +2938,29 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         catch (Exception ex) { Toast.makeText(this, "No hay una app para abrir ese enlace", Toast.LENGTH_SHORT).show(); }
     }
 
+    /** ⋯ de un elemento: en las apps, cuadrado estándar o grande; en todos, quitarlo. */
+    @Override public void onItemMenu(Item it) {
+        String name = Item.APP.equals(it.kind) ? it.title : "Elemento";
+        Ui.Sheet sh = new Ui.Sheet(this).title(name);
+        if (Item.APP.equals(it.kind)) {
+            sh.option(Ui.GRID, -1, "Cuadrado estándar", "El tamaño de siempre", it.sz == 0, () -> setAppSize(it, 0));
+            sh.option(Ui.GRID, -1, "Cuadrado grande", "Más grande, para las apps que más usas", it.sz == 1, () -> setAppSize(it, 1));
+        }
+        sh.option(Ui.TRASH, "Quitar del escritorio", null, () -> (desk.find(it.id) != null ? desk : desk2 != null ? desk2 : desk).removeItem(it));
+        sh.button("Cerrar", false, null).show();
+    }
+
+    private void setAppSize(Item it, int sz) {
+        if (it.sz == sz) return;
+        it.sz = sz;
+        it.touch();
+        desk.invalidate();
+        if (desk2 != null) desk2.invalidate();
+        onItemChanged(it);
+    }
+
     @Override public void onItemChanged(Item it) {
+        if (solo) { scheduleSave(); return; }   // una pantalla: su escritorio es solo de este teléfono
         JSONObject m = new JSONObject();
         try { m.put("t", "up"); m.put("item", it.toJson(false)); } catch (JSONException ignored) { }
         hub.send(m);
@@ -2915,6 +2969,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     @Override public void onItemDeleted(Item it) {
         if (Item.WIDGET.equals(it.kind)) releaseWidget(it);
+        if (solo) { scheduleSave(); return; }
         JSONObject m = new JSONObject();
         try { m.put("t", "del"); m.put("id", it.id); } catch (JSONException ignored) { }
         hub.send(m);
@@ -2922,6 +2977,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     @Override public void onDrag(Item it, double x, double y) {
+        if (solo) return;
         long now = System.currentTimeMillis();
         if (now - lastDragSend < 16) return;
         lastDragSend = now;
@@ -2931,6 +2987,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     @Override public void onDragEnd(Item it) {
+        if (solo) return;
         JSONObject m = new JSONObject();
         try { m.put("t", "dragEnd"); m.put("id", it.id); } catch (JSONException ignored) { }
         hub.send(m);
@@ -3227,7 +3284,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             if (side == 1) sendView();   // el principal define la forma; va antes que los elementos
             wantSent = ""; main.postDelayed(sendWant, 800);   // widgets: volver a pedir las imágenes
             hub.send(hello);
-            hub.send(full);
+            if (!solo) hub.send(full);
         }
         if (state != Link.CONNECTED) { otherSide = -1; desk.clearAllRemoteDrags(); requested.clear(); }
         updateStatus();
@@ -3235,6 +3292,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
+        // una pantalla: el escritorio de dos pantallas (del otro teléfono) no se mezcla con este
+        if (solo && ("full".equals(t) || "up".equals(t) || "del".equals(t) || "drag".equals(t) || "dragEnd".equals(t)
+                || "pages".equals(t) || "editItem".equals(t) || "needImg".equals(t) || "img".equals(t))) return;
         switch (t) {
             case "editItem":
                 main.post(() -> desk.startEditing(m.optString("id")));
@@ -3453,7 +3513,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     /** Manda la imagen de un elemento una sola vez (los movimientos ya no la incluyen). */
     private void sendImage(Item it) {
-        if (it.img.isEmpty()) return;
+        if (it.img.isEmpty() || solo) return;
         JSONObject m = new JSONObject();
         try { m.put("t", "img"); m.put("id", it.id); m.put("ik", it.ik); m.put("img", it.img); } catch (JSONException ignored) { }
         hub.send(m);
@@ -3488,10 +3548,10 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private final Runnable saveTask = () -> {
         JSONArray arr = new JSONArray();
         for (Item it : new ArrayList<>(desk.items)) arr.put(it.toJson());
-        final String data = arr.toString();
+        final String data = arr.toString(), file = deskFile();
         io.execute(() -> {
-            File f = new File(getFilesDir(), "desk.json");
-            File tmp = new File(getFilesDir(), "desk.json.tmp");
+            File f = new File(getFilesDir(), file);
+            File tmp = new File(getFilesDir(), file + ".tmp");
             try (FileOutputStream out = new FileOutputStream(tmp)) {
                 out.write(data.getBytes(StandardCharsets.UTF_8));
             } catch (Exception e) { return; }
@@ -3506,7 +3566,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     private void loadItems() {
-        File f = new File(getFilesDir(), "desk.json");
+        File f = new File(getFilesDir(), deskFile());
         if (!f.exists()) return;
         try (FileInputStream in = new FileInputStream(f)) {
             ByteArrayOutputStream bos = new ByteArrayOutputStream();

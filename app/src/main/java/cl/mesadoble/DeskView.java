@@ -80,6 +80,8 @@ public class DeskView extends View {
         org.json.JSONArray calls();
         boolean callsAllowed();
         void onCalls(String what, String num);
+        /** Botón ⋯ de un elemento en modo edición: sus opciones (en las apps, el tamaño del cuadrado). */
+        void onItemMenu(Item it);
     }
 
     // ---------------- widget de cámara: visor y botones de la cámara del principal ----------------
@@ -611,23 +613,17 @@ public class DeskView extends View {
             // horizontal: la barra está arriba en el principal y abajo en el extendido; vertical: abajo en ambos
             if (vertical) { top = s == 0 ? 86 * dp : 16 * dp; bottom = s == 0 ? 30 * dp : 86 * dp; }
             else { top = 16 * dp; bottom = 86 * dp; }
-            double w = vertical ? 0.12 : 0.24;
-            float cellW = 0, cellH = 0;
-            int cols = 1;
-            for (int tries = 0; tries < 8; tries++) {
-                cellW = (float) (w * W);
-                cellH = Math.max(96 * dp, cellW * 0.9f);
-                cols = Math.max(1, (int) ((W - 2 * mx + gap) / (cellW + gap)));
-                int rows = Math.max(1, (int) ((H - top - bottom + gap) / (cellH + gap)));
-                if (cols * rows >= apps.size() || w < 0.09) break;
-                w *= 0.86;
-            }
+            squareApps(W);
+            float cellW = 0;
+            for (Item it : apps) cellW = Math.max(cellW, appPx(it, W));
+            float cellH = cellW;
+            int cols = Math.max(1, (int) ((W - 2 * mx + gap) / (cellW + gap)));
             for (int i = 0; i < apps.size(); i++) {
                 Item it = apps.get(i);
                 double ux = (mx + (i % cols) * (cellW + gap)) / W, uy = (top + (i / cols) * (cellH + gap)) / H;
                 double nx = vertical ? ux : s + ux, ny = vertical ? s + uy : uy;
-                if (Math.abs(nx - it.x) < 1e-4 && Math.abs(ny - it.y) < 1e-4 && Math.abs(w - it.w) < 1e-4 && it.rot == 0) continue;
-                it.x = nx; it.y = ny; it.w = w; it.rot = 0;
+                if (Math.abs(nx - it.x) < 1e-4 && Math.abs(ny - it.y) < 1e-4 && it.rot == 0) continue;
+                it.x = nx; it.y = ny; it.rot = 0;
                 it.touch();
                 if (host != null) host.onItemChanged(it);
             }
@@ -756,6 +752,14 @@ public class DeskView extends View {
     }
 
     /** Deja el elemento en modo edición (para moverlo, girarlo o cambiarle el tamaño). */
+    /** Quita un elemento (desde el menú ⋯). */
+    public void removeItem(Item it) {
+        if (it == editing) editing = null;
+        items.remove(it);
+        invalidate();
+        if (host != null) host.onItemDeleted(it);
+    }
+
     public void startEditing(String id) {
         for (Item it : items) if (it.id.equals(id)) {
             editing = it;
@@ -877,6 +881,7 @@ public class DeskView extends View {
 
     @Override protected void onDraw(Canvas c) {
         int W = getWidth(), H = getHeight();
+        squareApps(W);
         clockTick = false;
         if (bgFade < 1f) {
             bgFade = Math.min(1f, bgFade + 0.06f);
@@ -972,6 +977,16 @@ public class DeskView extends View {
         }
     }
 
+    /** Regla para las apps: siempre cuadradas, de tamaño fijo (estándar o grande), en cualquier modo. */
+    static final float APP_STD = 104, APP_BIG = 152;
+
+    private float appPx(Item it, int W) { return Math.min(W * 0.46f, (it.sz == 1 ? APP_BIG : APP_STD) * dp); }
+
+    private void squareApps(int W) {
+        if (W <= 0) return;
+        for (Item it : items) if (Item.APP.equals(it.kind)) it.w = appPx(it, W) / W;
+    }
+
     private float measure(Item it, float width) {
         float pad = 14 * dp;
         if (Item.NOTE.equals(it.kind)) {
@@ -990,7 +1005,7 @@ public class DeskView extends View {
             float ih = b != null ? inner * b.getHeight() / (float) b.getWidth() : inner * 0.7f;
             it.hPx = 8 * dp + ih + 36 * dp;
         } else if (Item.APP.equals(it.kind)) {
-            it.hPx = Math.max(96 * dp, width * 0.9f);
+            it.hPx = width;   // cuadrada
         } else if (Item.WIDGET.equals(it.kind)) {
             it.hPx = widgetBar() + (float) (width * it.ar);
         } else if (Item.CLOCK.equals(it.kind)) {
@@ -1212,8 +1227,15 @@ public class DeskView extends View {
         // sin flecha: para pasar al otro teléfono basta lanzarlo con el dedo.
         // la ✕ para quitar solo aparece al mantener presionado (modo edición), junto a girar y tamaño.
         it.sendBtn.setEmpty();
-        if (locked(it) || it != editing) { it.delBtn.setEmpty(); if (locked(it)) { c.restore(); return; } }
+        if (locked(it) || it != editing) { it.delBtn.setEmpty(); it.moreBtn.setEmpty(); if (locked(it)) { c.restore(); return; } }
         else {
+            // ⋯ opciones (tamaño de las apps): esquina superior izquierda
+            float ms = 32 * dp;
+            it.moreBtn.set(6 * dp, 6 * dp, 6 * dp + ms, 6 * dp + ms);
+            btn.setColor(0xE6324A5F);
+            c.drawCircle(it.moreBtn.centerX(), it.moreBtn.centerY(), ms / 2, btn);
+            badge.setColor(0xFFFFFFFF);
+            for (int k = -1; k <= 1; k++) c.drawCircle(it.moreBtn.centerX() + k * 6.5f * dp, it.moreBtn.centerY(), 2.2f * dp, badge);
             float bs = 32 * dp;
             it.delBtn.set(width - 6 * dp - bs, 6 * dp, width - 6 * dp, 6 * dp + bs);
             btn.setColor(0xFFD9534F);
@@ -1236,11 +1258,13 @@ public class DeskView extends View {
             RectF arc = new RectF(width / 2 - 7 * dp, -37 * dp, width / 2 + 7 * dp, -23 * dp);
             c.drawArc(arc, -60, 270, false, icon);
             // tamaño: esquina inferior derecha
-            c.drawCircle(width + 5 * dp, h + 5 * dp, hr, handle);
-            float hx = width + 5 * dp, hy = h + 5 * dp, q = 5 * dp;
-            c.drawLine(hx - q, hy - q, hx + q, hy + q, icon);
-            c.drawLine(hx + q, hy + q, hx + q - 4 * dp, hy + q, icon);
-            c.drawLine(hx + q, hy + q, hx + q, hy + q - 4 * dp, icon);
+            if (!isApp) {   // las apps cambian de tamaño desde ⋯ (estándar o grande)
+                c.drawCircle(width + 5 * dp, h + 5 * dp, hr, handle);
+                float hx = width + 5 * dp, hy = h + 5 * dp, q = 5 * dp;
+                c.drawLine(hx - q, hy - q, hx + q, hy + q, icon);
+                c.drawLine(hx + q, hy + q, hx + q - 4 * dp, hy + q, icon);
+                c.drawLine(hx + q, hy + q, hx + q, hy + q - 4 * dp, icon);
+            }
         }
         c.restore();
     }
@@ -1514,7 +1538,7 @@ public class DeskView extends View {
         float[] l = toLocal(it, px, py);
         float hr = 24 * dp;
         if (Math.hypot(l[0] - l[2] / 2, l[1] + 30 * dp) < hr) return "rotate";
-        if (Math.hypot(l[0] - l[2] - 5 * dp, l[1] - l[3] - 5 * dp) < hr) return "resize";
+        if (!Item.APP.equals(it.kind) && Math.hypot(l[0] - l[2] - 5 * dp, l[1] - l[3] - 5 * dp) < hr) return "resize";
         return null;
     }
 
@@ -1587,6 +1611,7 @@ public class DeskView extends View {
                     }
                 }
                 pressedBtn = locked(pressed) ? null : pressed == editing && pressed.delBtn.contains(l[0], l[1]) ? "del"
+                        : pressed == editing && pressed.moreBtn.contains(l[0], l[1]) ? "more"
                         : Item.LINK.equals(pressed.kind) && pressed.openBtn.contains(l[0], l[1]) ? "open" : null;
                 ox = pressed.x; oy = pressed.y;
                 if (pressedBtn == null && editing == null && !locked(pressed)) postDelayed(longPress, 450);
@@ -1640,7 +1665,7 @@ public class DeskView extends View {
                 if (mode == PINCH && e.getPointerCount() >= 2) {
                     double d = Math.hypot(e.getX(0) - e.getX(1), e.getY(0) - e.getY(1));
                     double ang = Math.toDegrees(Math.atan2(e.getY(1) - e.getY(0), e.getX(1) - e.getX(0)));
-                    pressed.w = clampW(startW * d / Math.max(1, startDist));
+                    if (!Item.APP.equals(pressed.kind)) pressed.w = clampW(startW * d / Math.max(1, startDist));   // apps: tamaño desde ⋯
                     pressed.rot = snap((float) (startRot + ang - startAngle));
                     invalidate();
                     return true;
@@ -1777,6 +1802,7 @@ public class DeskView extends View {
 
     private void tap(Item it) {
         if ("send".equals(pressedBtn)) sendAcross(it);
+        else if ("more".equals(pressedBtn)) { if (host != null) host.onItemMenu(it); }
         else if ("del".equals(pressedBtn)) {
             if (it == editing) editing = null;
             items.remove(it); invalidate();

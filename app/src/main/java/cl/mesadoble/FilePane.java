@@ -78,6 +78,10 @@ public class FilePane extends FrameLayout implements Link.Listener {
 
     private String mode = "home";      // home | dir | images | audio | video | docs | apps
     private String path = "", otherPath = "";
+    /** Modo una pantalla: la otra mitad del gestor (en este mismo teléfono). */
+    private FilePane peer;
+
+    public void setPeer(FilePane p) { peer = p; }
     private boolean open;
 
     private int dp(float v) { return Math.round(v * dp); }
@@ -379,7 +383,8 @@ public class FilePane extends FrameLayout implements Link.Listener {
         String root = FileServer.root().getAbsolutePath();
         crumb.setText("dir".equals(m) ? "/ RAÍZ" + (p.startsWith(root) ? p.substring(root.length()) : p).replace("/", " / ").replace(" /  / ", " / ")
                 : "home".equals(m) ? "Inicio" : "/ " + catTitle().toUpperCase(Locale.ROOT));
-        if (hub.connected()) hub.send("fpPath", "path", "dir".equals(m) ? p : "");
+        if (peer != null) { peer.otherPath = "dir".equals(m) ? p : ""; peer.refreshActions(); }
+        else if (hub.connected()) hub.send("fpPath", "path", "dir".equals(m) ? p : "");
         if (remote()) showStatus(hub.connected() ? "Leyendo el teléfono principal…" : "El principal no está conectado");
         homeScroll.setVisibility("home".equals(m) ? VISIBLE : GONE);
         list.setVisibility("home".equals(m) ? GONE : VISIBLE);
@@ -811,7 +816,7 @@ public class FilePane extends FrameLayout implements Link.Listener {
         if (t.startsWith("fs") && t.endsWith("R")) {
             Wait w = waits.get(m.optInt("req"));
             if (w != null) { w.r = m; w.l.countDown(); }
-        } else if ("fpPath".equals(t)) {
+        } else if ("fpPath".equals(t) && peer == null) {
             main.post(() -> { otherPath = m.optString("path"); refreshActions(); });
         } else if ("fmAnim".equals(t)) {
             main.post(() -> {

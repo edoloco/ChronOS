@@ -33,11 +33,12 @@ public class Item {
     public double ar = 0.6;                       // widget: alto / ancho del contenido
     public boolean pin;                           // fijo: no se mueve y se ve en todos los escritorios
     public int page = 0;                          // escritorio (0 = el primero; los demás van a los lados)
+    public int sz = 0;                            // apps: 0 = cuadrado estándar, 1 = cuadrado grande
 
     // Estado solo local (no se envía)
     public float dx = Float.NaN, dy = Float.NaN;  // posición mostrada, animada
     public float hPx = 0;                         // alto medido en píxeles
-    public final RectF sendBtn = new RectF(), delBtn = new RectF(), openBtn = new RectF();
+    public final RectF sendBtn = new RectF(), delBtn = new RectF(), openBtn = new RectF(), moreBtn = new RectF();
     public Bitmap bmp;
     public volatile boolean decoding;
     public StaticLayout layout;
@@ -53,7 +54,7 @@ public class Item {
             o.put("id", id); o.put("kind", kind); o.put("text", text); o.put("url", url);
             o.put("title", title); o.put("color", color); o.put("pkg", pkg); o.put("ik", ik);
             if (withImg) o.put("img", img);
-            o.put("x", x); o.put("y", y); o.put("w", w); o.put("z", z); o.put("u", u); o.put("rev", rev); o.put("rot", (double) rot); o.put("page", page); o.put("ar", ar); o.put("wid", wid); o.put("pin", pin);
+            o.put("x", x); o.put("y", y); o.put("w", w); o.put("z", z); o.put("u", u); o.put("rev", rev); o.put("rot", (double) rot); o.put("page", page); o.put("ar", ar); o.put("wid", wid); o.put("pin", pin); o.put("sz", sz);
         } catch (JSONException ignored) { }
         return o;
     }
@@ -78,6 +79,7 @@ public class Item {
         it.rev = o.optInt("rev", 1);
         it.rot = (float) o.optDouble("rot", 0);
         it.page = Math.max(0, Math.min(49, o.optInt("page", 0)));
+        it.sz = o.optInt("sz", 0);
         it.wid = o.optInt("wid", -1);
         it.pin = o.optBoolean("pin", false);
         it.ar = Math.max(0.15, Math.min(4, o.optDouble("ar", 0.6)));
@@ -94,7 +96,7 @@ public class Item {
         kind = o.kind; text = o.text; url = o.url; title = o.title; color = o.color; pkg = o.pkg;
         if (!o.img.isEmpty()) { if (!o.img.equals(img)) bmp = null; img = o.img; ik = o.ik; }
         else if (!o.ik.equals(ik)) { img = ""; ik = o.ik; bmp = null; }   // cambió la imagen: llegará aparte
-        x = o.x; y = o.y; w = o.w; z = o.z; u = o.u; rev = o.rev; rot = o.rot; page = o.page; ar = o.ar; wid = o.wid; pin = o.pin;
+        x = o.x; y = o.y; w = o.w; z = o.z; u = o.u; rev = o.rev; rot = o.rot; page = o.page; ar = o.ar; wid = o.wid; pin = o.pin; sz = o.sz;
     }
 
     public void setImage(String b64) {
