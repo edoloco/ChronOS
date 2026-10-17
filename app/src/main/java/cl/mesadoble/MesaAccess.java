@@ -65,6 +65,9 @@ public class MesaAccess extends AccessibilityService {
     @Override public void onAccessibilityEvent(AccessibilityEvent e) {
         if (e.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || e.getPackageName() == null) return;
         String pkg = e.getPackageName().toString();
+        // ventanas propias que no son la pantalla de ChronOS (marco de la mesa de dibujo, teclado…): no cambian "la app del frente"
+        CharSequence cls = e.getClassName();
+        if (pkg.equals(getPackageName()) && (cls == null || !cls.toString().endsWith("Activity"))) return;
         if (pkg.equals(lastPkg)) return;
         lastPkg = pkg;
         Hub h = Hub.get(this);

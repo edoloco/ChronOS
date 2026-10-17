@@ -46,6 +46,15 @@ final class Sketch {
 
     private static boolean on;
     private static final Runnable offLater = () -> {
+        // antes de cerrar la mesa se confirma qué app está de verdad al frente (las ventanas propias de ChronOS,
+        // como el marco verde o el teclado, también avisan "cambio de ventana" y no deben cerrarla)
+        MesaAccess s = MesaAccess.instance;
+        if (s != null) {
+            try {
+                android.view.accessibility.AccessibilityNodeInfo root = s.getRootInActiveWindow();
+                if (root != null && root.getPackageName() != null && isSketchbook(root.getPackageName().toString())) return;
+            } catch (Exception ignored) { }
+        }
         on = false;
         Hub h = MesaAccess.instance != null ? Hub.get(MesaAccess.instance) : null;
         if (h != null && h.connected()) h.send("sketchOff");
