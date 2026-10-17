@@ -21,8 +21,14 @@ final class ColorWheel extends View {
     private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG), ring = new Paint(Paint.ANTI_ALIAS_FLAG);
     private RectF sq, bar, prev;
     private int touching;   // 1 cuadro, 2 barra
+    /** Se llama al soltar el dedo con el color nuevo (panel de colores del principal). */
+    IntConsumer onPick;
+    private int fixedH;
 
-    private ColorWheel(Activity a, int color) {
+    void setColor(int c) { Color.colorToHSV(c, hsv); invalidate(); }
+    void setFixedHeight(int h) { fixedH = h; requestLayout(); }
+
+    ColorWheel(Activity a, int color) {
         super(a);
         d = a.getResources().getDisplayMetrics().density;
         Color.colorToHSV(color, hsv);
@@ -35,7 +41,7 @@ final class ColorWheel extends View {
 
     @Override protected void onMeasure(int w, int h) {
         int W = MeasureSpec.getSize(w);
-        setMeasuredDimension(W, Math.round(Math.min(W * 0.62f, 300 * d)));
+        setMeasuredDimension(W, fixedH > 0 ? fixedH : Math.round(Math.min(W * 0.62f, 300 * d)));
     }
 
     @Override protected void onSizeChanged(int w, int h, int ow, int oh) {
@@ -74,6 +80,7 @@ final class ColorWheel extends View {
             hsv[2] = 1 - Math.max(0, Math.min(1, (y - sq.top) / sq.height()));
         } else if (touching == 2) hsv[0] = Math.max(0, Math.min(359.9f, (y - bar.top) / bar.height() * 360f));
         getParent().requestDisallowInterceptTouchEvent(touching != 0);
+        if (e.getActionMasked() == MotionEvent.ACTION_UP && touching != 0 && onPick != null) onPick.accept(color());
         invalidate();
         return true;
     }
