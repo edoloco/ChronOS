@@ -166,6 +166,13 @@
             android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize" />
         <activity
+            android:name=".DualDrawActivity"
+            android:exported="false"
+            android:label="DUAL-Draw"
+            android:launchMode="singleTask"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize" />
+        <activity
             android:name=".SketchActivity"
             android:exported="false"
             android:excludeFromRecents="true"

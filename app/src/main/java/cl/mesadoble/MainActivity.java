@@ -218,7 +218,10 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         side = hub.side();
         if (side >= 0) applySide();
         if (solo) setupSolo(root);
-        if (side < 0) chooseSide();   // solo la primera vez: después se recuerda (se cambia en Ajustes)
+        // intro de la nueva etapa: fondo naranja, papel del teléfono (si falta), letras, logo y sonido
+        boolean askRole = !solo && !prefs.getBoolean("roleV2", false);
+        if (b == null && !Intro.shownThisProcess && (askRole || prefs.getBoolean("introOn", true))) showIntro(askRole);
+        else if (side < 0) chooseSide();   // solo la primera vez: después se recuerda (se cambia en Ajustes)
         hub.add(this);
         LinkService.start(this);
         if (android.os.Build.VERSION.SDK_INT >= 33 && !prefs.getBoolean("askedNotif", false)) {
@@ -1458,6 +1461,11 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         boolean auto = hub.autoKeyboard(), principal = side == 1;
         boolean h = prefs.getBoolean("orientH", true);
         Ui.Sheet sh = new Ui.Sheet(this).title("Ajustes");
+        boolean introOn = prefs.getBoolean("introOn", true);
+        sh.option(Ui.PALETTE, -1, "Intro al iniciar: " + (introOn ? "sí" : "no"), "Fondo naranja, logo y sonido al abrir ChronOS", introOn, () -> {
+            prefs.edit().putBoolean("introOn", !introOn).apply();
+            Toast.makeText(this, !introOn ? "La intro se verá al iniciar" : "Intro desactivada", Toast.LENGTH_SHORT).show();
+        });
         if (solo) {
             boolean spl = prefs.getBoolean("soloSplit", true);
             sh.option(Ui.LAYOUT_STACK, -1, "Apps: " + (spl ? "arriba, con ChronOS abajo" : "pantalla completa"),
@@ -1808,6 +1816,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private void toolsMenu() {
         new Ui.Sheet(this)
                 .title("Herramientas")
+                .option(Ui.PALETTE, "DUAL-Draw", "Dibuja abajo con zoom y presión; arriba se ve la obra completa (con capas)", this::openDualDraw)
                 .option(Ui.NOTE, "Nota", "Una nota para escribir", this::addNote)
                 .option(Ui.IMAGE, "Imagen", "Una foto de la galería", this::pickImage)
                 .option(Ui.BATTERY, "Batería", "Nivel de batería del principal y del extendido", this::addBattery)
@@ -1825,6 +1834,17 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .badgeIf(Updater.updateAvailable(this), "1")
                 .button("Cerrar", false, null)
                 .show();
+    }
+
+    /** DUAL-Draw: en el principal se ve la obra, en el extendido se dibuja (en una pantalla, las dos cosas). */
+    private void openDualDraw() {
+        if (solo || !hub.connected()) {
+            if (!solo) Toast.makeText(this, "Sin el otro teléfono, DUAL-Draw se abre en una sola pantalla", Toast.LENGTH_LONG).show();
+            startActivity(DualDrawActivity.intent(this, "solo"));
+            return;
+        }
+        hub.send("dwOpen");
+        startActivity(DualDrawActivity.intent(this, side == 1 ? "view" : "edit"));
     }
 
     private void addBattery() {
@@ -2877,6 +2897,32 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         updateStatus();
     }
 
+    // ---------------- intro ----------------
+
+    private Intro intro;
+    private boolean otherRole2;
+
+    private void showIntro(boolean ask) {
+        intro = new Intro(this, new Intro.Host() {
+            @Override public boolean chooseRole(int s) { return chooseRole2(s); }
+            @Override public int side() { return side; }
+            @Override public boolean solo() { return solo; }
+            @Override public boolean connected() { return hub.connected(); }
+        });
+        intro.setOnDone(() -> intro = null);
+        rootView.addView(intro, new FrameLayout.LayoutParams(-1, -1));
+        intro.start(ask);
+    }
+
+    /** Papel elegido en la intro: el otro teléfono toma el contrario. No deja dos principales ni dos extendidos. */
+    private boolean chooseRole2(int s) {
+        if (hub.connected() && otherRole2 && otherSide == s) return false;
+        prefs.edit().putBoolean("roleV2", true).apply();
+        if (hub.connected()) hub.send("roleSet", "side", 1 - s);
+        if (side != s) main.postDelayed(() -> setSide(s), 300);
+        return true;
+    }
+
     private void chooseSide() {
         int ic = layoutIcon();
         new Ui.Sheet(this)
@@ -3396,6 +3442,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             JSONObject full = new JSONObject();
             try {
                 hello.put("t", "hello"); hello.put("side", side); hello.put("ver", Updater.installedVersion(this));
+                hello.put("role2", prefs.getBoolean("roleV2", false));
                 JSONArray arr = new JSONArray();
                 for (Item it : desk.items) arr.put(it.toJson(false));
                 full.put("t", "full"); full.put("items", arr);
@@ -3523,7 +3570,16 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             case "recList":
                 main.post(() -> { desk.setRecents(m); if (recentsBar != null) recentsBar.set(m); });
                 break;
+            case "roleSet":   // el otro teléfono eligió su papel en la intro: este toma el contrario
+                if (!solo) main.post(() -> {
+                    int ns = m.optInt("side", side);
+                    prefs.edit().putBoolean("roleV2", true).apply();
+                    if (ns != side && ns >= 0) setSide(ns);
+                    if (intro != null) intro.remoteAnswered();
+                });
+                break;
             case "hello":
+                otherRole2 = m.optBoolean("role2", false);
                 otherSide = m.optInt("side", -1);
                 otherVersion = m.optString("ver", "");
                 updateStatus();

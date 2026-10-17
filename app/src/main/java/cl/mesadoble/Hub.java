@@ -455,6 +455,11 @@ public class Hub implements Link.Listener {
             else if (!"skEnd".equals(t)) send("skImg", "err", "Activa la accesibilidad de ChronOS en el principal (versión completa) para dibujar desde aquí");
             return;
         }
+        if ("dwOpen".equals(t)) {   // DUAL-Draw se abrió en el otro teléfono: aquí la otra mitad
+            main.post(() -> startOwn(DualDrawActivity.intent(app, isPrincipal() ? "view" : "edit"), () -> DualDrawActivity.open, 98,
+                    "DUAL-Draw", "Toca para abrir la otra mitad de DUAL-Draw"));
+            return;
+        }
         if ("sketchOn".equals(t)) {
             if (!isPrincipal() && !SketchActivity.dismissed && !SketchActivity.open)
                 main.post(() -> startOwn(new Intent(app, SketchActivity.class), () -> SketchActivity.open, 97, "Mesa de dibujo", "Toca para dibujar en Sketchbook desde aquí"));
