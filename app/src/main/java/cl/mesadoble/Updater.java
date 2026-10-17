@@ -40,7 +40,10 @@ public class Updater {
     private static final Handler main = new Handler(Looper.getMainLooper());
 
     static String repo(Context c) {
-        String p = c.getSharedPreferences("mesa", Context.MODE_PRIVATE).getString("repo", "");
+        android.content.SharedPreferences sp = c.getSharedPreferences("mesa", Context.MODE_PRIVATE);
+        String p = sp.getString("repo", "");
+        // transición: el repositorio antiguo pasó a llamarse ChronOS
+        if (p.equalsIgnoreCase("edoloco/mesa-doble")) { p = "edoloco/ChronOS"; sp.edit().putString("repo", p).apply(); }
         if (!p.isEmpty()) return p;
         int id = c.getResources().getIdentifier("repo", "string", c.getPackageName());
         return id != 0 ? c.getString(id) : "";
@@ -325,9 +328,9 @@ public class Updater {
     private static void editRepo(Activity a, Hub hub) {
         android.widget.EditText e = new android.widget.EditText(a);
         e.setText(repo(a));
-        e.setHint("usuario/mesa-doble");
+        e.setHint("usuario/ChronOS");
         e.setSingleLine(true);
-        new Ui.Sheet(a).title("Repositorio de GitHub").message("El que tiene las versiones en Releases, como usuario/mesa-doble.").view(e)
+        new Ui.Sheet(a).title("Repositorio de GitHub").message("El que tiene las versiones en Releases, como usuario/ChronOS.").view(e)
                 .button("Cancelar", false, null)
                 .button("Guardar", true, () -> {
                     a.getSharedPreferences("mesa", Context.MODE_PRIVATE).edit().putString("repo", e.getText().toString().trim()).apply();

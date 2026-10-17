@@ -14,7 +14,8 @@ android {
         versionCode((System.getenv('VERSION_CODE') ?: '1').toInteger())
         versionName(System.getenv('VERSION_NAME') ?: '1.0')
         // repositorio de GitHub (dueño/nombre) para que la app busque sus propias actualizaciones
-        resValue "string", "repo", (System.getenv('GITHUB_REPOSITORY') ?: '')
+        // desde la versión de transición, todas las actualizaciones vienen de edoloco/ChronOS
+        resValue "string", "repo", "edoloco/ChronOS"
     }
 
     buildFeatures { resValues true }
