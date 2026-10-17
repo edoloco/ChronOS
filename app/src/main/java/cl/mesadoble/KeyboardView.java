@@ -56,7 +56,7 @@ public class KeyboardView extends View {
     private static Key sendKey() { return new Key(ACT, "Enviar ➤", null, null, 0, "send", 2f); }
 
     private final List<Key[]> rows = new ArrayList<>();
-    private final float[] rowWeights = {0.72f, 1, 1, 1, 1, 1};
+    private final float[] rowWeights = {0.72f, 1, 1, 1, 1, 1.18f};   // la fila del espacio, un poco más alta
     private final Map<Integer, Key> pointers = new HashMap<>();
     private int heldMods = 0, latchedMods = 0, usedWhileHeld = 0;
     private boolean caps = false;
@@ -114,7 +114,7 @@ public class KeyboardView extends View {
                 mod("Mayús", SHIFT, 1.25f), c("<", ">", null), l("z"), l("x"), l("c"), l("v"), l("b"), l("n"),
                 l("m"), c(",", ";", null), c(".", ":", null), c("-", "_", null), mod("Mayús", SHIFT, 2.75f)});
         rows.add(new Key[]{
-                mod("Ctrl", CTRL, 1.5f), mod("AltGr", ALTGR, 1.5f), c(" ", null, null, 10f),   // espacio ancho (sin flechas)
+                mod("Ctrl", CTRL, 1.25f), mod("AltGr", ALTGR, 1.25f), c(" ", null, null, 10.5f),   // espacio ancho y alto (sin flechas)
                 sendKey()});   // Enviar: esquina inferior derecha
     }
 
