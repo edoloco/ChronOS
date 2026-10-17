@@ -1466,6 +1466,10 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             prefs.edit().putBoolean("introOn", !introOn).apply();
             Toast.makeText(this, !introOn ? "La intro se verá al iniciar" : "Intro desactivada", Toast.LENGTH_SHORT).show();
         });
+        sh.option(Ui.PALETTE, "Ver la intro ahora", "En los dos teléfonos, con la pregunta de cuál es el principal", () -> {
+            if (hub.connected() && !solo) hub.send("introPlay");
+            playIntroAgain();
+        });
         if (solo) {
             boolean spl = prefs.getBoolean("soloSplit", true);
             sh.option(Ui.LAYOUT_STACK, -1, "Apps: " + (spl ? "arriba, con ChronOS abajo" : "pantalla completa"),
@@ -2902,6 +2906,13 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private Intro intro;
     private boolean otherRole2;
 
+    /** Repite la intro completa (también la pregunta del papel). */
+    private void playIntroAgain() {
+        if (intro != null) return;
+        if (!solo) prefs.edit().putBoolean("roleV2", false).apply();
+        showIntro(!solo);
+    }
+
     private void showIntro(boolean ask) {
         intro = new Intro(this, new Intro.Host() {
             @Override public boolean chooseRole(int s) { return chooseRole2(s); }
@@ -3569,6 +3580,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 break;
             case "recList":
                 main.post(() -> { desk.setRecents(m); if (recentsBar != null) recentsBar.set(m); });
+                break;
+            case "introPlay":
+                if (!solo) main.post(this::playIntroAgain);
                 break;
             case "roleSet":   // el otro teléfono eligió su papel en la intro: este toma el contrario
                 if (!solo) main.post(() -> {
