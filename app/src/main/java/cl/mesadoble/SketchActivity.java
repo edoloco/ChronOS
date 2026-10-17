@@ -20,7 +20,6 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -34,7 +33,8 @@ import java.util.List;
  * Mesa de dibujo en el EXTENDIDO (con Sketchbook abierto en el principal).
  * Abajo se ve una zona del dibujo con zoom; el dedo traza aquí y, al soltar, el trazo se dibuja en Sketchbook
  * dentro de esa zona (más chico = más fino). Después llega una imagen de cómo quedó.
- * Dos dedos: mover la zona y cambiar el zoom. A la izquierda, atajos que tocan botones de Sketchbook.
+ * Dos dedos: mover la zona y cambiar el zoom. El trazo de vista previa imita el pincel elegido en Sketchbook
+ * (grosor, color y opacidad): se aprende comparando la imagen antes y después de cada trazo.
  */
 public class SketchActivity extends Activity implements Link.Listener {
 
@@ -43,16 +43,13 @@ public class SketchActivity extends Activity implements Link.Listener {
     static volatile boolean dismissed;
     static SketchActivity live;
 
-    private static final String[] SLOTS = {"Deshacer", "Rehacer", "Pincel", "Borrador", "Color", "Tamaño", "Capas", "Atajo"};
 
     private final Handler h = new Handler(Looper.getMainLooper());
     private Hub hub;
     private Pad pad;
     private TextView banner;
     private SharedPreferences prefs;
-    private int pickSlot = -1;          // configurando este atajo
     private boolean pickView;           // eligiendo la zona en la vista completa
-    private final List<TextView> slotBtns = new ArrayList<>();
 
     private int dp(float v) { return Math.round(v * getResources().getDisplayMetrics().density); }
 
@@ -65,30 +62,6 @@ public class SketchActivity extends Activity implements Link.Listener {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.HORIZONTAL);
         root.setBackgroundColor(0xFF0E1418);
-
-        // atajos
-        LinearLayout side = new LinearLayout(this);
-        side.setOrientation(LinearLayout.VERTICAL);
-        side.setPadding(dp(6), dp(6), dp(6), dp(6));
-        for (int i = 0; i < SLOTS.length; i++) {
-            final int k = i;
-            TextView t = btn(SLOTS[i], v -> slot(k));
-            t.setOnLongClickListener(v -> { config(k); return true; });
-            slotBtns.add(t);
-            side.addView(t, new LinearLayout.LayoutParams(dp(84), dp(40)));
-            ((LinearLayout.LayoutParams) t.getLayoutParams()).bottomMargin = dp(5);
-        }
-        TextView view = btn("Vista ⤢", v -> pickView());
-        view.setBackground(round(0xFF1E5BC6));
-        side.addView(view, new LinearLayout.LayoutParams(dp(84), dp(40)));
-        ((LinearLayout.LayoutParams) view.getLayoutParams()).topMargin = dp(8);
-        TextView exit = btn("Salir", v -> { dismissed = true; finish(); });
-        exit.setBackground(round(0xFF7A2430));
-        side.addView(exit, new LinearLayout.LayoutParams(dp(84), dp(40)));
-        ((LinearLayout.LayoutParams) exit.getLayoutParams()).topMargin = dp(5);
-        ScrollView sv = new ScrollView(this);
-        sv.addView(side);
-        root.addView(sv, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT));
 
         // tablero
         android.widget.FrameLayout area = new android.widget.FrameLayout(this);
@@ -104,13 +77,29 @@ public class SketchActivity extends Activity implements Link.Listener {
                 android.widget.FrameLayout.LayoutParams.WRAP_CONTENT, android.widget.FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
         bl.topMargin = dp(10);
         area.addView(banner, bl);
+        // dos botones chicos en la esquina: vista completa y salir
+        LinearLayout corner = new LinearLayout(this);
+        corner.setOrientation(LinearLayout.HORIZONTAL);
+        TextView view = btn("⤢", v -> pickView());
+        view.setTextSize(18);
+        view.setBackground(circle(0xCC1E5BC6));
+        TextView exit = btn("✕", v -> { dismissed = true; finish(); });
+        exit.setTextSize(16);
+        exit.setBackground(circle(0xCC7A2430));
+        LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(dp(42), dp(42));
+        cl.leftMargin = dp(8);
+        corner.addView(view, cl);
+        corner.addView(exit, new LinearLayout.LayoutParams(cl));
+        android.widget.FrameLayout.LayoutParams kl = new android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT, android.widget.FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.END);
+        kl.topMargin = dp(8); kl.rightMargin = dp(8);
+        area.addView(corner, kl);
         root.addView(area, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1));
         setContentView(root);
-        refreshSlots();
         immersive();
         if (!prefs.getBoolean("skHelp", false)) {
             prefs.edit().putBoolean("skHelp", true).apply();
-            say("Dibuja con un dedo · dos dedos mueven la zona y el zoom · mantén apretado un atajo para elegir su botón en Sketchbook", 7000);
+            say("Dibuja con un dedo · dos dedos mueven la zona y el zoom · ⤢ para ver el dibujo completo", 7000);
         }
     }
 
@@ -132,8 +121,11 @@ public class SketchActivity extends Activity implements Link.Listener {
         return t;
     }
 
-    private void refreshSlots() {
-        for (int i = 0; i < slotBtns.size(); i++) slotBtns.get(i).setAlpha(prefs.getString("sk_" + i, null) == null ? 0.5f : 1f);
+    private GradientDrawable circle(int color) {
+        GradientDrawable g = new GradientDrawable();
+        g.setShape(GradientDrawable.OVAL);
+        g.setColor(color);
+        return g;
     }
 
     private void immersive() {
@@ -173,7 +165,7 @@ public class SketchActivity extends Activity implements Link.Listener {
     /** Cada tanto se pide la imagen otra vez (por si se cambió algo arriba), si no se está dibujando. */
     private final Runnable refresh = new Runnable() {
         @Override public void run() {
-            if (!pad.busy() && pickSlot < 0 && !pickView) requestZoom();
+            if (!pad.busy() && !pickView) requestZoom();
             h.postDelayed(this, 5000);
         }
     };
@@ -206,26 +198,10 @@ public class SketchActivity extends Activity implements Link.Listener {
         if (hub.connected()) hub.send("skTap", "x", x, "y", y, "r", rectJson(), "w", pad.getWidth(), "h", pad.getHeight());
     }
 
-    // ---------------- atajos ----------------
-
-    private void slot(int i) {
-        String v = prefs.getString("sk_" + i, null);
-        if (v == null) { config(i); return; }
-        String[] xy = v.split(",");
-        try { sendTap(Double.parseDouble(xy[0]), Double.parseDouble(xy[1])); } catch (Exception ignored) { }
-    }
-
-    private void config(int i) {
-        pickSlot = i;
-        pickView = false;
-        say("Toca el botón de Sketchbook para «" + SLOTS[i] + "»", 0);
-        pad.setFullMode(true);
-        requestFull();
-    }
+    // ---------------- vista completa ----------------
 
     private void pickView() {
         pickView = true;
-        pickSlot = -1;
         say("Toca dónde quieres dibujar", 0);
         pad.setFullMode(true);
         requestFull();
@@ -233,12 +209,7 @@ public class SketchActivity extends Activity implements Link.Listener {
 
     /** Toque en la vista completa (nx, ny de la pantalla del principal). */
     void picked(double nx, double ny) {
-        if (pickSlot >= 0) {
-            prefs.edit().putString("sk_" + pickSlot, nx + "," + ny).apply();
-            Toast.makeText(this, "«" + SLOTS[pickSlot] + "» listo", Toast.LENGTH_SHORT).show();
-            pickSlot = -1;
-            refreshSlots();
-        } else if (pickView) {
+        if (pickView) {
             pad.centerOn(nx, ny);
             pickView = false;
         }
@@ -268,7 +239,7 @@ public class SketchActivity extends Activity implements Link.Listener {
 
     @Override public void onState(int state, String info) {
         if (state != Link.CONNECTED) h.post(() -> say("El principal no está conectado", 0));
-        else h.post(() -> { if (pickSlot < 0 && !pickView) banner.setVisibility(View.GONE); });
+        else h.post(() -> { if (!pickView) banner.setVisibility(View.GONE); });
     }
 
     // ======================= el tablero =======================
@@ -294,7 +265,13 @@ public class SketchActivity extends Activity implements Link.Listener {
         // dos dedos
         private double[] r0;
         private float mx0, my0, d0;
-        private Bitmap shownBefore;
+        // pincel aprendido: grosor (fracción del ancho de la pantalla del principal) y color, de comparar antes/después
+        private double brushW = -1;
+        private int brushColor = 0xE600E5FF;
+        private Bitmap beforeImg;
+        private double[] beforeRect;
+        private float[] lastPts;
+        private long lastSentAt;
 
         Pad(SketchActivity a) {
             super(a);
@@ -343,12 +320,70 @@ public class SketchActivity extends Activity implements Link.Listener {
             if (w > 0 && h > 0) { sw = w; sh = h; }
             if (full) fullImg = b;
             else {
+                if (lastPts != null && beforeImg != null && SystemClock.uptimeMillis() - lastSentAt > 150
+                        && java.util.Arrays.equals(r, beforeRect) && b.getWidth() == beforeImg.getWidth() && b.getHeight() == beforeImg.getHeight()) {
+                    if (learn(beforeImg, b, r, lastPts)) lastPts = null;
+                    else if (SystemClock.uptimeMillis() - lastSentAt > 3000) lastPts = null;   // no se vio el trazo: se deja como estaba
+                }
                 img = b;
                 imgRect = r;
                 if (SystemClock.uptimeMillis() - sentAt > 200) sent.clear();
             }
             if (sizeChanged) { fit(); a.requestZoom(); }
             invalidate();
+        }
+
+        private static int diff(int a, int b) {
+            return Math.abs(((a >> 16) & 255) - ((b >> 16) & 255)) + Math.abs(((a >> 8) & 255) - ((b >> 8) & 255)) + Math.abs((a & 255) - (b & 255));
+        }
+
+        /**
+         * Compara la imagen antes y después del trazo a lo largo del recorrido: donde cambió, se mide el ancho
+         * (de lado a lado, perpendicular al trazo) y se toma el color. Así la vista previa imita el pincel elegido.
+         */
+        private boolean learn(Bitmap before, Bitmap after, double[] r, float[] p) {
+            int bw = after.getWidth(), bh = after.getHeight(), np = p.length / 2;
+            if (np < 3) return false;
+            double rw = r[2] - r[0], rh = r[3] - r[1];
+            List<Float> widths = new ArrayList<>();
+            long sr = 0, sg = 0, sb = 0;
+            int hits = 0, tries = 0, K = Math.min(28, np);
+            for (int k = 0; k < K; k++) {
+                int i = (int) ((long) k * (np - 1) / Math.max(1, K - 1));
+                float x = (float) ((p[i * 2] - r[0]) / rw * bw), y = (float) ((p[i * 2 + 1] - r[1]) / rh * bh);
+                int i0 = Math.max(0, i - 2), i1 = Math.min(np - 1, i + 2);
+                float dx = (float) ((p[i1 * 2] - p[i0 * 2]) / rw * bw), dy = (float) ((p[i1 * 2 + 1] - p[i0 * 2 + 1]) / rh * bh);
+                float len = (float) Math.hypot(dx, dy);
+                if (len < 0.5f) continue;
+                float px = -dy / len, py = dx / len;   // perpendicular
+                int cx = Math.round(x), cy = Math.round(y);
+                if (cx < 1 || cy < 1 || cx >= bw - 1 || cy >= bh - 1) continue;
+                tries++;
+                int na = after.getPixel(cx, cy);
+                if (diff(na, before.getPixel(cx, cy)) < 45) continue;
+                hits++;
+                sr += (na >> 16) & 255; sg += (na >> 8) & 255; sb += na & 255;
+                float w = 0;
+                for (int side = -1; side <= 1; side += 2) {
+                    for (float t = 0.5f; t < 90; t += 0.5f) {
+                        int qx = Math.round(x + side * px * t), qy = Math.round(y + side * py * t);
+                        if (qx < 0 || qy < 0 || qx >= bw || qy >= bh || diff(after.getPixel(qx, qy), before.getPixel(qx, qy)) < 45) { w += t; break; }
+                    }
+                }
+                widths.add(w);
+            }
+            if (tries == 0 || hits < Math.max(3, tries * 0.35f) || widths.isEmpty()) return false;
+            java.util.Collections.sort(widths);
+            float wpx = widths.get(widths.size() / 2);
+            brushW = wpx / bw * rw;
+            brushColor = 0xF0000000 | ((int) (sr / hits) << 16) | ((int) (sg / hits) << 8) | (int) (sb / hits);
+            return true;
+        }
+
+        private void applyBrush() {
+            float w = brushW > 0 ? (float) (brushW / (rect[2] - rect[0]) * getWidth()) : 2.5f * dp;
+            ink.setStrokeWidth(Math.max(1f, w));
+            ink.setColor(brushColor);
         }
 
         private RectF fullBox() {
@@ -375,6 +410,7 @@ public class SketchActivity extends Activity implements Link.Listener {
                 for (int i = 1; i < 8; i++) { c.drawLine(vw * i / 8, 0, vw * i / 8, vh, grid); c.drawLine(0, vh * i / 8, vw, vh * i / 8, grid); }
                 c.drawText("Esperando la imagen de Sketchbook…", vw / 2, vh / 2, txt);
             }
+            applyBrush();
             for (Path p : sent) c.drawPath(p, ink);
             if (cur != null) c.drawPath(cur, ink);
         }
@@ -445,7 +481,12 @@ public class SketchActivity extends Activity implements Link.Listener {
                     if (cur == null) return true;
                     long dur = e.getEventTime() - downAt;
                     if (!moved && dur < 350) a.sendTap(pts[0], pts[1]);
-                    else { a.sendStroke(pts, n, dur); sent.add(cur); sentAt = SystemClock.uptimeMillis(); }
+                    else {
+                        a.sendStroke(pts, n, dur);
+                        sent.add(cur);
+                        sentAt = SystemClock.uptimeMillis();
+                        if (img != null && imgRect != null) { beforeImg = img; beforeRect = imgRect.clone(); lastPts = java.util.Arrays.copyOf(pts, n); lastSentAt = sentAt; }
+                    }
                     cur = null;
                     invalidate();
                     return true;
