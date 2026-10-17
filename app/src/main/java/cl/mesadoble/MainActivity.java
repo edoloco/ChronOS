@@ -1244,6 +1244,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (cbar == null) return;
         int H = rootView.getHeight();
         if (H == 0) { rootView.post(() -> layoutChrono(false)); return; }
+        if (solo && nbar != null && pane2 != null) { layoutSolo(animate, H); return; }
         boolean top = barAtTop();
         int bh = cbar.barHeight();
         float y = top ? 0 : H - bh;
@@ -1457,6 +1458,14 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         boolean auto = hub.autoKeyboard(), principal = side == 1;
         boolean h = prefs.getBoolean("orientH", true);
         Ui.Sheet sh = new Ui.Sheet(this).title("Ajustes");
+        if (solo) {
+            boolean spl = prefs.getBoolean("soloSplit", true);
+            sh.option(Ui.LAYOUT_STACK, -1, "Apps: " + (spl ? "arriba, con ChronOS abajo" : "pantalla completa"),
+                    spl ? "Como en los dos teléfonos (necesita la accesibilidad)" : "La app ocupa toda la pantalla", spl, () -> {
+                        prefs.edit().putBoolean("soloSplit", !spl).apply();
+                        Toast.makeText(this, !spl ? "Las apps se abrirán arriba, con ChronOS abajo" : "Las apps se abrirán a pantalla completa", Toast.LENGTH_SHORT).show();
+                    });
+        }
         if (principal) {
             sh.option(h ? Ui.LAYOUT_STACK : Ui.LAYOUT_SIDE_V, deskSide(), h ? "Orientación: horizontal" : "Orientación: vertical",
                     h ? "Principal arriba, extendido abajo" : "Principal a la izquierda, extendido a la derecha", false, this::chooseOrientation);
@@ -2243,28 +2252,32 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         desk.setTwin(desk2);
         desk2.setSide(1);
         root.addView(desk2, 1, new FrameLayout.LayoutParams(-1, 0, Gravity.BOTTOM));
+        final boolean sp = isInMultiWindowMode();   // pantalla partida: arriba está la app, aquí solo la mesa de abajo
+        if (sp) desk.setVisibility(View.GONE);
         root.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
             int H = b - t;
             if (H <= 0) return;
             FrameLayout.LayoutParams a1 = (FrameLayout.LayoutParams) desk.getLayoutParams(), a2 = (FrameLayout.LayoutParams) desk2.getLayoutParams();
-            if (a1.height == H / 2 && a2.height == H - H / 2) return;
-            a1.height = H / 2; a1.gravity = Gravity.TOP;
-            a2.height = H - H / 2; a2.gravity = Gravity.BOTTOM;
+            int h1 = sp ? 0 : H / 2;
+            if (a1.height == h1 && a2.height == H - h1) return;
+            a1.height = h1; a1.gravity = Gravity.TOP;
+            a2.height = H - h1; a2.gravity = Gravity.BOTTOM;
             main.post(() -> { desk.setLayoutParams(a1); desk2.setLayoutParams(a2); });
         });
         // barra de abajo (como la del extendido): accesos rápidos, logo con el menú inicio y apps recientes
         nbar = new ChronoBar(this, ChronoBar.NAV, night);
         nbar.setListener(new ChronoBar.Listener() {
-            @Override public void onBarSwipe(ChronoBar b, boolean down) { setFileMode(!fileMode, false); }
+            @Override public void onBarSwipe(ChronoBar b, boolean down) { if (b.edgeTop() == down || split()) setFileMode(!fileMode, false); }
             @Override public void onClockTap() { hub.openAlarms(); }
             @Override public void onLogoTap() { showStart(startOverlay.getVisibility() != View.VISIBLE); }
             @Override public void onLogoLong() { showStart(true); }
         });
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER);
-        int[] kinds = {SquareButton.APPS, SquareButton.TOOLS, SquareButton.FILES};
-        String[] labels = {"Apps", "Herramientas", "Archivos"};
-        Runnable[] acts = {this::showApps, this::toolsMenu, () -> setFileMode(!fileMode, false)};
+        int[] kinds = sp ? new int[]{SquareButton.APPS, SquareButton.HOME, SquareButton.FILES} : new int[]{SquareButton.APPS, SquareButton.TOOLS, SquareButton.FILES};
+        String[] labels = sp ? new String[]{"Apps", "Pantalla completa", "Archivos"} : new String[]{"Apps", "Herramientas", "Archivos"};
+        Runnable[] acts = sp ? new Runnable[]{this::showApps, this::soloFull, () -> setFileMode(!fileMode, false)}
+                : new Runnable[]{this::showApps, this::toolsMenu, () -> setFileMode(!fileMode, false)};
         for (int i = 0; i < kinds.length; i++) {
             final Runnable r = acts[i];
             SquareButton sb = new SquareButton(this, kinds[i], labels[i], false, night);
@@ -2290,6 +2303,103 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     private FilePane pane2;
+    private android.animation.ValueAnimator soloAnim;
+
+    /** Una pantalla partida por Android (la app arriba, ChronOS abajo). */
+    private boolean split() { return solo && isInMultiWindowMode(); }
+
+    /**
+     * Una pantalla: el gestor se ve como en los dos teléfonos. Las barras se juntan en el medio (la del reloj baja,
+     * la del logo sube) y van destapando el gestor detrás, como abrir una ventana; al devolverlas, se cierra.
+     * Con la pantalla partida (ChronOS abajo) solo está la mitad de abajo: la barra del logo sube y destapa el gestor.
+     */
+    private void layoutSolo(boolean animate, int H) {
+        final int W = rootView.getWidth();
+        final boolean sp = split();
+        final int bh = cbar.barHeight(), nbh = nbar.barHeight();
+        FrameLayout.LayoutParams a1 = (FrameLayout.LayoutParams) pane.getLayoutParams(), a2 = (FrameLayout.LayoutParams) pane2.getLayoutParams();
+        int h1 = sp ? 0 : H / 2, h2 = H - h1;
+        if (a1.height != h1 || a2.height != h2 || a1.gravity != Gravity.TOP || a2.gravity != Gravity.BOTTOM) {
+            a1.height = h1; a1.gravity = Gravity.TOP;
+            a2.height = h2; a2.gravity = Gravity.BOTTOM;
+            pane.setLayoutParams(a1); pane2.setLayoutParams(a2);
+        }
+        pane.setPadding(0, 0, 0, cbar.visualHeight());
+        pane2.setPadding(0, nbar.visualHeight(), 0, 0);
+        pane.setTranslationY(0); pane2.setTranslationY(0);
+        cbar.setVisibility(sp ? View.GONE : View.VISIBLE);
+        cbar.setEdgeTop(!fileMode);
+        nbar.setEdgeTop(fileMode);
+        final float cTo = fileMode ? h1 - bh : 0, nTo = fileMode ? h1 : H - nbh;
+        final float cFrom = cbar.getTranslationY(), nFrom = nbar.getTranslationY();
+        if (fileMode) { if (!sp) pane.setVisibility(View.VISIBLE); pane2.setVisibility(View.VISIBLE); }
+        if (soloAnim != null) soloAnim.cancel();
+        soloAnim = android.animation.ValueAnimator.ofFloat(0f, 1f);
+        soloAnim.setDuration(animate ? 420 : 0);
+        soloAnim.setInterpolator(new android.view.animation.DecelerateInterpolator(1.4f));
+        soloAnim.addUpdateListener(va -> {
+            float f = (float) va.getAnimatedValue();
+            float cy = cFrom + (cTo - cFrom) * f, ny = nFrom + (nTo - nFrom) * f;
+            cbar.setTranslationY(cy);
+            nbar.setTranslationY(ny);
+            // arriba se ve el gestor por encima de la barra que baja; abajo, por debajo de la barra que sube
+            pane.setClipBounds(new android.graphics.Rect(0, 0, Math.max(1, W), Math.max(0, Math.round(cy + bh))));
+            pane2.setClipBounds(new android.graphics.Rect(0, Math.max(0, Math.round(ny - h1)), Math.max(1, W), h2));
+        });
+        soloAnim.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(android.animation.Animator a) {
+                if (!fileMode) { pane.setVisibility(View.GONE); pane2.setVisibility(View.GONE); }
+                if (sp) pane.setVisibility(View.GONE);
+            }
+        });
+        soloAnim.start();
+        placeStart();
+    }
+
+    // ---------------- una pantalla: la app arriba y ChronOS abajo, como en los dos teléfonos ----------------
+
+    /**
+     * Abre la app arriba y deja ChronOS abajo (pantalla partida de Android). Necesita la accesibilidad (versión
+     * completa) para partir la pantalla; sin ella, la app se abre a pantalla completa.
+     */
+    private void soloLaunch(String pkg, String label) {
+        Intent i = getPackageManager().getLaunchIntentForPackage(pkg);
+        if (i == null) { Toast.makeText(this, label + " no está instalada", Toast.LENGTH_SHORT).show(); return; }
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        if (!prefs.getBoolean("soloSplit", true) || MesaAccess.instance == null) {
+            try { startActivity(i); } catch (Exception ignored) { }
+            if (MesaAccess.instance == null && prefs.getBoolean("soloSplit", true) && !prefs.getBoolean("soloSplitHint", false)) {
+                prefs.edit().putBoolean("soloSplitHint", true).apply();
+                Toast.makeText(this, "Para ver la app arriba y ChronOS abajo, activa la accesibilidad de ChronOS (versión completa)", Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
+        if (isInMultiWindowMode()) {   // ChronOS ya está abajo: la app va arriba
+            i.addFlags(Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT);
+            try { startActivity(i); } catch (Exception ignored) { }
+            return;
+        }
+        try { startActivity(i); } catch (Exception e) { return; }
+        final android.content.Context app = getApplicationContext();
+        main.postDelayed(() -> {
+            if (MesaAccess.instance == null) return;
+            MesaAccess.instance.performGlobalAction(7 /* GLOBAL_ACTION_TOGGLE_SPLIT_SCREEN: la app queda arriba */);
+            main.postDelayed(() -> {
+                try { app.startActivity(new Intent(app, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT)); }
+                catch (Exception ignored) { }
+            }, 900);
+        }, 900);
+    }
+
+    /** Con la pantalla partida: la app de arriba pasa a pantalla completa. */
+    private void soloFull() {
+        if (MesaAccess.instance != null && isInMultiWindowMode()) MesaAccess.instance.performGlobalAction(7);
+    }
+
+    @Override public void onMultiWindowModeChanged(boolean on) {
+        super.onMultiWindowModeChanged(on);
+        if (solo) recreate();   // ChronOS abajo (solo la mesa de abajo) o a pantalla completa (las dos mitades)
+    }
 
     /** En una pantalla, el otro teléfono volvió: ¿volver a dos pantallas? */
     private void offerTwoScreens() {
@@ -2593,6 +2703,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     private void openApp(String pkg, String label) {
+        if (solo && !pkg.equals(getPackageName())) { soloLaunch(pkg, label); return; }
         int r = hub.launchHere(pkg, label);
         if (r == Hub.NOT_INSTALLED) {
             new Ui.Sheet(this)
