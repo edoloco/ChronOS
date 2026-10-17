@@ -250,6 +250,7 @@ public class Hub implements Link.Listener {
             FileServer fs = FileServer.get(app);
             fs.start();
             send("fsTok", "k", fs.token, "port", FileServer.PORT);
+            if (isPrincipal()) main.postDelayed(() -> Sketch.resend(this), 2500);
             main.removeCallbacks(restoreIme);
             if (isPrincipal() && link.peerIp() != null) app.getSharedPreferences("mesa", Context.MODE_PRIVATE).edit().putString("extIp", link.peerIp()).apply();
             app.getSharedPreferences("mesa", Context.MODE_PRIVATE).edit().putLong("lastLinkAt", System.currentTimeMillis()).apply();
@@ -447,6 +448,23 @@ public class Hub implements Link.Listener {
         if (t.startsWith("fs") && !t.endsWith("R") && !"fsTok".equals(t)) { FileServer.get(app).handle(m, this); return; }
         if ("fsTok".equals(t)) FileServer.get(app).setRemote(m.optString("k"), m.optInt("port"));
         if ("kbAsk".equals(t)) { sendImeState(); if (!imeSelected(app)) notifySwitch(); return; }
+        // mesa de dibujo (Sketchbook)
+        if ("skStroke".equals(t) || "skTap".equals(t) || "skShot".equals(t) || "skEnd".equals(t)) {
+            if (!isPrincipal()) return;
+            if (MesaAccess.instance != null) { final JSONObject fm = m; main.post(() -> { if (MesaAccess.instance != null) Sketch.handle(MesaAccess.instance, this, fm); }); }
+            else if (!"skEnd".equals(t)) send("skImg", "err", "Activa la accesibilidad de ChronOS en el principal (versión completa) para dibujar desde aquí");
+            return;
+        }
+        if ("sketchOn".equals(t)) {
+            if (!isPrincipal() && !SketchActivity.dismissed && !SketchActivity.open)
+                main.post(() -> startOwn(new Intent(app, SketchActivity.class), () -> SketchActivity.open, 97, "Mesa de dibujo", "Toca para dibujar en Sketchbook desde aquí"));
+            return;
+        }
+        if ("sketchOff".equals(t)) {
+            SketchActivity.dismissed = false;
+            for (Link.Listener l : listeners) l.onMessage(m);
+            return;
+        }
         if ("mouse".equals(t) || "click".equals(t) || "scroll".equals(t) || "nav".equals(t) || "pad".equals(t)) {
             if (MesaAccess.instance != null && MesaAccess.instance.handle(m)) return;
             pointerFallback(m);

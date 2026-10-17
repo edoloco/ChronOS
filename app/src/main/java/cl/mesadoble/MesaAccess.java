@@ -32,7 +32,8 @@ import java.util.Set;
  * 1) cambia el método de entrada a ChronOS (y lo devuelve al anterior al desconectarse);
  * 2) avisa al extendido cuando se abre una app de chat, para mostrar el teclado allá;
  * 3) ejecuta el touchpad (puntero, clic, desplazar, atrás/inicio) y el gamepad (toques en pantalla).
- * No lee el contenido de las pantallas.
+ * 4) mesa de dibujo para Sketchbook: dibuja los trazos que llegan del extendido y captura la zona para mostrarla allá.
+ * Fuera de la captura de la mesa de dibujo (solo con Sketchbook abierto), no lee el contenido de las pantallas.
  */
 public class MesaAccess extends AccessibilityService {
 
@@ -68,6 +69,8 @@ public class MesaAccess extends AccessibilityService {
         lastPkg = pkg;
         Hub h = Hub.get(this);
         if (!h.isPrincipal() || !h.connected()) return;
+        // mesa de dibujo: Sketchbook al frente → el extendido se vuelve tableta (teclados y avisos del sistema no cuentan)
+        if (pkg.equals(getPackageName()) || getPackageManager().getLaunchIntentForPackage(pkg) != null) Sketch.front(h, pkg);
         if (CHAT_APPS.contains(pkg)) {
             switchToMesa();
             h.send("openKb", "pkg", pkg);

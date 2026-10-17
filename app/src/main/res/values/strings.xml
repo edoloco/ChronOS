@@ -1,5 +1,5 @@
 <resources>
     <string name="app_name">ChronOS</string>
-    <string name="access_desc">Cambia al teclado ChronOS cuando los dos teléfonos están unidos (y devuelve tu teclado al desconectarse), y abre el teclado en el extendido cuando usas una app de chat. No lee el contenido de tu pantalla.</string>
+    <string name="access_desc">Cambia al teclado ChronOS cuando los dos teléfonos están unidos (y devuelve tu teclado al desconectarse), y abre el teclado en el extendido cuando usas una app de chat. Con Sketchbook abierto dibuja los trazos hechos en el extendido y captura la zona del dibujo para mostrarla allá; fuera de eso no lee el contenido de tu pantalla.</string>
     <string name="widget_reloj">Reloj y fecha. Al tocarlo abre las alarmas.</string>
 </resources>

@@ -6,4 +6,5 @@
     android:canRetrieveWindowContent="true"
     android:accessibilityFlags="flagReportViewIds"
     android:canPerformGestures="true"
+    android:canTakeScreenshot="true"
     android:description="@string/access_desc" />
