@@ -30,11 +30,12 @@ final class GamePalTouch {
     private static final long DUR = 40;   // ms de cada tramo
     private static final Handler main = new Handler(Looper.getMainLooper());
 
-    private static final class F { float x, y, tx, ty; GestureDescription.StrokeDescription s; boolean ending; }
+    /** Un dedo: dónde está, adónde va, dónde se apoyó (bx, by) y si hay que volver a apoyarlo tras un corte. */
+    private static final class F { float x, y, tx, ty, bx, by; GestureDescription.StrokeDescription s; boolean ending, restart; }
 
     private static final Map<Integer, F> fingers = new HashMap<>();
     private static boolean busy;
-    private static int jiggle, stale = -1;
+    private static int jiggle, stale = -1, cuts;
 
     private static Point screen(MesaAccess s) {
         Point p = new Point();
@@ -51,7 +52,7 @@ final class GamePalTouch {
         if (ph == 0) {
             if (f != null) { f.ending = true; fingers.remove(id); fingers.put(--stale, f); }   // quedó colgado: se suelta
             F n = new F();
-            n.x = n.tx = x; n.y = n.ty = y;
+            n.x = n.tx = n.bx = x; n.y = n.ty = n.by = y;
             fingers.put(id, n);
         } else if (f != null) {
             f.tx = x; f.ty = y;
@@ -70,6 +71,12 @@ final class GamePalTouch {
         for (Iterator<Map.Entry<Integer, F>> it = fingers.entrySet().iterator(); it.hasNext(); ) {
             F f = it.next().getValue();
             Path p = new Path();
+            if (f.s == null && f.restart) {
+                // Android cortó el gesto: el dedo se vuelve a apoyar donde empezó y de ahí va a su posición,
+                // así un joystick que se crea donde se apoya el dedo (Brawl Stars) sigue apuntando igual
+                f.x = f.bx; f.y = f.by;
+                f.restart = false;
+            }
             p.moveTo(f.x, f.y);
             float tx = f.tx, ty = f.ty;
             if (Math.abs(tx - f.x) < 0.5f && Math.abs(ty - f.y) < 0.5f) tx = f.x + (jiggle == 0 ? 0.6f : -0.6f);   // quieto: un pelo, para que el tramo no sea vacío
@@ -93,12 +100,15 @@ final class GamePalTouch {
                 @Override public void onCancelled(GestureDescription g) {
                     // Android cortó el gesto (por ejemplo, se tocó la pantalla de arriba): los dedos vuelven a apoyarse
                     busy = false;
-                    for (F f : fingers.values()) f.s = null;
-                    main.postDelayed(() -> pump(s), 20);
+                    cuts++;
+                    for (F f : fingers.values()) { if (f.s != null) f.restart = true; f.s = null; }
+                    Hub h = Hub.get(s);
+                    if (h.connected()) h.send("gpCut", "n", cuts);
+                    pump(s);
                 }
             }, main);
         } catch (Exception e) { ok = false; }
-        if (!ok) { busy = false; for (F f : fingers.values()) f.s = null; }
+        if (!ok) { busy = false; for (F f : fingers.values()) { if (f.s != null) f.restart = true; f.s = null; } }
     }
 
     /** Suelta todos los dedos (se cerró Game Pal). */

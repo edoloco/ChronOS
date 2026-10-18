@@ -52,6 +52,7 @@ public class GamePalActivity extends Activity implements Link.Listener {
     private Pad pad;
     private Calib calib;
     private Bitmap bg;
+    private TextView cutsView;
 
     private float dp;
     private int dp(float v) { return Math.round(v * dp); }
@@ -94,6 +95,11 @@ public class GamePalActivity extends Activity implements Link.Listener {
         t.setShadowLayer(3 * dp, 0, dp, 0xCC000000);
         t.setPadding(dp(12), 0, dp(10), 0);
         top.addView(t);
+        cutsView = new TextView(this);
+        cutsView.setTextSize(11);
+        cutsView.setTextColor(0xFFFFC107);
+        cutsView.setPadding(0, 0, dp(8), 0);
+        top.addView(cutsView);
         top.addView(pill("Ajustar", v -> startCalib()));
         top.addView(pill("✕", v -> finish()));
         FrameLayout.LayoutParams tl = new FrameLayout.LayoutParams(-2, dp(40), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
@@ -165,6 +171,7 @@ public class GamePalActivity extends Activity implements Link.Listener {
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
         if ("gameBg".equals(t)) h.post(() -> { if (m.optString("pkg").isEmpty()) finish(); else loadBg(); });
+        else if ("gpCut".equals(t)) h.post(() -> cutsView.setText("⚠ " + m.optInt("n") + " cortes"));
         else if ("gpImg".equals(t)) h.post(() -> {
             if (calib == null) return;
             if (m.has("err")) { android.widget.Toast.makeText(this, m.optString("err"), android.widget.Toast.LENGTH_LONG).show(); return; }
