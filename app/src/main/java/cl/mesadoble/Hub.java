@@ -60,6 +60,7 @@ public class Hub implements Link.Listener {
         side = prefs.getInt("side", -1);
         link = new Link(c, this);
         ScreenSync.listen(c, this);
+        LidWatch.update(c, this);
         CallHub.listen(c, this);   // llamadas del principal → controles en el extendido
         // batería: la de este teléfono se comparte con el otro para el widget de baterías
         c.registerReceiver(new android.content.BroadcastReceiver() {
@@ -377,6 +378,13 @@ public class Hub implements Link.Listener {
             }
             return;
         }
+        // tapa: el otro teléfono notó que se cerró (o abrió) la carcasa
+        if ("lid".equals(t)) {
+            String ls = m.optString("s");
+            main.post(() -> { if ("close".equals(ls)) ScreenSync.lockNow(app, this); else ScreenSync.wakeNow(app); });
+            return;
+        }
+        if ("lidPref".equals(t)) { boolean on = m.optBoolean("on", true); main.post(() -> LidWatch.setEnabled(app, this, on)); return; }
         // prueba de sensores (para detectar la tapa cerrada): el otro teléfono pide los valores de este
         if ("senOn".equals(t)) {
             main.post(() -> {

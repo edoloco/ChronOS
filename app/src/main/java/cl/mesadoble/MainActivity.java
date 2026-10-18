@@ -1476,6 +1476,13 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             hub.send("gpPref", "on", !gpOn);
             Toast.makeText(this, !gpOn ? "Game Pal activado" : "Game Pal desactivado", Toast.LENGTH_SHORT).show();
         });
+        boolean lidOn = LidWatch.enabled(this);
+        sh.option(Ui.LOCK, -1, "Bloquear al cerrar la tapa: " + (lidOn ? "sí" : "no"),
+                "Al cerrar la carcasa se bloquean los dos; al abrir se encienden", lidOn, () -> {
+                    LidWatch.setEnabled(this, hub, !lidOn);
+                    hub.send("lidPref", "on", !lidOn);
+                    Toast.makeText(this, !lidOn ? "Se bloquearán al cerrar la tapa" : "Bloqueo con la tapa desactivado", Toast.LENGTH_SHORT).show();
+                });
         sh.option(Ui.LOCK, "Prueba de sensores", "Proximidad, luz e imán de los dos teléfonos: para detectar la tapa cerrada",
                 () -> startActivity(SensorTestActivity.intent(this)));
         if (solo) {

@@ -75,6 +75,12 @@ public class ScreenSync {
         wake(app, "unlock".equals(s));
     }
 
+    /** Bloquear este teléfono ahora (tapa cerrada), aunque la sincronización de pantallas esté apagada. */
+    static void lockNow(Context app, Hub hub) { MainActivity.dropOverLock(); lock(app, hub); }
+
+    /** Encender este teléfono (tapa abierta): queda en la pantalla de bloqueo. */
+    static void wakeNow(Context app) { SleepActivity.close(); wake(app, false); }
+
     private static void lock(Context app, Hub hub) {
         PowerManager pm = (PowerManager) app.getSystemService(Context.POWER_SERVICE);
         if (pm != null && !pm.isInteractive()) return;   // ya está apagada
