@@ -83,7 +83,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
     private ValueBar valueBar;          // "Valor de trazo": grosor en vivo con la otra mano
     private float valueLevel;
     private LinearLayout selBar;        // selección: borrar, invertir, quitar, tolerancia
-    private TextView tolLabel;
+    private TextView tolLabel, sizeLabel;
     private int selTol;
 
     private int dp(float v) { return Math.round(v * dp); }
@@ -243,6 +243,9 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         TextView t = label("DUAL-Draw", 17);
         t.setTextColor(ORANGE);
         top.addView(t);
+        sizeLabel = label("", 12);
+        sizeLabel.setPadding(dp(8), 0, dp(4), 0);
+        top.addView(sizeLabel);
         top.addView(pill("◫ Paneles", v -> { panelsOn = !panelsOn; applyPanels(); }));
         top.addView(pill("Nuevo", v -> new Ui.Sheet(this).title("¿Empezar un dibujo nuevo?").message("Se borra el dibujo actual (guarda antes un PNG si lo quieres).")
                 .button("Cancelar", false, null).button("Nuevo", true, this::askSize).show()));
@@ -639,10 +642,12 @@ public class DualDrawActivity extends Activity implements Link.Listener {
     private int seenW, seenH;
 
     private void changed() {
+        if (sizeLabel != null) sizeLabel.setText(doc.W + " × " + doc.H);
         if (doc.W != seenW || doc.H != seenH) {   // dibujo nuevo de otro tamaño: se vuelve a encuadrar
             if (seenW != 0) Toast.makeText(this, "Dibujo de " + doc.W + " × " + doc.H + " px", Toast.LENGTH_SHORT).show();
             seenW = doc.W; seenH = doc.H;
-            if (editor != null && editor.getWidth() > 0) editor.fit();
+            if (viewer != null) viewer.frame = null;   // el marco del encuadre anterior ya no sirve (era de otro tamaño)
+            if (editor != null && editor.getWidth() > 0) { editor.lastViewSent = 0; editor.fit(); }
             if (viewer != null && viewer.getWidth() > 0) { viewer.fit(); viewer.rebuildBlur(); }
         }
         if (selBar != null) selBar.setVisibility(tool == T_WAND || tool == T_LASSO || doc.hasSel ? View.VISIBLE : View.GONE);
@@ -1041,7 +1046,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         private long lastT;
         private float z0, ox0, oy0, mx0, my0, dist0;
         private final List<Float> lasso = new ArrayList<>();
-        private Paint sheetShadow;
+        private Paint sheetShadow, info;
         private final Paint selP = new Paint(Paint.FILTER_BITMAP_FLAG), lassoP = new Paint(Paint.ANTI_ALIAS_FLAG);
 
         Board(boolean edit) {
@@ -1092,7 +1097,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
             oy = vh >= doc.H ? -(vh - doc.H) / 2f : Math.max(0, Math.min(doc.H - vh, oy));
         }
 
-        private long lastViewSent;
+        long lastViewSent;
 
         private void sendView() {
             if (!edit) return;
@@ -1120,14 +1125,15 @@ public class DualDrawActivity extends Activity implements Link.Listener {
             c.drawRect(dst.left + 2 * dp, dst.top + 6 * dp, dst.right - 2 * dp, dst.bottom + 9 * dp, sheetShadow);
             doc.draw(c, dst);
             if (sym) c.drawLine(dst.centerX(), dst.top, dst.centerX(), dst.bottom, axis);
-            if (doc.hasSel && doc.sel != null) c.drawBitmap(doc.sel, null, dst, selP);   // lo seleccionado, en celeste
+            if (doc.hasSel && doc.sel != null) c.drawBitmap(doc.sel, null, dst, selP);
+  // lo seleccionado, en celeste
             if (edit && lasso.size() >= 4) {
                 android.graphics.Path lp = new android.graphics.Path();
                 lp.moveTo((lasso.get(0) - ox) * zoom, (lasso.get(1) - oy) * zoom);
                 for (int i = 2; i + 1 < lasso.size(); i += 2) lp.lineTo((lasso.get(i) - ox) * zoom, (lasso.get(i + 1) - oy) * zoom);
                 c.drawPath(lp, lassoP);
             }
-            if (!edit && frame != null && (frame.width() < doc.W - 2 || frame.height() < doc.H - 2))
+            if (!edit && frame != null && frame.right <= doc.W + 1 && frame.bottom <= doc.H + 1 && (frame.width() < doc.W - 2 || frame.height() < doc.H - 2))
                 c.drawRect(dst.left + frame.left * zoom, dst.top + frame.top * zoom, dst.left + frame.right * zoom, dst.top + frame.bottom * zoom, framePaint);
             if (edit && shaping) {   // vista previa de la forma
                 prev.setColor(DrawDoc.eraser(brush) ? 0x88FF4444 : color);
@@ -1138,6 +1144,10 @@ public class DualDrawActivity extends Activity implements Link.Listener {
                 else c.drawOval(new RectF(Math.min(ax, bx), Math.min(ay, by), Math.max(ax, bx), Math.max(ay, by)), prev);
             }
             c.restore();
+            if (edit) {   // tamaño del dibujo y versión, abajo a la izquierda
+                if (info == null) { info = new Paint(Paint.ANTI_ALIAS_FLAG); info.setColor(0xCCFFFFFF); info.setTextSize(11 * dp); info.setShadowLayer(2 * dp, 0, dp / 2, 0x99000000); }
+                c.drawText(doc.W + " × " + doc.H + " px · " + Updater.installedVersion(getContext()), 8 * dp, getHeight() - 8 * dp, info);
+            }
         }
 
         private float sxv(float x) { return flip ? getWidth() - x : x; }
