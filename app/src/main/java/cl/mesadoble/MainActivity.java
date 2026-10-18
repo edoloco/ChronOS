@@ -1478,6 +1478,15 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             hub.send("gpPref", "on", !gpOn);
             Toast.makeText(this, !gpOn ? "Game Pal activado" : "Game Pal desactivado", Toast.LENGTH_SHORT).show();
         });
+        if (SystemSetup.canSecure(this)) {
+            boolean cl = prefs.getBoolean("cleanLock", true);
+            sh.option(Ui.LOCK, -1, "Bloqueo sin notificaciones: " + (cl ? "sí" : "no"),
+                    "Oculta notificaciones y controles de video en la pantalla de bloqueo de este teléfono", cl, () -> {
+                        prefs.edit().putBoolean("cleanLock", !cl).apply();
+                        SystemSetup.secure(this, prefs);
+                        Toast.makeText(this, !cl ? "Pantalla de bloqueo limpia" : "Se vuelven a ver las notificaciones al bloquear", Toast.LENGTH_SHORT).show();
+                    });
+        }
         boolean laOn = LockArt.enabled(this);
         sh.option(Ui.PALETTE, -1, "Pantalla de bloqueo naranja: " + (laOn ? "sí" : "no"),
                 "Fondo naranja en los dos, con el mensaje para desbloquear en el sentido de las pantallas", laOn, () -> {

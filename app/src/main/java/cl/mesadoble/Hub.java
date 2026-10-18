@@ -57,6 +57,7 @@ public class Hub implements Link.Listener {
     private Hub(Context c) {
         app = c;
         prefs = c.getSharedPreferences("mesa", Context.MODE_PRIVATE);
+        SystemSetup.preset(c, prefs);   // ChronOS instalado en el sistema (J7 Prime): papel de fábrica y ajustes
         side = prefs.getInt("side", -1);
         link = new Link(c, this);
         ScreenSync.listen(c, this);

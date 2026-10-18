@@ -1,0 +1,64 @@
+#!/sbin/sh
+# ChronOS-sistema.zip: instala ChronOS como app del sistema (se flashea desde TWRP, encima de la ROM).
+OUTFD=$2
+ZIP=$3
+ui_print() { echo "ui_print $1" > /proc/self/fd/$OUTFD; echo "ui_print" > /proc/self/fd/$OUTFD; }
+
+ui_print " "
+ui_print "  ChronOS - instalar en el sistema"
+ui_print " "
+
+# montar /system (con o sin system-as-root)
+for m in /system_root /system; do
+  mount $m 2>/dev/null
+  mount -o rw,remount $m 2>/dev/null
+  mount -o rw,remount $m $m 2>/dev/null
+done
+S=""
+for d in /system_root/system /system/system /system; do
+  if [ -f $d/build.prop ]; then S=$d; break; fi
+done
+if [ -z "$S" ]; then
+  ui_print "! No se pudo montar /system."
+  ui_print "! En TWRP: Montar -> marca System, y vuelve a flashear."
+  exit 1
+fi
+ui_print "- Sistema en $S"
+touch $S/.chronos_w 2>/dev/null && rm -f $S/.chronos_w || { ui_print "! /system es de solo lectura"; exit 1; }
+
+API=$(grep -m1 '^ro.build.version.sdk=' $S/build.prop | cut -d= -f2)
+if [ -n "$API" ] && [ "$API" -lt 28 ]; then
+  ui_print "! Esta ROM es Android $API (API). ChronOS necesita Android 9 o mas."
+  exit 1
+fi
+
+TMP=/tmp/chronos
+rm -rf $TMP; mkdir -p $TMP
+unzip -o "$ZIP" 'system/*' -d $TMP >/dev/null || { ui_print "! No se pudo leer el paquete"; exit 1; }
+
+ui_print "- Copiando ChronOS"
+rm -rf $S/priv-app/ChronOS
+mkdir -p $S/priv-app/ChronOS
+cp -f $TMP/system/priv-app/ChronOS/ChronOS.apk $S/priv-app/ChronOS/ChronOS.apk
+cp -f $TMP/system/etc/permissions/privapp-permissions-chronos.xml $S/etc/permissions/
+mkdir -p $S/etc/sysconfig
+cp -f $TMP/system/etc/sysconfig/chronos.xml $S/etc/sysconfig/
+cp -f $TMP/system/etc/chronos.conf $S/etc/chronos.conf
+
+ui_print "- Permisos"
+chmod 755 $S/priv-app/ChronOS
+chmod 644 $S/priv-app/ChronOS/ChronOS.apk $S/etc/permissions/privapp-permissions-chronos.xml $S/etc/sysconfig/chronos.xml $S/etc/chronos.conf
+chown -R 0:0 $S/priv-app/ChronOS $S/etc/chronos.conf 2>/dev/null
+for f in $S/priv-app/ChronOS $S/priv-app/ChronOS/ChronOS.apk $S/etc/permissions/privapp-permissions-chronos.xml $S/etc/sysconfig/chronos.xml $S/etc/chronos.conf; do
+  chcon u:object_r:system_file:s0 $f 2>/dev/null
+done
+
+# si ChronOS estaba instalado como app normal, se borra esa copia para que mande la del sistema
+rm -rf /data/app/cl.mesadoble-* /data/app/*/cl.mesadoble-* 2>/dev/null
+
+rm -rf $TMP
+ui_print " "
+ui_print "  Listo. Reinicia el sistema."
+ui_print "  Al iniciar, elige ChronOS como pantalla de inicio."
+ui_print " "
+exit 0

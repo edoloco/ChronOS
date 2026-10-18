@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android nunca frena a ChronOS por ahorro de batería ni de datos: la conexión entre pantallas no se corta -->
+<config>
+    <allow-in-power-save package="cl.mesadoble"/>
+    <allow-in-data-usage-save package="cl.mesadoble"/>
+</config>

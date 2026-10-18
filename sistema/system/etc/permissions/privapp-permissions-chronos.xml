@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Permisos de sistema de ChronOS (todos los permisos "privileged" que pide la app deben estar aquí) -->
+<permissions>
+    <privapp-permissions package="cl.mesadoble">
+        <permission name="android.permission.WRITE_SECURE_SETTINGS"/>
+        <permission name="android.permission.PACKAGE_USAGE_STATS"/>
+    </privapp-permissions>
+</permissions>

@@ -38,6 +38,8 @@
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     <!-- brillo de las pantallas (widget de brillo): "Modificar ajustes del sistema" -->
     <uses-permission android:name="android.permission.WRITE_SETTINGS" tools:ignore="ProtectedPermissions" />
+    <!-- solo si ChronOS va instalado en el sistema (ChronOS-sistema.zip) o se da por ADB: accesibilidad y bloqueo limpio -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
 
     <!-- para poder listar y abrir las apps instaladas (Android 11+) -->
     <queries>

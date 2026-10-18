@@ -40,6 +40,12 @@ jobs:
           cp app/build/outputs/apk/completa/release/*.apk MesaDoble-completa.apk
           cp app/build/outputs/apk/liviana/release/*.apk MesaDoble-liviana.apk
 
+      - name: Paquete para el sistema (TWRP)
+        run: |
+          mkdir -p sistema/system/priv-app/ChronOS
+          cp MesaDoble-completa.apk sistema/system/priv-app/ChronOS/ChronOS.apk
+          cd sistema && zip -r -X ../ChronOS-sistema.zip META-INF system
+
       - name: Publicar
         uses: softprops/action-gh-release@v2
         with:
@@ -49,7 +55,9 @@ jobs:
           files: |
             MesaDoble-liviana.apk
             MesaDoble-completa.apk
+            ChronOS-sistema.zip
           body: |
             Versión ${{ env.VERSION_NAME }}. Incluye: ${{ env.NOTA }}
             MesaDoble-liviana.apk: sin permisos sensibles, Play Protect no la bloquea. Sirve para ambos teléfonos.
             MesaDoble-completa.apk: versión con accesibilidad (cambio de teclado, centro de apagado, mesa de dibujo).
+            ChronOS-sistema.zip: para flashear desde TWRP encima de una ROM (por ejemplo en el J7 Prime): ChronOS como app del sistema, extendido de fábrica.
