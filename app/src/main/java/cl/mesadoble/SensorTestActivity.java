@@ -51,11 +51,11 @@ public class SensorTestActivity extends Activity implements Link.Listener {
     /** Lo visto en un teléfono: último valor y extremos. */
     private static final class Side {
         JSONObject s;
-        float lMin = Float.MAX_VALUE, lMax = -1, mBase = -1, mDelta;
-        int covers;
-        boolean wasNear;
+        float lMin = Float.MAX_VALUE, lMax = -1, mBase = -1, mDelta, mPeak;
+        int covers, darks, mags, mN;
+        boolean wasNear, dark, magOn;
         long at;
-        void reset() { lMin = Float.MAX_VALUE; lMax = -1; mBase = -1; mDelta = 0; covers = 0; }
+        void reset() { lMin = Float.MAX_VALUE; lMax = -1; mBase = -1; mDelta = 0; mPeak = 0; mN = 0; covers = 0; darks = 0; mags = 0; }
     }
 
     static Intent intent(Context c) {
@@ -100,8 +100,8 @@ public class SensorTestActivity extends Activity implements Link.Listener {
         how.setPadding(dp(14), dp(12), dp(14), dp(12));
         how.setText("Cómo probar:\n"
                 + "1. Con la carcasa abierta, mira que \"Proximidad\" diga LIBRE en los dos.\n"
-                + "2. Cierra la carcasa (o junta los teléfonos cara a cara) y espera 3 segundos. Sonará un pitido doble si los DOS"
-                + " detectan la tapa.\n"
+                + "2. Cierra la carcasa (o junta los teléfonos cara a cara) y espera 3 segundos. Suena un pitido doble cuando"
+                + " detecta la tapa (por imán o por proximidad de los dos).\n"
                 + "3. Abre: un pitido simple. Revisa los contadores \"veces tapado\" y el registro de abajo.\n"
                 + "4. Si la proximidad no responde, mira \"Imán\": con un imán en la carcasa el número salta mucho al cerrar.\n"
                 + "Mándame una captura de esta pantalla después de cerrar y abrir 3 veces.");
@@ -171,6 +171,9 @@ public class SensorTestActivity extends Activity implements Link.Listener {
         });
     }
 
+    /** Cambio del campo magnético que cuenta como "imán cerca" (girar el teléfono mueve unos 30-60 µT). */
+    static final float MAG_ON = 200, MAG_OFF = 120;
+
     private void got(Side sd, JSONObject s, String who) {
         if (probe == null && sd == me) return;
         sd.s = s;
@@ -182,25 +185,49 @@ public class SensorTestActivity extends Activity implements Link.Listener {
             sd.wasNear = near;
         }
         float lx = (float) s.optDouble("lx", -1);
-        if (lx >= 0) { sd.lMin = Math.min(sd.lMin, lx); sd.lMax = Math.max(sd.lMax, lx); }
+        if (lx >= 0) {
+            sd.lMin = Math.min(sd.lMin, lx);
+            sd.lMax = Math.max(sd.lMax, lx);
+            boolean dk = sd.dark ? lx < 8 : lx < 2;
+            if (dk != sd.dark) {
+                sd.dark = dk;
+                if (dk) sd.darks++;
+                addLog(who + ": luz " + (dk ? "OSCURO" : "vuelve") + " (" + fmt(lx) + " lux)");
+            }
+        }
         float mt = (float) s.optDouble("mt", -1);
         if (mt >= 0) {
-            if (sd.mBase < 0) sd.mBase = mt;
+            // referencia "abierto": sigue despacio al valor normal (para que girar el teléfono no cuente),
+            // y se congela mientras hay un imán cerca
+            if (sd.mBase < 0 || sd.mN++ < 6) sd.mBase = mt;   // las primeras lecturas al encender el sensor pueden venir raras
             float dl = Math.abs(mt - sd.mBase);
-            if (dl > sd.mDelta + 40 && sd.mDelta < 40) addLog(who + ": imán, salto de " + Math.round(dl) + " µT");
+            boolean on = sd.magOn ? dl > MAG_OFF : dl > MAG_ON;
+            if (!on) sd.mBase += (mt - sd.mBase) * 0.05f;
             sd.mDelta = Math.max(sd.mDelta, dl);
+            if (on) sd.mPeak = Math.max(sd.mPeak, mt);
+            if (on != sd.magOn) {
+                sd.magOn = on;
+                if (on) { sd.mags++; addLog(who + ": IMÁN cerca (" + Math.round(mt) + " µT, normal " + Math.round(sd.mBase) + ")"); }
+                else { addLog(who + ": imán se aleja (" + Math.round(mt) + " µT; máximo " + Math.round(sd.mPeak) + ")"); sd.mPeak = 0; }
+            }
         }
         checkLid();
         draw();
     }
 
+    /** Tapa cerrada si cualquier teléfono siente el imán o si los dos están tapados por proximidad. */
+    private boolean closed() {
+        boolean pa = me.s != null && me.s.optBoolean("near"), pb = other.s != null && other.s.optBoolean("near");
+        return me.magOn || other.magOn || (pa && pb);
+    }
+
     private void checkLid() {
-        boolean a = me.s != null && me.s.optBoolean("near"), b = other.s != null && other.s.optBoolean("near");
-        int st = a && b ? 1 : (!a && !b ? 0 : -2);
-        if (st == -2 || st == lidState) return;
+        int st = closed() ? 1 : 0;
+        if (st == lidState) return;
         if (lidState == -1) { lidState = st; return; }
         lidState = st;
-        addLog(st == 1 ? "TAPA CERRADA (los dos tapados)" : "tapa abierta");
+        String why = (me.magOn || other.magOn ? "imán" : "proximidad") + ((me.dark || other.dark) ? " + oscuridad" : "");
+        addLog(st == 1 ? "TAPA CERRADA (" + why + ")" : "tapa abierta");
         if (tone != null) {
             if (st == 1) { tone.startTone(ToneGenerator.TONE_PROP_BEEP2, 300); }
             else tone.startTone(ToneGenerator.TONE_PROP_BEEP, 150);
@@ -214,16 +241,12 @@ public class SensorTestActivity extends Activity implements Link.Listener {
 
     private void draw() {
         boolean a = me.s != null && me.s.optBoolean("near"), b = other.s != null && other.s.optBoolean("near");
-        if (other.s == null) {
-            verdict.setText(hub.connected() ? "Esperando al otro teléfono…" : "Sin conexión con el otro teléfono: solo se ve este");
-            verdict.setTextColor(0xFFFFD54F);
-            verdict.setBackground(card(0x26FFC107));
-        } else if (a && b) {
+        if (closed()) {
             verdict.setText("Tapa: CERRADA");
             verdict.setTextColor(0xFF7CFC9A);
             verdict.setBackground(card(0x264CAF50));
-        } else if (a || b) {
-            verdict.setText("Solo " + (a ? "este" : "el otro") + " está tapado");
+        } else if (other.s == null) {
+            verdict.setText(hub.connected() ? "Esperando al otro teléfono…" : "Sin conexión con el otro teléfono: solo se ve este");
             verdict.setTextColor(0xFFFFD54F);
             verdict.setBackground(card(0x26FFC107));
         } else {
@@ -273,14 +296,16 @@ public class SensorTestActivity extends Activity implements Link.Listener {
         }
         if (s.optBoolean("hasL")) {
             float lx = (float) s.optDouble("lx", -1);
-            col.addView(card("Luz: " + (lx < 0 ? "—" : fmt(lx) + " lux"),
-                    "Visto: " + (sd.lMax < 0 ? "—" : fmt(sd.lMin) + " a " + fmt(sd.lMax) + " lux") + "\nAl cerrar debería bajar casi a 0.", 3));
+            col.addView(card("Luz: " + (lx < 0 ? "—" : fmt(lx) + " lux") + (sd.dark ? " · OSCURO" : ""),
+                    "Visto: " + (sd.lMax < 0 ? "—" : fmt(sd.lMin) + " a " + fmt(sd.lMax) + " lux") + " · veces oscuro: " + sd.darks
+                            + "\nAl cerrar debería bajar casi a 0.", sd.dark ? 1 : 3));
         } else col.addView(card("Luz: no tiene", "", 2));
         if (s.optBoolean("hasM")) {
             float mt = (float) s.optDouble("mt", -1);
-            col.addView(card("Imán: " + (mt < 0 ? "—" : Math.round(mt) + " µT"),
-                    "Mayor cambio visto: " + Math.round(sd.mDelta) + " µT (sin imán, girar el teléfono cambia ~30;"
-                            + " un imán cerca, más de 100).", sd.mDelta > 100 ? 1 : 3));
+            col.addView(card("Imán: " + (mt < 0 ? "—" : Math.round(mt) + " µT") + (sd.magOn ? " · CERCA" : ""),
+                    "Normal (abierto): " + Math.round(Math.max(0, sd.mBase)) + " µT · veces cerca: " + sd.mags
+                            + "\nMayor cambio visto: " + Math.round(sd.mDelta) + " µT (girar el teléfono cambia ~30-60;"
+                            + " cuenta como imán sobre " + Math.round(MAG_ON) + ").", sd.magOn ? 1 : 3));
         } else col.addView(card("Imán: no tiene", "", 2));
     }
 
