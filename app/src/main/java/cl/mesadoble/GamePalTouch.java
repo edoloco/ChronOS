@@ -65,6 +65,12 @@ final class GamePalTouch {
 
     private static void pump(MesaAccess s) {
         if (busy || fingers.isEmpty()) return;
+        // con todos los dedos quietos no se manda nada: el dedo queda apoyado solo (mandar tramos "de relleno"
+        // sin parar es lo que hacía que Android cortara el gesto al mantener el joystick)
+        boolean change = false;
+        for (F f : fingers.values())
+            if (f.s == null || f.ending || Math.abs(f.tx - f.x) >= 0.5f || Math.abs(f.ty - f.y) >= 0.5f) { change = true; break; }
+        if (!change) return;
         GestureDescription.Builder b = new GestureDescription.Builder();
         int n = 0;
         jiggle = 1 - jiggle;
