@@ -621,6 +621,10 @@ public class Hub implements Link.Listener {
 
     public int launchHere(String pkg, String label) {
         if (pkg.equals(app.getPackageName())) { goDesk(); return LAUNCHED; }
+        if (Pals.isPal(pkg)) {   // un PAL: se abre en el principal como una app más
+            if (Pals.get(pkg.substring(4)) == null) return NOT_INSTALLED;
+            return startExternal(Pals.intent(app, pkg.substring(4)), app.getPackageName(), label);
+        }
         Intent i = app.getPackageManager().getLaunchIntentForPackage(pkg);
         if (i == null) return NOT_INSTALLED;
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);

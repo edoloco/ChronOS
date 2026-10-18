@@ -171,6 +171,15 @@
             android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize" />
         <activity
+            android:name=".PalActivity"
+            android:exported="false"
+            android:label="PAL"
+            android:launchMode="singleTask"
+            android:taskAffinity="cl.mesadoble.pal"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard|smallestScreenSize|uiMode" />
+        <activity
             android:name=".SensorTestActivity"
             android:exported="false"
             android:label="Prueba de sensores"

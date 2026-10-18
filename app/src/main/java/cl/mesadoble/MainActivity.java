@@ -1864,6 +1864,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private void toolsMenu() {
         new Ui.Sheet(this)
                 .title("Herramientas")
+                .option(Ui.GRID, "PALS", "Compañeritos para las apps que no se ven bien en horizontal (Claude…)", this::palsMenu)
                 .option(Ui.PALETTE, "DUAL-Draw", "Dibuja abajo con zoom y presión; arriba se ve la obra completa (con capas)", this::openDualDraw)
                 .option(Ui.NOTE, "Nota", "Una nota para escribir", this::addNote)
                 .option(Ui.IMAGE, "Imagen", "Una foto de la galería", this::pickImage)
@@ -1882,6 +1883,29 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .badgeIf(Updater.updateAvailable(this), "1")
                 .button("Cerrar", false, null)
                 .show();
+    }
+
+    /** PALS: abrirlos o ponerlos en una mesa (también aparecen al principio de la lista de apps). */
+    private void palsMenu() {
+        Ui.Sheet sh = new Ui.Sheet(this).title("PALS");
+        for (Pals.Pal p : Pals.ALL) {
+            sh.option(Ui.OPEN, "Abrir " + p.name, "Se abre en el principal; escribes con el teclado del extendido", () -> openOnPrincipal("pal:" + p.id, p.name));
+            sh.option(Ui.PIN, "Poner " + p.name + " en la mesa", "Como una app más, con su ícono de naranja", () -> {
+                Item it = new Item();
+                it.kind = Item.APP; it.pkg = "pal:" + p.id; it.title = p.name; it.w = sized(0.24);
+                android.graphics.Bitmap ic = Pals.icon(p, 192);
+                java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+                ic.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, bos);
+                it.setImage(android.util.Base64.encodeToString(bos.toByteArray(), android.util.Base64.NO_WRAP));
+                double[] pos = desk.spotOn(it.w, deskSide());
+                it.x = pos[0]; it.y = pos[1];
+                it.page = desk.page();
+                addItem(it);
+                sendImage(it);
+                main.postDelayed(() -> desk.startEditing(it.id), 200);
+            });
+        }
+        sh.button("Cerrar", false, null).show();
     }
 
     /** DUAL-Draw: en el principal se ve la obra, en el extendido se dibuja (en una pantalla, las dos cosas). */
@@ -2786,6 +2810,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     private void openApp(String pkg, String label) {
+        if (Pals.isPal(pkg)) { hub.launchHere(pkg, label); return; }
         if (solo && !pkg.equals(getPackageName())) { soloLaunch(pkg, label); return; }
         int r = hub.launchHere(pkg, label);
         if (r == Hub.NOT_INSTALLED) {

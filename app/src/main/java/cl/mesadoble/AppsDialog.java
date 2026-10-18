@@ -264,7 +264,9 @@ public class AppsDialog {
                     .option(Ui.PIN, 1, "Poner en el extendido", "Queda en la mesa de abajo, lista para ubicarla", false, () -> {
                         d.dismiss(); host.putOnDesk(app.pkg, app.label, png, 1);
                     })
-                    .option(Ui.TRASH, "Desinstalar", remote ? "Se confirma en el principal" : null, () -> host.uninstall(app.pkg, app.label))
+                    .option(Ui.TRASH, Pals.isPal(app.pkg) ? "Los PALS no se desinstalan" : "Desinstalar", remote ? "Se confirma en el principal" : null, () -> {
+                        if (!Pals.isPal(app.pkg)) host.uninstall(app.pkg, app.label);
+                    })
                     .button("Cerrar", false, null)
                     .show();
             return true;
@@ -304,7 +306,7 @@ public class AppsDialog {
                         saveCache(a, arr, sig);
                         a.runOnUiThread(() -> {
                             synchronized (remoteCache) { remoteCache.clear(); remoteCache.addAll(list); remoteSig = sig; }
-                            all.clear(); all.addAll(list);
+                            all.clear(); all.addAll(Pals.asApps(a)); all.addAll(list);
                             search.setText(search.getText());   // vuelve a filtrar
                             hint.setText("Apps del principal. Toca una para abrirla. Mantén presionado para ponerla en una mesa o desinstalarla.");
                         });
@@ -319,6 +321,7 @@ public class AppsDialog {
 
         if (remote) {
             loadCache(a);
+            all.addAll(Pals.asApps(a)); shown.addAll(Pals.asApps(a));
             synchronized (remoteCache) { all.addAll(remoteCache); shown.addAll(remoteCache); }
             adapter.notifyDataSetChanged();
             if (hub.connected()) {
@@ -332,6 +335,7 @@ public class AppsDialog {
         }
 
         // la lista queda guardada: se muestra al tiro y se revisa en segundo plano por si cambió
+        all.addAll(Pals.asApps(a)); shown.addAll(Pals.asApps(a));
         synchronized (localCache) { all.addAll(localCache); shown.addAll(localCache); }
         adapter.notifyDataSetChanged();
         new Thread(() -> {
@@ -349,7 +353,7 @@ public class AppsDialog {
             Collator col = Collator.getInstance(new Locale("es"));
             Collections.sort(list, (x, y) -> col.compare(x.label, y.label));
             synchronized (localCache) { localCache.clear(); localCache.addAll(list); localSig = sig; }
-            a.runOnUiThread(() -> { all.clear(); all.addAll(list); search.setText(search.getText()); });
+            a.runOnUiThread(() -> { all.clear(); all.addAll(Pals.asApps(a)); all.addAll(list); search.setText(search.getText()); });
         }, "apps").start();
     }
 
