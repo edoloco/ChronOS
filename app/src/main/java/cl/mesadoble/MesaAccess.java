@@ -269,9 +269,17 @@ public class MesaAccess extends AccessibilityService {
         try {
             joyStroke = joyStroke.continueStroke(p, 0, 60, willContinue);
             dispatchGesture(new GestureDescription.Builder().addStroke(joyStroke).build(), null, null);
-            joyX = tx; joyY = ty;
+            float[] end = endOf(p, tx, ty);   // el siguiente tramo debe empezar justo donde Android dejó el dedo
+            joyX = end[0]; joyY = end[1];
         } catch (Exception e) { joyStroke = null; }
         if (!willContinue) joyStroke = null;
+    }
+
+    static float[] endOf(Path p, float tx, float ty) {
+        android.graphics.PathMeasure pm = new android.graphics.PathMeasure(p, false);
+        float[] e = new float[2];
+        if (pm.getLength() > 0 && pm.getPosTan(pm.getLength() * 1.0f, e, null)) return e;
+        return new float[]{tx, ty};
     }
 
     private void pad(JSONObject m) {
@@ -297,7 +305,8 @@ public class MesaAccess extends AccessibilityService {
             joyStroke = new GestureDescription.StrokeDescription(p, 0, 60, true);
             try { dispatchGesture(new GestureDescription.Builder().addStroke(joyStroke).build(), null, null); }
             catch (Exception e) { joyStroke = null; return; }
-            joyX = tx; joyY = ty; joyTX = tx; joyTY = ty;
+            float[] end = endOf(p, tx, ty);
+            joyX = end[0]; joyY = end[1]; joyTX = tx; joyTY = ty;
             h.postDelayed(joyHold, 45);
         } else if (phase == 1) {
             joyTX = tx; joyTY = ty;

@@ -87,7 +87,12 @@ final class GamePalTouch {
                 b.addStroke(f.s);
                 n++;
             } catch (Exception e) { f.s = null; }
-            f.x = tx; f.y = ty;
+            // el próximo tramo tiene que empezar EXACTAMENTE donde Android dejó el dedo: Android calcula ese punto
+            // midiendo el trazo (no usa el número que le dimos), y si no calza ni por una milésima, corta el gesto
+            android.graphics.PathMeasure pm = new android.graphics.PathMeasure(p, false);
+            float[] end = new float[2];
+            if (pm.getLength() > 0 && pm.getPosTan(pm.getLength() * 1.0f, end, null)) { f.x = end[0]; f.y = end[1]; }
+            else { f.x = tx; f.y = ty; }
             if (f.ending) it.remove();
             if (n >= 10) break;
         }
