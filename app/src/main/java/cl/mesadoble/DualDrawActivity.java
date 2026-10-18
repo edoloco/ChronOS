@@ -53,7 +53,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
     static DualDrawActivity live;
     static DrawDoc doc;   // uno por proceso
 
-    static final int ORANGE = 0xFFF57C1F, BG = 0xFF101418;
+    static final int ORANGE = 0xFFF57C1F, BG = 0xFF5F6369;   // fondo gris de trabajo
     static final int T_DRAW = 0, T_LINE = 1, T_RECT = 2, T_OVAL = 3, T_FILL = 4, T_PICK = 5, T_WAND = 6, T_LASSO = 7;
 
     private final Handler h = new Handler(Looper.getMainLooper());
@@ -122,6 +122,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         else {
             LinearLayout col = new LinearLayout(this);
             col.setOrientation(LinearLayout.VERTICAL);
+            col.setClipChildren(false);
             col.addView(buildViewer(), new LinearLayout.LayoutParams(-1, 0, 1));
             col.addView(buildEditor(), new LinearLayout.LayoutParams(-1, 0, 1));
             content = col;
@@ -156,7 +157,8 @@ public class DualDrawActivity extends Activity implements Link.Listener {
     private void askCustomSize() {
         LinearLayout box = new LinearLayout(this);
         box.setGravity(Gravity.CENTER);
-        android.widget.EditText w = num(String.valueOf(doc.W)), hh = num(String.valueOf(doc.H));
+        // campos vacíos (con el ejemplo de fondo): así lo escrito no se pega al número que había
+        android.widget.EditText w = num("Ancho"), hh = num("Alto");
         box.addView(w, new LinearLayout.LayoutParams(dp(110), -2));
         TextView x = new TextView(this);
         x.setText("  ×  ");
@@ -174,12 +176,12 @@ public class DualDrawActivity extends Activity implements Link.Listener {
                 }).show();
     }
 
-    private android.widget.EditText num(String v) {
+    private android.widget.EditText num(String hint) {
         android.widget.EditText e = new android.widget.EditText(this);
         e.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
-        e.setText(v);
+        e.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(4)});
+        e.setHint(hint);
         e.setGravity(Gravity.CENTER);
-        e.setSelectAllOnFocus(true);
         return e;
     }
 
@@ -229,6 +231,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
     /** Principal: la obra a pantalla completa y, encima, los paneles de cristal. */
     private View buildViewer() {
         FrameLayout f = new FrameLayout(this);
+        f.setClipChildren(false);
         viewer = new Board(false);
         f.addView(viewer, new FrameLayout.LayoutParams(-1, -1));
 
@@ -365,7 +368,9 @@ public class DualDrawActivity extends Activity implements Link.Listener {
     private View buildEditor() {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setPadding(dp(6), dp(6), dp(6), dp(6));
+        row.setClipChildren(false);
+        row.setClipToPadding(false);
+        row.setPadding(dp(10), dp(8), dp(10), dp(18));   // espacio para las sombras
         boolean compact = "solo".equals(mode);
         int cell = compact ? 36 : 44;
 
@@ -400,9 +405,14 @@ public class DualDrawActivity extends Activity implements Link.Listener {
 
         // el lienzo, con la barra de "Valor de trazo" a un costado y la barra de selección arriba
         FrameLayout boardBox = new FrameLayout(this);
+        boardBox.setClipChildren(false);
         editor = new Board(true);
         boardBox.addView(editor, new FrameLayout.LayoutParams(-1, -1));
         valueBar = new ValueBar();
+        valueBar.setOutlineProvider(new android.view.ViewOutlineProvider() {
+            @Override public void getOutline(View v, android.graphics.Outline o) { o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), dp(18)); }
+        });
+        valueBar.setElevation(dp(10));
         boardBox.addView(valueBar, valueBarLp());
         selBar = new LinearLayout(this);
         selBar.setGravity(Gravity.CENTER_VERTICAL);
@@ -412,6 +422,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         sg.setStroke(dp(1), 0x40FFFFFF);
         sg.setCornerRadius(dp(18));
         selBar.setBackground(sg);
+        selBar.setElevation(dp(10));
         selBar.addView(pill("Borrar selección", v -> {
             if (!doc.hasSel) { Toast.makeText(this, "Primero selecciona con la varita o el lazo", Toast.LENGTH_SHORT).show(); return; }
             request(opj("selDel", "l", doc.cur));
@@ -594,6 +605,8 @@ public class DualDrawActivity extends Activity implements Link.Listener {
 
     private void op(JSONObject m) {
         doc.apply(m);
+        // dibujo nuevo: después se manda entero, así los dos teléfonos quedan con el mismo tamaño sí o sí
+        if ("new".equals(m.optString("op")) && online()) h.postDelayed(this::sendFull, 300);
         if (online()) {
             try { m.put("t", "dw"); } catch (Exception ignored) { }
             hub.send(m);
@@ -627,6 +640,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
 
     private void changed() {
         if (doc.W != seenW || doc.H != seenH) {   // dibujo nuevo de otro tamaño: se vuelve a encuadrar
+            if (seenW != 0) Toast.makeText(this, "Dibujo de " + doc.W + " × " + doc.H + " px", Toast.LENGTH_SHORT).show();
             seenW = doc.W; seenH = doc.H;
             if (editor != null && editor.getWidth() > 0) editor.fit();
             if (viewer != null && viewer.getWidth() > 0) { viewer.fit(); viewer.rebuildBlur(); }
@@ -829,6 +843,13 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         @Override protected void onDraw(Canvas c) {
             RectF r = new RectF(0, 0, getWidth(), getHeight());
             float rad = 20 * dp;
+            // sombra difuminada sobre el fondo gris (solo afuera del vidrio, para que no lo oscurezca)
+            android.graphics.Path out = new android.graphics.Path();
+            out.addRoundRect(r, rad, rad, android.graphics.Path.Direction.CW);
+            c.save();
+            c.clipOutPath(out);
+            Glass.shadow(c, r, rad, dp, false);
+            c.restore();
             Glass.body(c, r, rad, dp, over == null || over.blur == null ? null : () -> {
                 RectF dst = new RectF(over.dst);
                 dst.offset(-getLeft() - getTranslationX(), -getTop() - getTranslationY());
@@ -1020,6 +1041,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         private long lastT;
         private float z0, ox0, oy0, mx0, my0, dist0;
         private final List<Float> lasso = new ArrayList<>();
+        private Paint sheetShadow;
         private final Paint selP = new Paint(Paint.FILTER_BITMAP_FLAG), lassoP = new Paint(Paint.ANTI_ALIAS_FLAG);
 
         Board(boolean edit) {
@@ -1089,6 +1111,13 @@ public class DualDrawActivity extends Activity implements Link.Listener {
             c.save();
             if (flip) c.scale(-1, 1, getWidth() / 2f, 0);
             dst.set(-ox * zoom, -oy * zoom, (doc.W - ox) * zoom, (doc.H - oy) * zoom);
+            // la hoja proyecta una sombra difuminada sobre el fondo gris
+            if (sheetShadow == null) {
+                sheetShadow = new Paint(Paint.ANTI_ALIAS_FLAG);
+                sheetShadow.setColor(0x8C000000);
+                sheetShadow.setMaskFilter(new android.graphics.BlurMaskFilter(16 * dp, android.graphics.BlurMaskFilter.Blur.NORMAL));
+            }
+            c.drawRect(dst.left + 2 * dp, dst.top + 6 * dp, dst.right - 2 * dp, dst.bottom + 9 * dp, sheetShadow);
             doc.draw(c, dst);
             if (sym) c.drawLine(dst.centerX(), dst.top, dst.centerX(), dst.bottom, axis);
             if (doc.hasSel && doc.sel != null) c.drawBitmap(doc.sel, null, dst, selP);   // lo seleccionado, en celeste
