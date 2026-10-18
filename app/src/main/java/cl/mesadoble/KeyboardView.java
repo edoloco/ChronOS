@@ -166,7 +166,7 @@ public class KeyboardView extends View {
             rows.add(new Key[]{page("?123", "page:1", 1.5f), l("¿"), l("¡"), l("["), l("]"), l("<"), l(">"), l("´"), del});
         }
         rows.add(new Key[]{page(page == 0 ? "?123" : "ABC", page == 0 ? "page:1" : "page:0", 1.3f), page("PC", "layout:pc", 1f),
-                l(","), c(" ", null, null, 4f), l("."), key("↵", KeyEvent.KEYCODE_ENTER, 1f), sendKey()});
+                l(","), c(" ", null, null, 5f), l("."), sendKey()});   // sin "saltar línea": el punto en su lugar y el espacio más ancho
     }
 
     public void setSink(Sink s) { sink = s; }

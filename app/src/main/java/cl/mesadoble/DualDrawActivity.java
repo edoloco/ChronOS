@@ -87,6 +87,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
     private LinearLayout selBar;        // selección: borrar, invertir, quitar, tolerancia
     private LinearLayout xfBar;         // transformar: aplicar, cancelar, restablecer
     private android.graphics.Matrix xf; // transformación en curso de la capa (en el extendido)
+    private int xfL;                    // la capa que se está transformando (fija desde que se empezó)
     private TextView tolLabel, sizeLabel;
     private int selTol;
 
@@ -587,7 +588,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
                 int nt = ((Number) v).intValue();
                 if (tool == T_XFORM && nt != T_XFORM) commitXform();   // al cambiar de herramienta, se aplica
                 tool = nt;
-                if (tool == T_XFORM) { xf = new android.graphics.Matrix(); sendXf(true); }
+                if (tool == T_XFORM) { xf = new android.graphics.Matrix(); xfL = doc.cur; sendXf(true); }
                 break;
             }
             case "size": size = ((Number) v).floatValue(); prefs.edit().putFloat("dwSize", size).apply(); break;
@@ -675,6 +676,9 @@ public class DualDrawActivity extends Activity implements Link.Listener {
     }
 
     private void op(JSONObject m) {
+        // cualquier otra orden (cambiar de capa, deshacer…) primero aplica la transformación pendiente en SU capa
+        String o = m.optString("op");
+        if (xf != null && !"xfPrev".equals(o) && !"xform".equals(o)) commitXform();
         doc.apply(m);
         // dibujo nuevo: después se manda entero, así los dos teléfonos quedan con el mismo tamaño sí o sí
         if ("new".equals(m.optString("op")) && online()) h.postDelayed(this::sendFull, 300);
@@ -1052,7 +1056,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         long now = SystemClock.uptimeMillis();
         if (!force && now - xfSent < 50) return;
         xfSent = now;
-        op(opj("xfPrev", "l", doc.cur, "m", mjson(xf)));
+        op(opj("xfPrev", "l", xfL, "m", mjson(xf)));
     }
 
     private JSONArray mjson(android.graphics.Matrix m) {
@@ -1067,14 +1071,14 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         if (xf == null) return;
         android.graphics.Matrix m = xf;
         xf = null;
-        if (m.isIdentity()) op(opj("xfPrev", "l", doc.cur));
-        else op(opj("xform", "l", doc.cur, "m", mjson(m)));
+        if (m.isIdentity()) op(opj("xfPrev", "l", xfL));
+        else op(opj("xform", "l", xfL, "m", mjson(m)));
         if (tool == T_XFORM) { tool = T_DRAW; refreshTools(); sendState(); }
     }
 
     private void cancelXform() {
         xf = null;
-        op(opj("xfPrev", "l", doc.cur));
+        op(opj("xfPrev", "l", xfL));
         tool = T_DRAW;
         refreshTools();
         sendState();
@@ -1345,7 +1349,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
 
         /** Transformar la capa: un dedo la mueve; dos dedos la escalan y giran (alrededor del punto medio). */
         private boolean xformTouch(MotionEvent e) {
-            if (xf == null) xf = new android.graphics.Matrix();
+            if (xf == null) { xf = new android.graphics.Matrix(); xfL = doc.cur; }
             switch (e.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
                     tTwo = false;
