@@ -408,6 +408,8 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setClipChildren(false);
         row.setClipToPadding(false);
+        // un gesto que empieza en el lienzo es del lienzo aunque el otro dedo caiga sobre un panel (zoom sin trazos)
+        row.setMotionEventSplittingEnabled(false);
         row.setPadding(dp(10), dp(8), dp(10), dp(18));   // espacio para las sombras
         boolean compact = "solo".equals(mode);
         int cell = compact ? 36 : 44;
@@ -1148,6 +1150,8 @@ public class DualDrawActivity extends Activity implements Link.Listener {
 
         @Override protected void onDraw(Canvas c) {
             if (zoom <= 0) fit();
+            // la hoja (con zoom) nunca se sale de su espacio: los paneles de herramientas siempre quedan a la vista
+            c.clipRect(0, 0, getWidth(), getHeight());
             c.save();
             if (flip) c.scale(-1, 1, getWidth() / 2f, 0);
             dst.set(-ox * zoom, -oy * zoom, (doc.W - ox) * zoom, (doc.H - oy) * zoom);
