@@ -1885,27 +1885,98 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .show();
     }
 
-    /** PALS: abrirlos o ponerlos en una mesa (también aparecen al principio de la lista de apps). */
+    /** PALS: tus compañeritos, el catálogo de redes sociales y PALS propios de cualquier página. */
     private void palsMenu() {
         Ui.Sheet sh = new Ui.Sheet(this).title("PALS");
+        for (Pals.Pal p : Pals.active(this))
+            sh.option(Ui.OPEN, p.name, p.custom ? "PAL propio" : "social".equals(p.group) ? "Red social" : "Inteligencia artificial", () -> palMenu(p));
+        sh.option(Ui.GRID, "Catálogo de redes sociales", "Instagram, Facebook, X, TikTok, WhatsApp Web… en horizontal y con tu cuenta", this::palsCatalog);
+        sh.option(Ui.PLUS, "Crear un PAL de cualquier página", "Una página que no se vea bien en ChronOS", this::palCreate);
+        sh.button("Cerrar", false, null).show();
+    }
+
+    private void palsSync() { if (hub.connected()) hub.send("palsSync", "s", Pals.syncState(this)); }
+
+    private void palMenu(Pals.Pal p) {
+        Ui.Sheet sh = new Ui.Sheet(this).title(p.name)
+                .option(Ui.OPEN, "Abrir", "Se abre en el principal; escribes con el teclado del extendido", () -> openOnPrincipal("pal:" + p.id, p.name))
+                .option(Ui.PIN, "Poner en la mesa", "Como una app más, con su ícono de naranja", () -> palOnDesk(p));
+        if (p.custom) sh.option(Ui.TRASH, "Eliminar este PAL", null, () -> { Pals.removeCustom(this, p.id); palsSync(); });
+        else if (!"claude".equals(p.id)) sh.option(Ui.CROSS, "Quitar de mis PALS", "Vuelve al catálogo", () -> { Pals.setEnabled(this, p.id, false); palsSync(); });
+        sh.button("Cerrar", false, null).show();
+    }
+
+    private void palOnDesk(Pals.Pal p) {
+        Item it = new Item();
+        it.kind = Item.APP; it.pkg = "pal:" + p.id; it.title = p.name; it.w = sized(0.24);
+        android.graphics.Bitmap ic = Pals.icon(p, 192);
+        java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+        ic.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, bos);
+        it.setImage(android.util.Base64.encodeToString(bos.toByteArray(), android.util.Base64.NO_WRAP));
+        double[] pos = desk.spotOn(it.w, deskSide());
+        it.x = pos[0]; it.y = pos[1];
+        it.page = desk.page();
+        addItem(it);
+        sendImage(it);
+        main.postDelayed(() -> desk.startEditing(it.id), 200);
+    }
+
+    /** Catálogo: redes sociales hechas para el teléfono en vertical; al activarlas aparecen en tus apps. */
+    private void palsCatalog() {
+        Ui.Sheet sh = new Ui.Sheet(this).title("Catálogo de redes sociales")
+                .message("Las que actives aparecen en tus apps. Al abrirlas inicias sesión una vez (con usuario y contraseña, no con el botón de Google) y queda guardada.");
         for (Pals.Pal p : Pals.ALL) {
-            sh.option(Ui.OPEN, "Abrir " + p.name, "Se abre en el principal; escribes con el teclado del extendido", () -> openOnPrincipal("pal:" + p.id, p.name));
-            sh.option(Ui.PIN, "Poner " + p.name + " en la mesa", "Como una app más, con su ícono de naranja", () -> {
-                Item it = new Item();
-                it.kind = Item.APP; it.pkg = "pal:" + p.id; it.title = p.name; it.w = sized(0.24);
-                android.graphics.Bitmap ic = Pals.icon(p, 192);
-                java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
-                ic.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, bos);
-                it.setImage(android.util.Base64.encodeToString(bos.toByteArray(), android.util.Base64.NO_WRAP));
-                double[] pos = desk.spotOn(it.w, deskSide());
-                it.x = pos[0]; it.y = pos[1];
-                it.page = desk.page();
-                addItem(it);
-                sendImage(it);
-                main.postDelayed(() -> desk.startEditing(it.id), 200);
+            if (!"social".equals(p.group)) continue;
+            boolean on = Pals.enabled(this, p);
+            sh.option(on ? Ui.CHECK : Ui.PLUS, -1, p.name.replace(" PAL", ""), on ? "Activo · toca para quitarlo" : "Toca para agregarlo", on, () -> {
+                Pals.setEnabled(this, p.id, !on);
+                palsSync();
+                Toast.makeText(this, !on ? p.name + " está en tus apps" : p.name + " quitado", Toast.LENGTH_SHORT).show();
+                palsCatalog();
             });
         }
-        sh.button("Cerrar", false, null).show();
+        sh.button("Listo", true, null).show();
+    }
+
+    /** PAL propio: nombre y dirección (se puede usar un enlace copiado). */
+    private void palCreate() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        android.widget.EditText name = new android.widget.EditText(this), url = new android.widget.EditText(this);
+        name.setHint("Nombre (por ejemplo: Diario)");
+        url.setHint("Dirección (https://…)");
+        url.setInputType(android.text.InputType.TYPE_TEXT_VARIATION_URI | android.text.InputType.TYPE_CLASS_TEXT);
+        box.addView(name);
+        box.addView(url);
+        TextView paste = new TextView(this);
+        paste.setText("⎘  Usar el enlace copiado");
+        paste.setTextSize(15);
+        paste.setPadding(0, dp(10), 0, dp(6));
+        paste.setOnClickListener(v -> {
+            android.content.ClipboardManager cb = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            CharSequence t = cb != null && cb.hasPrimaryClip() && cb.getPrimaryClip() != null && cb.getPrimaryClip().getItemCount() > 0
+                    ? cb.getPrimaryClip().getItemAt(0).coerceToText(this) : null;
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("https?://\\S+").matcher(t == null ? "" : t);
+            if (m.find()) url.setText(m.group()); else Toast.makeText(this, "No hay un enlace copiado", Toast.LENGTH_SHORT).show();
+        });
+        box.addView(paste);
+        android.widget.CheckBox wide = new android.widget.CheckBox(this);
+        wide.setText("Vista de computador (más ancha, mejor en horizontal)");
+        wide.setChecked(true);
+        box.addView(wide);
+        new Ui.Sheet(this).title("Crear un PAL").view(box)
+                .button("Cancelar", false, null)
+                .button("Crear", true, () -> {
+                    String u = url.getText().toString().trim();
+                    if (!u.isEmpty() && !u.startsWith("http")) u = "https://" + u;
+                    Uri uu = Uri.parse(u);
+                    if (uu.getHost() == null || !uu.getHost().contains(".")) { Toast.makeText(this, "Falta una dirección válida", Toast.LENGTH_SHORT).show(); return; }
+                    String n = name.getText().toString().trim();
+                    if (n.isEmpty()) n = uu.getHost().replaceFirst("^www\\.", "");
+                    Pals.addCustom(this, n + " PAL", u, wide.isChecked());
+                    palsSync();
+                    Toast.makeText(this, n + " PAL está en tus apps", Toast.LENGTH_SHORT).show();
+                }).show();
     }
 
     /** DUAL-Draw: en el principal se ve la obra, en el extendido se dibuja (en una pantalla, las dos cosas). */

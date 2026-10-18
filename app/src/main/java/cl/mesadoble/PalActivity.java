@@ -88,6 +88,11 @@ public class PalActivity extends Activity {
         });
         // mantener presionado una rama: abre su página (por ejemplo, el proyecto entero)
         if (branch && n.url != null) v.setOnLongClickListener(x -> { web.loadUrl(n.url); return true; });
+        if (!branch && pinned(n)) v.setOnLongClickListener(x -> {
+            new Ui.Sheet(this).title("¿Quitar de Fijadas?").message(n.label)
+                    .button("Cancelar", false, null).button("Quitar", true, () -> unpin(n.url)).show();
+            return true;
+        });
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(depth == 0 ? 40 : 34));
         lp.setMargins(0, dp(2), 0, dp(2));
         tree.addView(v, lp);
@@ -101,6 +106,11 @@ public class PalActivity extends Activity {
         for (Node k : n.kids) drawNode(k, depth + 1);
     }
 
+    private boolean pinned(Node n) {
+        for (Node r : roots) if ("pins".equals(r.list) && r.kids.contains(n)) return true;
+        return false;
+    }
+
     private void reloadLists() {
         for (Node n : roots) if (n.list != null) { n.loaded = false; n.kids.clear(); if (n.open) load(n); }
         drawTree();
@@ -111,6 +121,17 @@ public class PalActivity extends Activity {
      * ChronosPal.got(). Son las mismas consultas que hace la página de Claude para su menú.
      */
     private void load(Node n) {
+        if ("pins".equals(n.list)) {
+            n.kids.clear();
+            org.json.JSONArray a = pins();
+            for (int i = 0; i < a.length(); i++) {
+                org.json.JSONObject o = a.optJSONObject(i);
+                n.kids.add(new Node(null, o.optString("l"), o.optString("u"), null));
+            }
+            n.note = a.length() == 0 ? "Toca ★ abajo para fijar la página que estás viendo" : null;
+            n.loaded = true;
+            return;
+        }
         Uri cur = Uri.parse(web.getUrl() == null ? "" : web.getUrl());
         if (cur.getHost() == null || !allowed(cur)) { n.note = "Abre primero " + pal.name.replace(" PAL", ""); return; }
         n.loading = true;
@@ -198,7 +219,7 @@ public class PalActivity extends Activity {
         super.onCreate(b);
         dp = getResources().getDisplayMetrics().density;
         prefs = getSharedPreferences("mesa", MODE_PRIVATE);
-        pal = Pals.get(getIntent().getStringExtra("pal"));
+        pal = Pals.get(this, getIntent().getStringExtra("pal"));
         if (pal == null) pal = Pals.ALL.get(0);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
@@ -245,12 +266,14 @@ public class PalActivity extends Activity {
         sc.addView(tree);
         menu.addView(sc, new LinearLayout.LayoutParams(-1, 0, 1));
         for (Pals.Item it : pal.menu) roots.add(new Node(it.glyph, it.label, it.url, it.list));
+        roots.add(new Node("★", "Fijadas", null, "pins"));   // páginas que tú fijas con ★
         drawTree();
         // barra de abajo, solo símbolos
         LinearLayout bar1 = new LinearLayout(this), bar2 = new LinearLayout(this);
         bar1.addView(small("←", v -> { if (web.canGoBack()) web.goBack(); }), new LinearLayout.LayoutParams(0, dp(36), 1));
         bar1.addView(small("↻", v -> { web.reload(); reloadLists(); }), new LinearLayout.LayoutParams(0, dp(36), 1));
         bar1.addView(small("⎘", v -> openCopiedLink()), new LinearLayout.LayoutParams(0, dp(36), 1));
+        bar1.addView(small("★", v -> pinPage()), new LinearLayout.LayoutParams(0, dp(36), 1));
         bar1.addView(small("✕", v -> finish()), new LinearLayout.LayoutParams(0, dp(36), 1));
         bar2.addView(small("A−", v -> setZoom(-10)), new LinearLayout.LayoutParams(0, dp(34), 1));
         zoomLabel = text("", 12, false);
@@ -306,6 +329,13 @@ public class PalActivity extends Activity {
         s.setTextZoom(prefs.getInt("pal_" + pal.id + "_zoom", 90));
         // como el navegador normal (sin la marca de "app incrustada", que algunos sitios rechazan)
         s.setUserAgentString(s.getUserAgentString().replace("; wv", "").replaceAll(" Version/\\d+(\\.\\d+)*", ""));
+        if (pal.desktop) {
+            // como computador: la página se arma ancha (foto a un lado y comentarios al otro, etc.), mejor en horizontal
+            String ua = s.getUserAgentString();
+            java.util.regex.Matcher cv = java.util.regex.Pattern.compile("Chrome/[\\d.]+").matcher(ua);
+            s.setUserAgentString("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                    + (cv.find() ? cv.group() : "Chrome/124.0.0.0") + " Safari/537.36");
+        }
         CookieManager cm = CookieManager.getInstance();
         cm.setAcceptCookie(true);
         cm.setAcceptThirdPartyCookies(web, true);
@@ -323,12 +353,14 @@ public class PalActivity extends Activity {
                 // Google no deja iniciar sesión dentro de apps: la página queda pegada en accounts.google.com.
                 // Se vuelve a la entrada del servicio y se explica cómo entrar con el correo.
                 Uri u = Uri.parse(url);
-                if (u.getHost() != null && u.getHost().endsWith("google.com")) {
+                if ("accounts.google.com".equals(u.getHost()) && !allowed(u)) {
                     v.stopLoading();
                     v.post(() -> { v.loadUrl(pal.login); googleHelp(); });
                 }
             }
+            @Override public void onPageCommitVisible(WebView v, String url) { wide(); }
             @Override public void onPageFinished(WebView v, String url) {
+                wide();
                 if (allowed(Uri.parse(url))) prefs.edit().putString("pal_" + pal.id + "_url", url).apply();
                 CookieManager.getInstance().flush();
             }
@@ -346,19 +378,63 @@ public class PalActivity extends Activity {
         setZoom(0);
     }
 
+    /** Modo computador: se fija un ancho virtual para que la página se arme como en un computador. */
+    private void wide() {
+        if (!pal.desktop || pal.vw <= 0) return;
+        web.evaluateJavascript("(function(){var m=document.querySelector('meta[name=viewport]');"
+                + "if(!m){m=document.createElement('meta');m.name='viewport';(document.head||document.documentElement).appendChild(m);}"
+                + "var c='width=" + pal.vw + "';if(m.content!==c)m.content=c;})();", null);
+    }
+
+    // ---------------- páginas fijadas (★) ----------------
+
+    private org.json.JSONArray pins() {
+        try { return new org.json.JSONArray(prefs.getString("pal_" + pal.id + "_pins", "[]")); } catch (Exception e) { return new org.json.JSONArray(); }
+    }
+
+    /** ★: la página que se está viendo queda en la rama "Fijadas" del panel. */
+    private void pinPage() {
+        String url = web.getUrl(), title = web.getTitle();
+        if (url == null || !allowed(Uri.parse(url))) { Toast.makeText(this, "No hay una página para fijar", Toast.LENGTH_SHORT).show(); return; }
+        org.json.JSONArray a = pins();
+        for (int i = 0; i < a.length(); i++) if (url.equals(a.optJSONObject(i).optString("u"))) { Toast.makeText(this, "Ya está fijada", Toast.LENGTH_SHORT).show(); return; }
+        try { a.put(new org.json.JSONObject().put("l", title == null || title.isEmpty() ? url : title).put("u", url)); } catch (Exception ignored) { }
+        prefs.edit().putString("pal_" + pal.id + "_pins", a.toString()).apply();
+        Toast.makeText(this, "Fijada en ★ Fijadas (mantén presionada para quitarla)", Toast.LENGTH_SHORT).show();
+        for (Node n : roots) if ("pins".equals(n.list)) { n.loaded = false; if (n.open) load(n); }
+        drawTree();
+    }
+
+    private void unpin(String url) {
+        org.json.JSONArray a = pins(), b = new org.json.JSONArray();
+        for (int i = 0; i < a.length(); i++) if (!url.equals(a.optJSONObject(i).optString("u"))) b.put(a.optJSONObject(i));
+        prefs.edit().putString("pal_" + pal.id + "_pins", b.toString()).apply();
+        for (Node n : roots) if ("pins".equals(n.list)) { n.loaded = false; if (n.open) load(n); }
+        drawTree();
+    }
+
+    @Override protected void onNewIntent(Intent i) {
+        super.onNewIntent(i);
+        String id = i.getStringExtra("pal");
+        if (id != null && !id.equals(pal.id)) { setIntent(i); recreate(); }   // otro PAL: se arma de nuevo
+    }
+
     private boolean helpShown;
 
     private void googleHelp() {
         if (helpShown || isFinishing()) return;
         helpShown = true;
-        new Ui.Sheet(this).title("Entra con tu correo")
-                .message("Google no permite iniciar sesión dentro de otras apps, por eso se quedaba pegado.\n\n"
-                        + "1. En la pantalla de " + pal.name.replace(" PAL", "") + ", escribe tu correo (el mismo de tu cuenta de Google) y toca "
-                        + "\"Continuar con correo\".\n"
-                        + "2. Te llega un correo: escribe aquí el código que trae.\n"
-                        + "3. Si en vez de código trae un enlace: mantenlo presionado en tu correo, toca \"Copiar enlace\" y vuelve aquí a "
-                        + "\"⎘ Abrir enlace copiado\".\n\n"
-                        + "Es la misma cuenta: verás tus chats y proyectos de siempre.")
+        String svc = pal.name.replace(" PAL", "");
+        String msg = "claude".equals(pal.id)
+                ? "1. En la pantalla de Claude, escribe tu correo (el mismo de tu cuenta de Google) y toca \"Continuar con correo\".\n"
+                  + "2. Te llega un correo: escribe aquí el código que trae.\n"
+                  + "3. Si en vez de código trae un enlace: mantenlo presionado en tu correo, toca \"Copiar enlace\" y vuelve aquí a "
+                  + "\"⎘ Abrir enlace copiado\".\n\nEs la misma cuenta: verás tus chats y proyectos de siempre."
+                : "Entra a " + svc + " con tu usuario (o correo / teléfono) y contraseña, no con el botón de Google.\n"
+                  + "Si te piden un código, llega por correo o SMS: escríbelo aquí con el teclado del extendido.\n"
+                  + "Si te llega un enlace, cópialo y usa \"⎘ Abrir enlace copiado\".";
+        new Ui.Sheet(this).title("Entra sin el botón de Google")
+                .message("Google no permite iniciar sesión dentro de otras apps, por eso se quedaba pegado.\n\n" + msg)
                 .button("Entendido", true, () -> helpShown = false)
                 .show();
     }

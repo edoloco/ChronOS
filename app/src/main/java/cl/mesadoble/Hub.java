@@ -385,6 +385,7 @@ public class Hub implements Link.Listener {
             main.post(() -> { if ("close".equals(ls)) ScreenSync.lockNow(app, this); else ScreenSync.wakeNow(app); });
             return;
         }
+        if ("palsSync".equals(t)) { Pals.applySync(app, m.optJSONObject("s")); return; }
         if ("lockFlip".equals(t)) { prefs.edit().putBoolean("lockFlip", m.optBoolean("on")).apply(); main.post(() -> LockArt.apply(app, this)); return; }
         if ("lockArt".equals(t)) {
             prefs.edit().putBoolean("lockArt", m.optBoolean("on")).putInt("lockMethod", m.optInt("m")).apply();
@@ -622,7 +623,7 @@ public class Hub implements Link.Listener {
     public int launchHere(String pkg, String label) {
         if (pkg.equals(app.getPackageName())) { goDesk(); return LAUNCHED; }
         if (Pals.isPal(pkg)) {   // un PAL: se abre en el principal como una app más
-            if (Pals.get(pkg.substring(4)) == null) return NOT_INSTALLED;
+            if (Pals.get(app, pkg.substring(4)) == null) return NOT_INSTALLED;
             return startExternal(Pals.intent(app, pkg.substring(4)), app.getPackageName(), label);
         }
         Intent i = app.getPackageManager().getLaunchIntentForPackage(pkg);
