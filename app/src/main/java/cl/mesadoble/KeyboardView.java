@@ -56,7 +56,7 @@ public class KeyboardView extends View {
     private static Key sendKey() { return new Key(ACT, "Enviar ➤", null, null, 0, "send", 2f); }
 
     private final List<Key[]> rows = new ArrayList<>();
-    private final float[] rowWeights = {0.72f, 1, 1, 1, 1, 1.18f};   // la fila del espacio, un poco más alta
+    private float[] rowWeights = {0.72f, 1, 1, 1, 1, 1.18f};
     private final Map<Integer, Key> pointers = new HashMap<>();
     private int heldMods = 0, latchedMods = 0, usedWhileHeld = 0;
     private boolean caps = false;
@@ -95,11 +95,42 @@ public class KeyboardView extends View {
         main.setTextAlign(Paint.Align.CENTER);
         sub.setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
 
+        android = ctx.getSharedPreferences("mesa", Context.MODE_PRIVATE).getBoolean("kbAndroid", false);
+        build();
+    }
+
+    // ---------------- distribuciones: PC o Android (como el de Google) ----------------
+
+    private boolean android;
+    private int page;   // Android: 0 letras, 1 símbolos (?123), 2 más símbolos (=\<)
+
+    /** ¿Teclado tipo Android (letras grandes, como el de Google) en vez del de PC? */
+    public boolean isAndroid() { return android; }
+
+    public void setAndroid(boolean a) {
+        android = a;
+        page = 0;
+        getContext().getSharedPreferences("mesa", Context.MODE_PRIVATE).edit().putBoolean("kbAndroid", a).apply();
+        heldMods = 0; latchedMods = 0; caps = false; deadKey = null;
+        build();
+    }
+
+    private static Key page(String l, String a, float u) { return new Key(ACT, l, null, null, 0, a, u); }
+
+    private void build() {
+        rows.clear();
+        if (!android) buildPc(); else buildAndroid();
+        if (getWidth() > 0) layoutKeys(getWidth(), getHeight());
+        invalidate();
+    }
+
+    private void buildPc() {
+        rowWeights = new float[]{0.72f, 1, 1, 1, 1, 1.18f};   // la fila del espacio, un poco más alta
         rows.add(new Key[]{
                 key("Esc", KeyEvent.KEYCODE_ESCAPE, 1.5f), act("Sel. todo", "all"), act("Copiar", "copy"),
                 act("Cortar", "cut"), act("Pegar", "paste"), act("Deshacer", "undo"),
                 media("⏯", "play"), media("Vol −", "vdown"), media("Vol +", "vup"),
-                key("Supr", KeyEvent.KEYCODE_FORWARD_DEL, 1.5f)});
+                key("Supr", KeyEvent.KEYCODE_FORWARD_DEL, 1.5f), page("Android", "layout:android", 1.5f)});
         rows.add(new Key[]{
                 c("|", "°", "¬"), c("1", "!", null), c("2", "\"", null), c("3", "#", null), c("4", "$", null),
                 c("5", "%", null), c("6", "&", null), c("7", "/", null), c("8", "(", null), c("9", ")", null),
@@ -118,9 +149,31 @@ public class KeyboardView extends View {
                 sendKey()});   // Enviar: esquina inferior derecha
     }
 
+    private void buildAndroid() {
+        rowWeights = new float[]{1, 1, 1, 1.05f};
+        Key del = key("⌫", KeyEvent.KEYCODE_DEL, 1.5f);
+        if (page == 0) {
+            rows.add(new Key[]{l("q"), l("w"), l("e"), l("r"), l("t"), l("y"), l("u"), l("i"), l("o"), l("p")});
+            rows.add(new Key[]{l("a"), l("s"), l("d"), l("f"), l("g"), l("h"), l("j"), l("k"), l("l"), l("ñ")});
+            rows.add(new Key[]{mod("⇧", SHIFT, 1.5f), l("z"), l("x"), l("c"), l("v"), l("b"), l("n"), l("m"), del});
+        } else if (page == 1) {
+            rows.add(new Key[]{l("1"), l("2"), l("3"), l("4"), l("5"), l("6"), l("7"), l("8"), l("9"), l("0")});
+            rows.add(new Key[]{l("@"), l("#"), l("$"), l("_"), l("&"), l("-"), l("+"), l("("), l(")"), l("/")});
+            rows.add(new Key[]{page("=\\<", "page:2", 1.5f), l("*"), l("\""), l("'"), l(":"), l(";"), l("!"), l("?"), del});
+        } else {
+            rows.add(new Key[]{l("~"), l("`"), l("|"), l("•"), l("√"), l("π"), l("÷"), l("×"), l("¶"), l("∆")});
+            rows.add(new Key[]{l("£"), l("€"), l("¥"), l("^"), l("°"), l("="), l("{"), l("}"), l("\\"), l("%")});
+            rows.add(new Key[]{page("?123", "page:1", 1.5f), l("¿"), l("¡"), l("["), l("]"), l("<"), l(">"), l("´"), del});
+        }
+        rows.add(new Key[]{page(page == 0 ? "?123" : "ABC", page == 0 ? "page:1" : "page:0", 1.3f), page("PC", "layout:pc", 1f),
+                l(","), c(" ", null, null, 4f), l("."), key("↵", KeyEvent.KEYCODE_ENTER, 1f), sendKey()});
+    }
+
     public void setSink(Sink s) { sink = s; }
 
-    @Override protected void onSizeChanged(int w, int h, int ow, int oh) {
+    @Override protected void onSizeChanged(int w, int h, int ow, int oh) { layoutKeys(w, h); }
+
+    private void layoutKeys(int w, int h) {
         float gap = 4 * dp, pad = 6 * dp, total = 0;
         for (float rw : rowWeights) total += rw;
         float avail = h - 2 * pad - gap * (rows.size() - 1);
@@ -144,7 +197,7 @@ public class KeyboardView extends View {
         int mods = heldMods | latchedMods;
         boolean shift = (mods & SHIFT) != 0;
         for (Key[] row : rows) for (Key k : row) {
-            boolean active = k.down || (k.type == MOD && k.code != 0 && (mods & k.code) != 0)
+            boolean active = k.down || (k.type == MOD && k.code != 0 && (mods & k.code) != 0) || (android && k.type == MOD && k.code == SHIFT && caps)
                     || (k.type == MOD && k.code == 0 && caps) || (k.type == CHAR && k.label.equals(deadKey));
             boolean special = !(k.type == CHAR);
             boolean send = k.type == ACT && "send".equals(k.act);
@@ -201,12 +254,51 @@ public class KeyboardView extends View {
         return true;
     }
 
+    private long lastShiftAt;
+    private boolean skipLatch;
+    private Key longKey;
+    private boolean longFired;
+    private final Runnable longPress = () -> {
+        Key k = longKey;
+        if (k == null || !k.down || sink == null) return;
+        String acc = accent(k.label);
+        if (acc == null) return;
+        longFired = true;
+        boolean up = ((heldMods | latchedMods) & SHIFT) != 0 ^ caps;
+        sink.text(up ? acc.toUpperCase() : acc);
+        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+    };
+
+    /** Android: dejar apretada una vocal escribe la vocal con tilde. */
+    private static String accent(String l) {
+        switch (l) {
+            case "a": return "á"; case "e": return "é"; case "i": return "í"; case "o": return "ó"; case "u": return "ú";
+            case "n": return "ñ"; case ".": return "…"; case ",": return ";"; case "?": return "¿"; case "!": return "¡";
+            default: return null;
+        }
+    }
+
     private void press(Key k) {
         k.down = true;
         performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+        if (k.type == ACT && k.act != null && (k.act.startsWith("page:") || k.act.startsWith("layout:"))) return;   // al soltar
         if (k.type == MOD) {
-            if (k.code == 0) caps = !caps;
+            if (android && k.code == SHIFT) {
+                // Android: un toque = la siguiente letra en mayúscula; dos toques seguidos = bloq mayús; otro toque lo quita
+                long now = System.nanoTime() / 1_000_000L;
+                skipLatch = false;
+                if (caps) { caps = false; skipLatch = true; }
+                else if (now - lastShiftAt < 350) { caps = true; latchedMods &= ~SHIFT; skipLatch = true; }
+                lastShiftAt = now;
+                if (!skipLatch) { heldMods |= k.code; usedWhileHeld &= ~k.code; }
+            } else if (k.code == 0) caps = !caps;
             else { heldMods |= k.code; usedWhileHeld &= ~k.code; }
+        } else if (android && k.type == CHAR) {
+            // Android: la letra se escribe al soltar (dejarla apretada da la variante con tilde)
+            usedWhileHeld |= heldMods;
+            longKey = k; longFired = false;
+            repeat.removeCallbacks(longPress);
+            if (accent(k.label) != null) repeat.postDelayed(longPress, 420);
         } else {
             usedWhileHeld |= heldMods;
             fire(k);
@@ -224,6 +316,14 @@ public class KeyboardView extends View {
     private void release(Key k) {
         k.down = false;
         if (k == repeating) { repeating = null; repeat.removeCallbacks(repeater); }
+        if (k.type == ACT && k.act != null && k.act.startsWith("page:")) { page = Integer.parseInt(k.act.substring(5)); build(); return; }
+        if (k.type == ACT && k.act != null && k.act.startsWith("layout:")) { setAndroid("layout:android".equals(k.act)); return; }
+        if (android && k.type == CHAR) {
+            repeat.removeCallbacks(longPress);
+            if (!(k == longKey && longFired)) fire(k);
+            longKey = null;
+        }
+        if (android && k.type == MOD && k.code == SHIFT && skipLatch) { skipLatch = false; invalidate(); return; }
         if (k.type == MOD && k.code != 0) {
             heldMods &= ~k.code;
             // toque corto sin otra tecla: queda activo para la tecla siguiente
