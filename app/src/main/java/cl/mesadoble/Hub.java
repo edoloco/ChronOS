@@ -384,6 +384,12 @@ public class Hub implements Link.Listener {
             main.post(() -> { if ("close".equals(ls)) ScreenSync.lockNow(app, this); else ScreenSync.wakeNow(app); });
             return;
         }
+        if ("lockFlip".equals(t)) { prefs.edit().putBoolean("lockFlip", m.optBoolean("on")).apply(); main.post(() -> LockArt.apply(app, this)); return; }
+        if ("lockArt".equals(t)) {
+            prefs.edit().putBoolean("lockArt", m.optBoolean("on")).putInt("lockMethod", m.optInt("m")).apply();
+            main.post(() -> LockArt.apply(app, this));
+            return;
+        }
         if ("lidPref".equals(t)) { boolean on = m.optBoolean("on", true); main.post(() -> LidWatch.setEnabled(app, this, on)); return; }
         // prueba de sensores (para detectar la tapa cerrada): el otro teléfono pide los valores de este
         if ("senOn".equals(t)) {

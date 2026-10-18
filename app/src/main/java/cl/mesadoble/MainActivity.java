@@ -256,6 +256,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     @Override protected void onResume() {
         super.onResume();
+        LockArt.noteRotation(this, hub, getWindowManager().getDefaultDisplay().getRotation());
         immersive();
         hub.foreground = true;
         live = this;
@@ -362,6 +363,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     @Override public void onConfigurationChanged(Configuration c) {
         super.onConfigurationChanged(c);
+        LockArt.noteRotation(this, hub, getWindowManager().getDefaultDisplay().getRotation());
         relayout();
         if (side == 1 && !locked()) sendView();   // vista libre: el extendido sigue al principal al girar
     }
@@ -1476,6 +1478,24 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             hub.send("gpPref", "on", !gpOn);
             Toast.makeText(this, !gpOn ? "Game Pal activado" : "Game Pal desactivado", Toast.LENGTH_SHORT).show();
         });
+        boolean laOn = LockArt.enabled(this);
+        sh.option(Ui.PALETTE, -1, "Pantalla de bloqueo naranja: " + (laOn ? "sí" : "no"),
+                "Fondo naranja en los dos, con el mensaje para desbloquear en el sentido de las pantallas", laOn, () -> {
+                    setLockArt(!laOn, LockArt.method(this));
+                    Toast.makeText(this, !laOn ? "Listo: apaga y enciende la pantalla para verla" : "Se volvió al fondo de bloqueo normal", Toast.LENGTH_LONG).show();
+                });
+        if (laOn && !solo) sh.option(Ui.PALETTE, "Voltear el mensaje de bloqueo", "Si el texto quedó de cabeza", () -> {
+            prefs.edit().putBoolean("lockFlip", !prefs.getBoolean("lockFlip", false)).apply();
+            LockArt.apply(this, hub);
+            if (hub.connected()) hub.send("lockFlip", "on", prefs.getBoolean("lockFlip", false));
+            Toast.makeText(this, "Volteado: apaga y enciende la pantalla para verlo", Toast.LENGTH_LONG).show();
+        });
+        if (laOn) sh.option(Ui.LOCK, "Mi bloqueo es con: " + LockArt.METHODS[LockArt.method(this)],
+                "Toca para cambiar (PIN, patrón o contraseña). La huella se detecta sola", () -> {
+                    int nm = (LockArt.method(this) + 1) % LockArt.METHODS.length;
+                    setLockArt(true, nm);
+                    Toast.makeText(this, "El mensaje dirá: " + LockArt.message(this), Toast.LENGTH_LONG).show();
+                });
         boolean lidOn = LidWatch.enabled(this);
         sh.option(Ui.LOCK, -1, "Bloquear al cerrar la tapa: " + (lidOn ? "sí" : "no"),
                 "Al cerrar la carcasa se bloquean los dos; al abrir se encienden", lidOn, () -> {
@@ -2262,6 +2282,13 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private boolean solo;
     private DeskView desk2;
     private ChronoBar nbar;
+
+    /** Pantalla de bloqueo naranja: guarda el ajuste y lo aplica en los dos teléfonos. */
+    private void setLockArt(boolean on, int method) {
+        prefs.edit().putBoolean("lockArt", on).putInt("lockMethod", method).apply();
+        LockArt.apply(this, hub);
+        if (hub.connected() && !soloMode(this)) hub.send("lockArt", "on", on, "m", method);
+    }
 
     static boolean soloMode(android.content.Context c) { return c.getSharedPreferences("mesa", MODE_PRIVATE).getBoolean("soloMode", false); }
 
