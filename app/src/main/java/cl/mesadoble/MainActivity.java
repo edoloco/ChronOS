@@ -1909,7 +1909,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private void palOnDesk(Pals.Pal p) {
         Item it = new Item();
         it.kind = Item.APP; it.pkg = "pal:" + p.id; it.title = p.name; it.w = sized(0.24);
-        android.graphics.Bitmap ic = Pals.icon(p, 192);
+        android.graphics.Bitmap ic = Pals.icon(this, p, 192);
         java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
         ic.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, bos);
         it.setImage(android.util.Base64.encodeToString(bos.toByteArray(), android.util.Base64.NO_WRAP));
