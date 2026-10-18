@@ -425,7 +425,8 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         left.addView(grid(br, cell, 4, (i, b) -> { b.tag = brIds[i]; brushBtns.add(b); b.setOnClickListener(v -> { set("brush", brIds[i]); set("tool", T_DRAW); }); }));
         View sep = new View(this);
         sep.setBackgroundColor(0x262FA866);
-        LinearLayout.LayoutParams sepl = new LinearLayout.LayoutParams(-1, dp(1));
+        // ancho fijo (4 botones): con "todo el ancho" el panel se estiraba hasta tapar el lienzo
+        LinearLayout.LayoutParams sepl = new LinearLayout.LayoutParams(dp((cell + 4) * 4 - 8), dp(1));
         sepl.setMargins(dp(4), dp(2), dp(4), dp(4));
         left.addView(sep, sepl);
         String[][] tl = {{"╱", "Línea"}, {"▭", "Rectángulo"}, {"◯", "Óvalo"}, {"◧", "Balde"}, {"⊙", "Gotero"}, {"✦", "Varita"},
