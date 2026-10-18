@@ -1470,6 +1470,12 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             if (hub.connected() && !solo) hub.send("introPlay");
             playIntroAgain();
         });
+        boolean gpOn = GamePalActivity.enabled(this);
+        sh.option(Ui.AUTO, -1, "Game Pal: " + (gpOn ? "sí" : "no"), "Control en pantalla en el extendido al jugar Brawl Stars", gpOn, () -> {
+            prefs.edit().putBoolean("gamePal", !gpOn).apply();
+            hub.send("gpPref", "on", !gpOn);
+            Toast.makeText(this, !gpOn ? "Game Pal activado" : "Game Pal desactivado", Toast.LENGTH_SHORT).show();
+        });
         if (solo) {
             boolean spl = prefs.getBoolean("soloSplit", true);
             sh.option(Ui.LAYOUT_STACK, -1, "Apps: " + (spl ? "arriba, con ChronOS abajo" : "pantalla completa"),

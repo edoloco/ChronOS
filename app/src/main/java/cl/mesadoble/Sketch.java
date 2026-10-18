@@ -252,7 +252,7 @@ final class Sketch {
     }
 
     /** AccessibilityService.takeScreenshot (Android 11+), por reflexión. */
-    private static void take(MesaAccess s, Consumer<Bitmap> cb) {
+    static void take(MesaAccess s, Consumer<Bitmap> cb) {
         if (android.os.Build.VERSION.SDK_INT < 30) { cb.accept(null); return; }
         try {
             Class<?> cbI = Class.forName("android.accessibilityservice.AccessibilityService$TakeScreenshotCallback");

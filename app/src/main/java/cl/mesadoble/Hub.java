@@ -353,7 +353,26 @@ public class Hub implements Link.Listener {
         }
         if ("call".equals(t)) { if (!isPrincipal()) CallHub.onCall(app, this, m); }
         if ("callCmd".equals(t)) { if (isPrincipal()) CallHub.command(app, this, m); return; }
-        if ("game".equals(t)) { if (!isPrincipal()) GameBg.handle(app, this, m); return; }
+        if ("game".equals(t)) {
+            if (!isPrincipal()) {
+                GameBg.handle(app, this, m);
+                // Game Pal: control en pantalla para los juegos que lo tienen (por ahora, Brawl Stars)
+                String gp = m.optString("pkg");
+                if (GamePalActivity.supported(gp) && GamePalActivity.enabled(app) && !GamePalActivity.open)
+                    main.postDelayed(() -> startOwn(GamePalActivity.intent(app, gp), () -> GamePalActivity.open, 99,
+                            "Game Pal", "Toca para abrir el control de Brawl Stars"), 600);
+            }
+            return;
+        }
+        if ("gpPref".equals(t)) { prefs.edit().putBoolean("gamePal", m.optBoolean("on", true)).apply(); return; }
+        if ("gp".equals(t) || "gpShot".equals(t)) {
+            if (isPrincipal() && MesaAccess.instance != null) main.post(() -> {
+                if (MesaAccess.instance == null) return;
+                if ("gp".equals(t)) GamePalTouch.onMessage(MesaAccess.instance, m); else GamePalTouch.shot(MesaAccess.instance, this);
+            });
+            else if (isPrincipal() && "gpShot".equals(t)) send("gpImg", "err", "Activa la accesibilidad de ChronOS en el principal (versión completa)");
+            return;
+        }
         // cámara del principal, controlada desde el extendido
         if ("camCmd".equals(t)) { if (isPrincipal()) CameraActivity.command(app, m); return; }
 
