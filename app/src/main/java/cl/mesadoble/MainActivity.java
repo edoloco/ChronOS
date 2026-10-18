@@ -1476,6 +1476,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             hub.send("gpPref", "on", !gpOn);
             Toast.makeText(this, !gpOn ? "Game Pal activado" : "Game Pal desactivado", Toast.LENGTH_SHORT).show();
         });
+        sh.option(Ui.LOCK, "Prueba de sensores", "Proximidad, luz e imán de los dos teléfonos: para detectar la tapa cerrada",
+                () -> startActivity(SensorTestActivity.intent(this)));
         if (solo) {
             boolean spl = prefs.getBoolean("soloSplit", true);
             sh.option(Ui.LAYOUT_STACK, -1, "Apps: " + (spl ? "arriba, con ChronOS abajo" : "pantalla completa"),

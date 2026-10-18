@@ -153,6 +153,9 @@ public class Hub implements Link.Listener {
     private boolean battOffered, lostOffered, lostPending;
     private boolean brPermAsked;
 
+    private SensorProbe senProbe;
+    private final Runnable senStop = () -> { if (senProbe != null) senProbe.stop(); senProbe = null; };
+
     /** Reintentar la conexión ya: el principal busca al extendido; el extendido llama al principal. */
     public void reconnect() {
         if (connected()) return;
@@ -278,6 +281,7 @@ public class Hub implements Link.Listener {
             else if (isPrincipal() && !imeSelected(app)) notifySwitch();   // versión liviana: un toque en el aviso
         } else {
             remoteImeReady = false;
+            main.post(senStop);
             // Game Pal: sin conexión no llegará el "soltar": los dedos virtuales del principal se levantan ya
             if (isPrincipal() && MesaAccess.instance != null) GamePalTouch.releaseAll(MesaAccess.instance);
             // sin el extendido no hay teclado: si la conexión no vuelve pronto, devolver el teclado normal
@@ -371,6 +375,21 @@ public class Hub implements Link.Listener {
                     main.postDelayed(() -> startOwn(GamePalActivity.intent(app, gp), () -> GamePalActivity.open, 99,
                             "Game Pal", "Toca para abrir el control de Brawl Stars"), 600);
             }
+            return;
+        }
+        // prueba de sensores (para detectar la tapa cerrada): el otro teléfono pide los valores de este
+        if ("senOn".equals(t)) {
+            main.post(() -> {
+                if (senProbe == null) senProbe = new SensorProbe(app, s -> { if (connected()) send("sen", "s", s); });
+                main.removeCallbacks(senStop);
+                main.postDelayed(senStop, 10 * 60_000);   // por si nunca llega el senOff
+            });
+            return;
+        }
+        if ("senOff".equals(t)) { main.post(senStop); return; }
+        if ("senOpen".equals(t)) {
+            main.post(() -> startOwn(SensorTestActivity.intent(app), () -> SensorTestActivity.open, 98,
+                    "Prueba de sensores", "Toca para abrir la prueba de sensores"));
             return;
         }
         // revisor de permisos de Game Pal: el otro teléfono pregunta el estado de este, o pide abrir un ajuste aquí

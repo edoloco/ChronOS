@@ -166,6 +166,13 @@
             android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize" />
         <activity
+            android:name=".SensorTestActivity"
+            android:exported="false"
+            android:label="Prueba de sensores"
+            android:launchMode="singleTask"
+            android:theme="@android:style/Theme.Black.NoTitleBar"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize" />
+        <activity
             android:name=".GamePalActivity"
             android:exported="false"
             android:label="Game Pal"
