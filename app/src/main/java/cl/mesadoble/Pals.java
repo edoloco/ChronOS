@@ -34,19 +34,23 @@ final class Pals {
     /** La receta de un PAL. */
     static final class Pal {
         final String id, name, home;
+        String login;
         final int accent;
         final String[] hosts;   // dominios que se abren dentro del PAL (el resto, en el navegador)
         final List<Item> menu = new ArrayList<>();
         Pal(String id, String name, String home, int accent, String... hosts) {
             this.id = id; this.name = name; this.home = home; this.accent = accent; this.hosts = hosts;
+            this.login = home;
         }
         Pal item(String g, String l, String u) { menu.add(new Item(g, l, u)); return this; }
+        Pal login(String u) { login = u; return this; }
     }
 
     static final List<Pal> ALL = new ArrayList<>();
     static {
         ALL.add(new Pal("claude", "Claude PAL", "https://claude.ai/new", 0xFFD97757,
                 "claude.ai", "claude.com", "anthropic.com")
+                .login("https://claude.ai/login")
                 .item("✚", "Nuevo chat", "https://claude.ai/new")
                 .item("☰", "Chats", "https://claude.ai/recents")
                 .item("▣", "Proyectos", "https://claude.ai/projects")

@@ -96,6 +96,7 @@ public class PalActivity extends Activity {
         space(menu, 8);
         menu.addView(option("←", "Atrás", v -> { if (web.canGoBack()) web.goBack(); }));
         menu.addView(option("↻", "Recargar", v -> web.reload()));
+        menu.addView(option("⎘", "Abrir enlace copiado", v -> openCopiedLink()));
         LinearLayout zoom = new LinearLayout(this);
         zoom.setGravity(Gravity.CENTER_VERTICAL);
         zoom.addView(option("A−", "", v -> setZoom(-10)), new LinearLayout.LayoutParams(0, dp(38), 1));
@@ -165,6 +166,15 @@ public class PalActivity extends Activity {
                 try { startActivity(new Intent(Intent.ACTION_VIEW, u).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); } catch (Exception ignored) { }
                 return true;
             }
+            @Override public void onPageStarted(WebView v, String url, android.graphics.Bitmap fav) {
+                // Google no deja iniciar sesión dentro de apps: la página queda pegada en accounts.google.com.
+                // Se vuelve a la entrada del servicio y se explica cómo entrar con el correo.
+                Uri u = Uri.parse(url);
+                if (u.getHost() != null && u.getHost().endsWith("google.com")) {
+                    v.stopLoading();
+                    v.post(() -> { v.loadUrl(pal.login); googleHelp(); });
+                }
+            }
             @Override public void onPageFinished(WebView v, String url) {
                 if (allowed(Uri.parse(url))) prefs.edit().putString("pal_" + pal.id + "_url", url).apply();
                 CookieManager.getInstance().flush();
@@ -181,6 +191,37 @@ public class PalActivity extends Activity {
             }
         });
         setZoom(0);
+    }
+
+    private boolean helpShown;
+
+    private void googleHelp() {
+        if (helpShown || isFinishing()) return;
+        helpShown = true;
+        new Ui.Sheet(this).title("Entra con tu correo")
+                .message("Google no permite iniciar sesión dentro de otras apps, por eso se quedaba pegado.\n\n"
+                        + "1. En la pantalla de " + pal.name.replace(" PAL", "") + ", escribe tu correo (el mismo de tu cuenta de Google) y toca "
+                        + "\"Continuar con correo\".\n"
+                        + "2. Te llega un correo: escribe aquí el código que trae.\n"
+                        + "3. Si en vez de código trae un enlace: mantenlo presionado en tu correo, toca \"Copiar enlace\" y vuelve aquí a "
+                        + "\"⎘ Abrir enlace copiado\".\n\n"
+                        + "Es la misma cuenta: verás tus chats y proyectos de siempre.")
+                .button("Entendido", true, () -> helpShown = false)
+                .show();
+    }
+
+    /** Abre en el PAL un enlace copiado (por ejemplo, el enlace de inicio de sesión que llega por correo). */
+    private void openCopiedLink() {
+        android.content.ClipboardManager cb = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        CharSequence t = null;
+        if (cb != null && cb.hasPrimaryClip() && cb.getPrimaryClip() != null && cb.getPrimaryClip().getItemCount() > 0)
+            t = cb.getPrimaryClip().getItemAt(0).coerceToText(this);
+        String s = t == null ? "" : t.toString().trim();
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("https?://\\S+").matcher(s);
+        if (!m.find()) { Toast.makeText(this, "No hay un enlace copiado", Toast.LENGTH_SHORT).show(); return; }
+        Uri u = Uri.parse(m.group());
+        if (!allowed(u)) { Toast.makeText(this, "Ese enlace no es de " + pal.name.replace(" PAL", ""), Toast.LENGTH_SHORT).show(); return; }
+        web.loadUrl(u.toString());
     }
 
     private boolean allowed(Uri u) {
