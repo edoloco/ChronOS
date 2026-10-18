@@ -52,7 +52,9 @@ public class GamePalActivity extends Activity implements Link.Listener {
     private Pad pad;
     private Calib calib;
     private Bitmap bg;
-    private TextView cutsView;
+    private TextView cutsView, connView;
+    private FrameLayout root;
+    private Checker checker;
 
     private float dp;
     private int dp(float v) { return Math.round(v * dp); }
@@ -81,7 +83,7 @@ public class GamePalActivity extends Activity implements Link.Listener {
         pkg = getIntent().getStringExtra("pkg");
         if (pkg == null) pkg = BRAWL;
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        FrameLayout root = new FrameLayout(this);
+        root = new FrameLayout(this);
         root.setBackgroundColor(0xFF0B0F14);
         pad = new Pad();
         root.addView(pad, new FrameLayout.LayoutParams(-1, -1));
@@ -100,6 +102,10 @@ public class GamePalActivity extends Activity implements Link.Listener {
         cutsView.setTextColor(0xFFFFC107);
         cutsView.setPadding(0, 0, dp(8), 0);
         top.addView(cutsView);
+        connView = pill("", v -> openChecker());
+        top.addView(connView);
+        showConn();
+        top.addView(pill("Revisar", v -> openChecker()));
         top.addView(pill("Ajustar", v -> startCalib()));
         top.addView(pill("✕", v -> finish()));
         FrameLayout.LayoutParams tl = new FrameLayout.LayoutParams(-2, dp(40), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
@@ -108,6 +114,8 @@ public class GamePalActivity extends Activity implements Link.Listener {
         setContentView(root);
         immersive();
         loadBg();
+        // sin conexión al abrir: directo al revisor, que explica qué falta
+        h.postDelayed(() -> { if (!hub.connected() && checker == null && !isFinishing()) openChecker(); }, 2500);
         if (!prefs.getBoolean("gpHelp", false)) {
             prefs.edit().putBoolean("gpHelp", true).apply();
             android.widget.Toast.makeText(this, "Si los botones no calzan con los de Brawl Stars, toca \"Ajustar\"", android.widget.Toast.LENGTH_LONG).show();
@@ -159,6 +167,8 @@ public class GamePalActivity extends Activity implements Link.Listener {
         super.onResume();
         open = true;
         hub.add(this);
+        showConn();
+        if (checker != null) checker.refresh();
     }
 
     @Override protected void onPause() {
@@ -171,6 +181,7 @@ public class GamePalActivity extends Activity implements Link.Listener {
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
         if ("gameBg".equals(t)) h.post(() -> { if (m.optString("pkg").isEmpty()) finish(); else loadBg(); });
+        else if ("pcRes".equals(t)) h.post(() -> { JSONObject st = m.optJSONObject("s"); if (checker != null && st != null) checker.got(st); });
         else if ("gpCut".equals(t)) h.post(() -> cutsView.setText("⚠ " + m.optInt("n") + " cortes"));
         else if ("gpImg".equals(t)) h.post(() -> {
             if (calib == null) return;
@@ -181,7 +192,256 @@ public class GamePalActivity extends Activity implements Link.Listener {
         });
     }
 
-    @Override public void onState(int state, String info) { }
+    @Override public void onState(int state, String info) {
+        h.post(() -> {
+            showConn();
+            if (!hub.connected()) {
+                pad.releaseAll();
+                h.postDelayed(() -> hub.reconnect(), 1500);   // se intenta volver solo
+            }
+            if (checker != null) checker.refresh();
+        });
+    }
+
+    @Override public void onBackPressed() { if (checker != null) checker.close(); else super.onBackPressed(); }
+
+    private void showConn() {
+        if (connView == null) return;
+        boolean on = hub.connected();
+        connView.setText(on ? "● Conectado" : "● Sin conexión");
+        connView.setTextColor(on ? 0xFF7CFC9A : 0xFFFF6B6B);
+    }
+
+    private void openChecker() {
+        if (checker != null) return;
+        checker = new Checker();
+        root.addView(checker.view, new FrameLayout.LayoutParams(-1, -1));
+        checker.refresh();
+    }
+
+    // ======================= revisor de permisos =======================
+
+    /** Panel que revisa los dos teléfonos, con instructivo y botones que abren cada ajuste. */
+    private final class Checker {
+        final FrameLayout view = new FrameLayout(GamePalActivity.this);
+        final LinearLayout colMe = new LinearLayout(GamePalActivity.this), colOther = new LinearLayout(GamePalActivity.this);
+        JSONObject other;
+        long askedAt, gotAt;
+        final Runnable tick = new Runnable() {
+            @Override public void run() { if (checker != Checker.this) return; refresh(); h.postDelayed(this, 3000); }
+        };
+
+        Checker() {
+            view.setBackgroundColor(0xF00B0F14);
+            view.setClickable(true);
+            android.widget.ScrollView sc = new android.widget.ScrollView(GamePalActivity.this);
+            LinearLayout box = new LinearLayout(GamePalActivity.this);
+            box.setOrientation(LinearLayout.VERTICAL);
+            box.setPadding(dp(16), dp(10), dp(16), dp(24));
+            LinearLayout head = new LinearLayout(GamePalActivity.this);
+            head.setGravity(Gravity.CENTER_VERTICAL);
+            TextView t = new TextView(GamePalActivity.this);
+            t.setText("Revisor de Game Pal");
+            t.setTypeface(Intro.font(GamePalActivity.this));
+            t.setTextSize(18);
+            t.setTextColor(ORANGE);
+            head.addView(t, new LinearLayout.LayoutParams(0, -2, 1));
+            head.addView(pill("Volver a revisar", v -> { other = null; refresh(); }));
+            head.addView(pill("Reconectar", v -> { hub.reconnect(); toast("Buscando al otro teléfono…"); }));
+            head.addView(pill("Cerrar", v -> close()));
+            box.addView(head);
+            TextView how = new TextView(GamePalActivity.this);
+            how.setTextSize(13);
+            how.setTextColor(0xDDFFFFFF);
+            how.setLineSpacing(dp(2), 1);
+            how.setPadding(dp(14), dp(12), dp(14), dp(12));
+            how.setText("Instructivo, en orden:\n"
+                    + "1. Los dos teléfonos en el mismo WiFi, con ChronOS abierto.\n"
+                    + "2. En el PRINCIPAL (arriba): versión completa de ChronOS y su accesibilidad activada. Es la que \"toca\" Brawl Stars por ti.\n"
+                    + "3. En AMBOS: batería \"Sin restricciones\" e Inicio automático (Xiaomi/Poco). Si falta, Android corta la conexión en pleno juego.\n"
+                    + "4. Abre Brawl Stars en el principal: Game Pal aparece aquí. Si los botones no calzan, toca \"Ajustar\".\n"
+                    + "Cada punto rojo trae un botón que abre el ajuste justo en el teléfono que corresponde.");
+            how.setBackground(card(0x22F57C1F));
+            LinearLayout.LayoutParams hl = new LinearLayout.LayoutParams(-1, -2);
+            hl.setMargins(0, dp(10), 0, dp(10));
+            box.addView(how, hl);
+            LinearLayout cols = new LinearLayout(GamePalActivity.this);
+            colOther.setOrientation(LinearLayout.VERTICAL);
+            colMe.setOrientation(LinearLayout.VERTICAL);
+            LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(0, -2, 1);
+            cl.setMargins(0, 0, dp(6), 0);
+            cols.addView(hub.isPrincipal() ? colMe : colOther, cl);
+            LinearLayout.LayoutParams cr = new LinearLayout.LayoutParams(0, -2, 1);
+            cr.setMargins(dp(6), 0, 0, 0);
+            cols.addView(hub.isPrincipal() ? colOther : colMe, cr);
+            box.addView(cols);
+            sc.addView(box);
+            view.addView(sc, new FrameLayout.LayoutParams(-1, -1));
+            h.postDelayed(tick, 3000);
+        }
+
+        void close() { root.removeView(view); checker = null; }
+
+        void got(JSONObject s) { other = s; gotAt = System.currentTimeMillis(); draw(); }
+
+        void refresh() {
+            if (hub.connected() && System.currentTimeMillis() - askedAt > 1500) { askedAt = System.currentTimeMillis(); hub.send("pcAsk"); }
+            if (!hub.connected()) other = null;
+            draw();
+        }
+
+        void draw() {
+            JSONObject me = PermCheck.status(GamePalActivity.this, hub);
+            fill(colMe, me, true);
+            colOther.removeAllViews();
+            colOther.addView(heading(hub.isPrincipal() ? "Extendido (abajo)" : "Principal (arriba)"));
+            if (other == null) {
+                boolean waiting = hub.connected() && System.currentTimeMillis() - askedAt < 4000;
+                colOther.addView(row(waiting ? 2 : 0, waiting ? "Preguntando…" : "Sin respuesta",
+                        waiting ? "Revisando el otro teléfono." :
+                        "No hay conexión con el otro teléfono, así que no se puede revisar. Mira el punto \"Conexión\" a este lado"
+                                + " y, en el otro teléfono, abre ChronOS. Cuando vuelva la conexión esta columna se llena sola.", null, null, false));
+            } else fill(colOther, other, false);
+        }
+
+        private void fill(LinearLayout col, JSONObject s, boolean local) {
+            if (local) { col.removeAllViews(); col.addView(heading((s.optBoolean("p") ? "Principal (arriba)" : "Extendido (abajo)") + " · este")); }
+            boolean principal = s.optBoolean("p");
+            String model = s.optString("model");
+            if (!model.isEmpty()) col.addView(small(model + " · Android " + sdkName(s.optInt("sdk")) + " · ChronOS " + s.optString("ver")));
+            if (!principal && local)
+                col.addView(row(hub.connected() ? 1 : 0, "Conexión con el principal",
+                        hub.connected() ? "Conectados." : "Sin conexión. Revisa que ambos estén en el mismo WiFi y que ChronOS esté abierto en el principal."
+                                + " Toca Reconectar. Si se corta seguido, revisa la batería y el Inicio automático en AMBOS teléfonos.",
+                        "reconnect", null, true));
+            if (principal) {
+                col.addView(row(s.optBoolean("full") ? 1 : 0, "Versión completa",
+                        s.optBoolean("full") ? "Instalada." : "Game Pal necesita la versión completa en el principal: instala MesaDoble-completa.apk"
+                                + " (Ajustes de ChronOS → Actualizar). La liviana no puede tocar la pantalla.", null, null, local));
+                if (s.optBoolean("full")) {
+                    boolean acc = s.optBoolean("acc");
+                    col.addView(row(acc ? 1 : 0, "Accesibilidad de ChronOS",
+                            acc ? "Activada." : "Ajustes → Accesibilidad → Apps descargadas (o Servicios instalados) → ChronOS → Activar."
+                                    + " Si sale \"ajuste restringido\": toca \"Ficha de ChronOS\" → ⋮ (arriba a la derecha) →"
+                                    + " Permitir ajustes restringidos, y vuelve a activarla.", "acc", acc ? null : "app", local));
+                    if (acc) col.addView(row(s.optBoolean("alive") ? 1 : 0, "Accesibilidad funcionando",
+                            s.optBoolean("alive") ? "Lista para tocar la pantalla." : "Figura activada pero Android la detuvo. Desactívala y vuelve a"
+                                    + " activarla; en Xiaomi/Poco activa además el Inicio automático.", "acc", null, local));
+                }
+                boolean shot = s.optInt("sdk") >= 30;
+                col.addView(row(shot ? 1 : 2, "Captura para \"Ajustar\"",
+                        shot ? "Disponible." : "Este teléfono tiene Android " + sdkName(s.optInt("sdk")) + ": Game Pal funciona, pero \"Ajustar\""
+                                + " no puede mostrar la pantalla del juego. Ubica los botones a ojo.", null, null, local));
+            }
+            col.addView(row(s.optBoolean("wifi") ? 1 : 0, "WiFi",
+                    s.optBoolean("wifi") ? "Conectado." : "Conéctalo al mismo WiFi que el otro teléfono (o a la zona WiFi del otro).", "wifi", null, local));
+            col.addView(row(s.optBoolean("batt") ? 1 : 0, "Batería sin restricciones",
+                    s.optBoolean("batt") ? "Android no frena a ChronOS." : "Android está ahorrando batería con ChronOS y puede cortar la conexión."
+                            + (s.optBoolean("mi") ? " Ficha de ChronOS → Ahorro de batería → Sin restricciones."
+                            : " Elige ChronOS → No optimizar / Sin restricciones."), "batt", null, local));
+            if (s.optBoolean("mi")) {
+                col.addView(row(2, "Inicio automático (Xiaomi/Poco)", "Android no deja comprobarlo desde aquí: ábrelo y deja ChronOS activado."
+                        + " Sin esto MIUI/HyperOS cierra ChronOS y se pierde la conexión.", "auto", null, local));
+                col.addView(row(2, "Candado en Recientes", "Abre las apps recientes, mantén presionada ChronOS y toca el candado."
+                        + " Así no se cierra al limpiar la memoria.", null, null, local));
+            }
+            if (!local && other != null) {
+                String a = me().optString("ver"), b = s.optString("ver");
+                if (!a.equals(b)) col.addView(row(2, "Versiones distintas", "Ese teléfono: " + b + " · este: " + a
+                        + ". Actualiza ambos a la misma para que se entiendan bien.", null, null, false));
+            }
+        }
+
+        private JSONObject me() { return PermCheck.status(GamePalActivity.this, hub); }
+
+        private String sdkName(int sdk) {
+            switch (sdk) { case 28: return "9"; case 29: return "10"; case 30: return "11"; case 31: return "12"; case 32: return "12L";
+                case 33: return "13"; case 34: return "14"; case 35: return "15"; case 36: return "16"; default: return "API " + sdk; }
+        }
+
+        private TextView heading(String s) {
+            TextView t = new TextView(GamePalActivity.this);
+            t.setText(s);
+            t.setTextSize(15);
+            t.setTextColor(Color.WHITE);
+            t.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            t.setPadding(dp(4), dp(4), 0, dp(2));
+            return t;
+        }
+
+        private TextView small(String s) {
+            TextView t = new TextView(GamePalActivity.this);
+            t.setText(s);
+            t.setTextSize(11);
+            t.setTextColor(0x99FFFFFF);
+            t.setPadding(dp(4), 0, 0, dp(6));
+            return t;
+        }
+
+        /** st: 1 bien, 0 falta, 2 revisar a mano. */
+        private View row(int st, String title, String desc, String fix, String fix2, boolean local) {
+            LinearLayout r = new LinearLayout(GamePalActivity.this);
+            r.setOrientation(LinearLayout.VERTICAL);
+            r.setPadding(dp(12), dp(10), dp(12), dp(10));
+            r.setBackground(card(st == 1 ? 0x1A4CAF50 : st == 0 ? 0x33E53935 : 0x26FFC107));
+            TextView t = new TextView(GamePalActivity.this);
+            t.setText((st == 1 ? "✓  " : st == 0 ? "✗  " : "!  ") + title);
+            t.setTextSize(14);
+            t.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+            t.setTextColor(st == 1 ? 0xFF7CFC9A : st == 0 ? 0xFFFF8A80 : 0xFFFFD54F);
+            r.addView(t);
+            TextView d = new TextView(GamePalActivity.this);
+            d.setText(desc);
+            d.setTextSize(12);
+            d.setTextColor(0xCCFFFFFF);
+            d.setPadding(0, dp(3), 0, 0);
+            r.addView(d);
+            if (st != 1 && (fix != null || fix2 != null)) {
+                LinearLayout bs = new LinearLayout(GamePalActivity.this);
+                bs.setPadding(0, dp(8), 0, 0);
+                if (fix != null) bs.addView(pill(label(fix), v -> doFix(fix, local)));
+                if (fix2 != null) bs.addView(pill(label(fix2), v -> doFix(fix2, local)));
+                r.addView(bs);
+            }
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+            lp.setMargins(0, dp(4), 0, dp(4));
+            r.setLayoutParams(lp);
+            return r;
+        }
+
+        private String label(String w) {
+            switch (w) {
+                case "reconnect": return "Reconectar";
+                case "acc": return "Abrir Accesibilidad";
+                case "app": return "Ficha de ChronOS";
+                case "auto": return "Abrir Inicio automático";
+                case "wifi": return "Abrir WiFi";
+                case "batt": return "Abrir batería";
+                default: return "Abrir ajuste";
+            }
+        }
+
+        private void doFix(String w, boolean local) {
+            if ("reconnect".equals(w)) { hub.reconnect(); toast("Buscando al otro teléfono…"); return; }
+            if (local) {
+                try { startActivity(PermCheck.fix(GamePalActivity.this, w)); }
+                catch (Exception e) { toast("No se pudo abrir ese ajuste"); }
+            } else if (hub.connected()) {
+                hub.send("pcFix", "w", w);
+                toast("Se abrió en el " + (hub.isPrincipal() ? "extendido" : "principal") + ": hazlo allá y vuelve a Brawl Stars");
+            } else toast("Sin conexión con el otro teléfono");
+        }
+    }
+
+    private android.graphics.drawable.GradientDrawable card(int color) {
+        android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
+        g.setColor(color);
+        g.setStroke(dp(1), 0x33FFFFFF);
+        g.setCornerRadius(dp(14));
+        return g;
+    }
+
+    private void toast(String s) { android.widget.Toast.makeText(this, s, android.widget.Toast.LENGTH_LONG).show(); }
 
     private void send(int finger, int ph, double x, double y) {
         if (hub.connected()) hub.send("gp", "f", finger, "ph", ph, "x", Math.round(x * 10000) / 10000.0, "y", Math.round(y * 10000) / 10000.0);

@@ -74,6 +74,12 @@ final class GamePalTouch {
         GestureDescription.Builder b = new GestureDescription.Builder();
         int n = 0;
         jiggle = 1 - jiggle;
+        // Android solo acepta "continuar" un gesto si en su PRIMER instante aparecen exactamente los dedos que
+        // venían apoyados. Un dedo nuevo (disparar mientras se camina) en ese instante hace que rechace todo y
+        // corte el caminar: por eso los dedos nuevos entran 1 ms después.
+        boolean anyCont = false;
+        for (F f : fingers.values()) if (f.s != null) { anyCont = true; break; }
+        long late = anyCont ? 1 : 0;
         for (Iterator<Map.Entry<Integer, F>> it = fingers.entrySet().iterator(); it.hasNext(); ) {
             F f = it.next().getValue();
             Path p = new Path();
@@ -89,7 +95,7 @@ final class GamePalTouch {
             p.lineTo(tx, ty);
             boolean cont = !f.ending;
             try {
-                f.s = f.s == null ? new GestureDescription.StrokeDescription(p, 0, DUR, cont) : f.s.continueStroke(p, 0, DUR, cont);
+                f.s = f.s == null ? new GestureDescription.StrokeDescription(p, late, DUR, cont) : f.s.continueStroke(p, 0, DUR, cont);
                 b.addStroke(f.s);
                 n++;
             } catch (Exception e) { f.s = null; }

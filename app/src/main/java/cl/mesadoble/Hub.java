@@ -153,6 +153,13 @@ public class Hub implements Link.Listener {
     private boolean battOffered, lostOffered, lostPending;
     private boolean brPermAsked;
 
+    /** Reintentar la conexión ya: el principal busca al extendido; el extendido llama al principal. */
+    public void reconnect() {
+        if (connected()) return;
+        if (isPrincipal()) forceLink();
+        else link.call(null);
+    }
+
     /** Principal: buscar al extendido a la fuerza (última IP + todo el WiFi). */
     public void forceLink() {
         if (!isPrincipal() || connected()) return;
@@ -271,6 +278,8 @@ public class Hub implements Link.Listener {
             else if (isPrincipal() && !imeSelected(app)) notifySwitch();   // versión liviana: un toque en el aviso
         } else {
             remoteImeReady = false;
+            // Game Pal: sin conexión no llegará el "soltar": los dedos virtuales del principal se levantan ya
+            if (isPrincipal() && MesaAccess.instance != null) GamePalTouch.releaseAll(MesaAccess.instance);
             // sin el extendido no hay teclado: si la conexión no vuelve pronto, devolver el teclado normal
             if (isPrincipal()) { main.removeCallbacks(restoreIme); main.postDelayed(restoreIme, 6000); }
             // el extendido no aparece por un minuto: se ofrece volver al teléfono normal
@@ -362,6 +371,13 @@ public class Hub implements Link.Listener {
                     main.postDelayed(() -> startOwn(GamePalActivity.intent(app, gp), () -> GamePalActivity.open, 99,
                             "Game Pal", "Toca para abrir el control de Brawl Stars"), 600);
             }
+            return;
+        }
+        // revisor de permisos de Game Pal: el otro teléfono pregunta el estado de este, o pide abrir un ajuste aquí
+        if ("pcAsk".equals(t)) { send("pcRes", "s", PermCheck.status(app, this)); return; }
+        if ("pcFix".equals(t)) {
+            Intent fi = PermCheck.fix(app, m.optString("w"));
+            main.post(() -> startExternal(fi, PermCheck.pkgOf(fi), "Ajustes", true));
             return;
         }
         if ("gpPref".equals(t)) { prefs.edit().putBoolean("gamePal", m.optBoolean("on", true)).apply(); return; }
