@@ -27,8 +27,8 @@ final class Pals {
 
     /** Una opción del panel lateral: símbolo, nombre y la dirección que abre. */
     static final class Item {
-        final String glyph, label, url;
-        Item(String glyph, String label, String url) { this.glyph = glyph; this.label = label; this.url = url; }
+        final String glyph, label, url, list;   // list: qué se despliega como árbol ("chats", "projects") o null
+        Item(String glyph, String label, String url, String list) { this.glyph = glyph; this.label = label; this.url = url; this.list = list; }
     }
 
     /** La receta de un PAL. */
@@ -42,7 +42,8 @@ final class Pals {
             this.id = id; this.name = name; this.home = home; this.accent = accent; this.hosts = hosts;
             this.login = home;
         }
-        Pal item(String g, String l, String u) { menu.add(new Item(g, l, u)); return this; }
+        Pal item(String g, String l, String u) { menu.add(new Item(g, l, u, null)); return this; }
+        Pal tree(String g, String l, String u, String list) { menu.add(new Item(g, l, u, list)); return this; }
         Pal login(String u) { login = u; return this; }
     }
 
@@ -52,8 +53,8 @@ final class Pals {
                 "claude.ai", "claude.com", "anthropic.com")
                 .login("https://claude.ai/login")
                 .item("✚", "Nuevo chat", "https://claude.ai/new")
-                .item("☰", "Chats", "https://claude.ai/recents")
-                .item("▣", "Proyectos", "https://claude.ai/projects")
+                .tree("☰", "Chats", "https://claude.ai/recents", "chats")
+                .tree("▣", "Proyectos", "https://claude.ai/projects", "projects")
                 .item("◆", "Artefactos", "https://claude.ai/artifacts")
                 .item("⚙", "Ajustes", "https://claude.ai/settings"));
     }

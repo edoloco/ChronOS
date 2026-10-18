@@ -48,6 +48,151 @@ public class PalActivity extends Activity {
 
     private int dp(float v) { return Math.round(v * dp); }
 
+    // ---------------- árbol de opciones ----------------
+
+    /** Un nudo del árbol: un enlace, y si tiene "list", una lista que se trae de la cuenta al desplegarlo. */
+    private final class Node {
+        final String glyph, label, url, list;
+        final java.util.List<Node> kids = new java.util.ArrayList<>();
+        boolean open, loading, loaded;
+        String note;
+        Node(String glyph, String label, String url, String list) { this.glyph = glyph; this.label = label; this.url = url; this.list = list; }
+    }
+
+    private final java.util.List<Node> roots = new java.util.ArrayList<>();
+    private LinearLayout tree;
+    private final String nonce = Long.toHexString(new java.security.SecureRandom().nextLong());
+    private final java.util.Map<String, Node> waiting = new java.util.HashMap<>();
+    private int reqN;
+
+    private void drawTree() {
+        tree.removeAllViews();
+        for (Node n : roots) drawNode(n, 0);
+    }
+
+    private void drawNode(Node n, int depth) {
+        boolean branch = n.list != null;
+        String arrow = branch ? (n.open ? "▾ " : "▸ ") : "   ";
+        TextView v = text(arrow + (n.glyph == null ? "" : n.glyph + "  ") + n.label, depth == 0 ? 14 : 12.5f, false);
+        v.setSingleLine(true);
+        v.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        v.setGravity(Gravity.CENTER_VERTICAL);
+        v.setPadding(dp(8 + depth * 14), 0, dp(6), 0);
+        v.setBackground(rowBg(depth == 0 ? 0x1AFFFFFF : 0x0DFFFFFF));
+        v.setOnClickListener(x -> {
+            if (branch) {
+                n.open = !n.open;
+                if (n.open && !n.loaded && !n.loading) load(n);
+                drawTree();
+            } else if (n.url != null) web.loadUrl(n.url);
+        });
+        // mantener presionado una rama: abre su página (por ejemplo, el proyecto entero)
+        if (branch && n.url != null) v.setOnLongClickListener(x -> { web.loadUrl(n.url); return true; });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(depth == 0 ? 40 : 34));
+        lp.setMargins(0, dp(2), 0, dp(2));
+        tree.addView(v, lp);
+        if (!n.open) return;
+        if (n.loading || n.note != null) {
+            TextView w = text(n.loading ? "cargando…" : n.note, 11.5f, false);
+            w.setAlpha(0.8f);
+            w.setPadding(dp(22 + depth * 14), dp(4), dp(6), dp(4));
+            tree.addView(w);
+        }
+        for (Node k : n.kids) drawNode(k, depth + 1);
+    }
+
+    private void reloadLists() {
+        for (Node n : roots) if (n.list != null) { n.loaded = false; n.kids.clear(); if (n.open) load(n); }
+        drawTree();
+    }
+
+    /**
+     * Trae la lista desde la cuenta abierta en el PAL: se pide desde la misma página (con su sesión) y vuelve por
+     * ChronosPal.got(). Son las mismas consultas que hace la página de Claude para su menú.
+     */
+    private void load(Node n) {
+        Uri cur = Uri.parse(web.getUrl() == null ? "" : web.getUrl());
+        if (cur.getHost() == null || !allowed(cur)) { n.note = "Abre primero " + pal.name.replace(" PAL", ""); return; }
+        n.loading = true;
+        n.note = null;
+        String id = "r" + (++reqN);
+        waiting.put(id, n);
+        String what = n.list;
+        String js = "(async()=>{const N='" + nonce + "',I='" + id + "',W='" + what + "';"
+                + "const g=async u=>{const r=await fetch(u,{credentials:'include'});if(!r.ok)throw new Error('http '+r.status);return r.json();};"
+                + "try{let o=window.__chronosOrg;if(!o){const os=await g('/api/organizations');"
+                + "const c=os.find(x=>(x.capabilities||[]).includes('chat'))||os[0];o=window.__chronosOrg=c.uuid;}"
+                + "let out=[];"
+                + "if(W==='projects'){const ps=await g('/api/organizations/'+o+'/projects');"
+                + "out=ps.filter(p=>!p.archived_at).map(p=>({id:p.uuid,name:p.name}));}"
+                + "else if(W==='chats'){const cs=await g('/api/organizations/'+o+'/chat_conversations?limit=40');"
+                + "out=cs.map(c=>({id:c.uuid,name:c.name||'(sin título)'}));}"
+                + "else if(W.startsWith('pchats:')){const p=W.slice(7);let cs;"
+                + "try{cs=await g('/api/organizations/'+o+'/projects/'+p+'/conversations');}"
+                + "catch(e){cs=(await g('/api/organizations/'+o+'/chat_conversations?limit=100')).filter(c=>c.project_uuid===p);}"
+                + "out=cs.map(c=>({id:c.uuid,name:c.name||'(sin título)'}));}"
+                + "ChronosPal.got(N,I,JSON.stringify(out));}catch(e){ChronosPal.got(N,I,'!'+String(e&&e.message||e));}})();";
+        web.evaluateJavascript(js, null);
+    }
+
+    /** Respuesta de la página: solo se acepta con la clave de esta sesión del PAL. */
+    private final class Bridge {
+        @android.webkit.JavascriptInterface
+        public void got(String key, String id, String data) {
+            if (!nonce.equals(key)) return;
+            runOnUiThread(() -> fill(id, data));
+        }
+    }
+
+    private void fill(String id, String data) {
+        Node n = waiting.remove(id);
+        if (n == null) return;
+        n.loading = false;
+        n.kids.clear();
+        if (data == null || data.startsWith("!")) {
+            String e = data == null ? "" : data;
+            n.note = e.contains("401") || e.contains("403") ? "Inicia sesión primero" : "No se pudo cargar (toca ↻)";
+            drawTree();
+            return;
+        }
+        try {
+            org.json.JSONArray a = new org.json.JSONArray(data);
+            for (int i = 0; i < a.length(); i++) {
+                org.json.JSONObject o = a.getJSONObject(i);
+                String uid = o.optString("id"), nm = o.optString("name");
+                if ("projects".equals(n.list)) n.kids.add(new Node("▣", nm, "https://claude.ai/project/" + uid, "pchats:" + uid));
+                else n.kids.add(new Node(null, nm, "https://claude.ai/chat/" + uid, null));
+            }
+            if (a.length() == 0) n.note = "projects".equals(n.list) ? "Sin proyectos" : "Sin chats";
+            // atajos dentro de cada rama: abrir el proyecto entero / ver la lista completa
+            if (n.list.startsWith("pchats:")) n.kids.add(0, new Node("↗", "Abrir proyecto", n.url, null));
+            else n.kids.add(new Node("…", "Ver todos", n.url, null));
+            n.loaded = true;
+        } catch (Exception e) { n.note = "No se pudo leer la lista"; }
+        drawTree();
+    }
+
+    private android.graphics.drawable.Drawable rowBg(int color) {
+        android.graphics.drawable.StateListDrawable st = new android.graphics.drawable.StateListDrawable();
+        android.graphics.drawable.GradientDrawable on = new android.graphics.drawable.GradientDrawable(), off = new android.graphics.drawable.GradientDrawable();
+        on.setColor(0x59FFFFFF); on.setCornerRadius(dp(10));
+        off.setColor(color); off.setCornerRadius(dp(10));
+        st.addState(new int[]{android.R.attr.state_pressed}, on);
+        st.addState(new int[]{}, off);
+        return st;
+    }
+
+    private View small(String glyph, View.OnClickListener l) {
+        TextView v = text(glyph, 15, false);
+        v.setGravity(Gravity.CENTER);
+        v.setBackground(rowBg(0x1AFFFFFF));
+        v.setOnClickListener(l);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(36), 1);
+        lp.setMargins(dp(2), dp(2), dp(2), dp(2));
+        v.setLayoutParams(lp);
+        return v;
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
@@ -91,24 +236,31 @@ public class PalActivity extends Activity {
         name.setPadding(dp(8), 0, 0, 0);
         head.addView(name);
         menu.addView(head);
-        space(menu, 10);
-        for (Pals.Item it : pal.menu) menu.addView(option(it.glyph, it.label, v -> web.loadUrl(it.url)));
         space(menu, 8);
-        menu.addView(option("←", "Atrás", v -> { if (web.canGoBack()) web.goBack(); }));
-        menu.addView(option("↻", "Recargar", v -> web.reload()));
-        menu.addView(option("⎘", "Abrir enlace copiado", v -> openCopiedLink()));
-        LinearLayout zoom = new LinearLayout(this);
-        zoom.setGravity(Gravity.CENTER_VERTICAL);
-        zoom.addView(option("A−", "", v -> setZoom(-10)), new LinearLayout.LayoutParams(0, dp(38), 1));
+        // árbol: las opciones se despliegan con su contenido (la lista de proyectos, los chats…)
+        android.widget.ScrollView sc = new android.widget.ScrollView(this);
+        sc.setVerticalScrollBarEnabled(false);
+        tree = new LinearLayout(this);
+        tree.setOrientation(LinearLayout.VERTICAL);
+        sc.addView(tree);
+        menu.addView(sc, new LinearLayout.LayoutParams(-1, 0, 1));
+        for (Pals.Item it : pal.menu) roots.add(new Node(it.glyph, it.label, it.url, it.list));
+        drawTree();
+        // barra de abajo, solo símbolos
+        LinearLayout bar1 = new LinearLayout(this), bar2 = new LinearLayout(this);
+        bar1.addView(small("←", v -> { if (web.canGoBack()) web.goBack(); }), new LinearLayout.LayoutParams(0, dp(36), 1));
+        bar1.addView(small("↻", v -> { web.reload(); reloadLists(); }), new LinearLayout.LayoutParams(0, dp(36), 1));
+        bar1.addView(small("⎘", v -> openCopiedLink()), new LinearLayout.LayoutParams(0, dp(36), 1));
+        bar1.addView(small("✕", v -> finish()), new LinearLayout.LayoutParams(0, dp(36), 1));
+        bar2.addView(small("A−", v -> setZoom(-10)), new LinearLayout.LayoutParams(0, dp(34), 1));
         zoomLabel = text("", 12, false);
         zoomLabel.setGravity(Gravity.CENTER);
-        zoom.addView(zoomLabel, new LinearLayout.LayoutParams(dp(42), dp(38)));
-        zoom.addView(option("A+", "", v -> setZoom(10)), new LinearLayout.LayoutParams(0, dp(38), 1));
-        menu.addView(zoom);
-        View fill = new View(this);
-        menu.addView(fill, new LinearLayout.LayoutParams(1, 0, 1));
-        menu.addView(option("✕", "Cerrar", v -> finish()));
-        row.addView(menu, new LinearLayout.LayoutParams(dp(176), -1));
+        bar2.addView(zoomLabel, new LinearLayout.LayoutParams(0, dp(34), 1));
+        bar2.addView(small("A+", v -> setZoom(10)), new LinearLayout.LayoutParams(0, dp(34), 1));
+        space(menu, 6);
+        menu.addView(bar1);
+        menu.addView(bar2);
+        row.addView(menu, new LinearLayout.LayoutParams(dp(236), -1));
 
         // ---- la ventana del servicio (cristal naranjo grande)
         Glass chat = new Glass(0x66F57C1F);
@@ -158,6 +310,7 @@ public class PalActivity extends Activity {
         cm.setAcceptCookie(true);
         cm.setAcceptThirdPartyCookies(web, true);
         web.setBackgroundColor(0xFF1F1E1D);
+        web.addJavascriptInterface(new Bridge(), "ChronosPal");
         web.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
                 Uri u = r.getUrl();
