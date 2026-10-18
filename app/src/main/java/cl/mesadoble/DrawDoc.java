@@ -25,15 +25,27 @@ import java.util.List;
  * órdenes en el mismo orden, así se ve igual arriba y abajo:
  *   seg {l, b:{t,s,c,o}, p:[x,y,presión,…], st}  tramo de un trazo (st = empieza)
  *   end                                          el trazo se pega en la capa (se puede deshacer)
- *   undo · redo · clear · layer {a: add|del|sel|vis|up|down, i}
+ *   undo · redo · clear · layer {a: add|del|sel|vis|up|down, i} · new {w, h}
+ *   sel {k: wand|lasso, …} · selClear · selInv · selDel {l}   (selección: borrar partes y dejarlas transparentes)
+ * El tamaño del dibujo se elige al empezar uno nuevo. "Mezcla" y "Difuminar" pintan directo en la capa (toman
+ * los colores que van tocando); el resto pasa por el búfer.
  * Un trazo se dibuja primero en un búfer (con opacidad completa) y al soltar se pega en la capa con la
  * opacidad del pincel: así el rotulador no se oscurece donde se cruza consigo mismo.
  */
 final class DrawDoc {
 
-    static final int W = 1600, H = 900, MAX_LAYERS = 6;
-    static final int PENCIL = 0, INK = 1, MARKER = 2, AIR = 3, ERASER = 4, BRUSH = 5, CHALK = 6, CALLI = 7, SOFT_ERASER = 8;
-    static final String[] BRUSH_NAMES = {"Lápiz", "Tinta", "Rotulador", "Aerógrafo", "Borrador", "Pincel", "Tiza", "Caligrafía", "Borrador suave"};
+    int W = 1600, H = 900;
+    static final int MAX_SIDE = 3000, MAX_AREA = 4_200_000;
+    static final int PENCIL = 0, INK = 1, MARKER = 2, AIR = 3, ERASER = 4, BRUSH = 5, CHALK = 6, CALLI = 7, SOFT_ERASER = 8,
+            MIX = 9, SMUDGE = 10, VALUE = 11;
+    static final String[] BRUSH_NAMES = {"Lápiz", "Tinta", "Rotulador", "Aerógrafo", "Borrador", "Pincel", "Tiza", "Caligrafía", "Borrador suave",
+            "Mezcla", "Difuminar", "Valor de trazo"};
+
+    /** Cuántas capas caben según el tamaño (unos 100 MB para las capas). */
+    int maxLayers() { return Math.max(3, Math.min(10, (int) (100L * 1024 * 1024 / ((long) W * H * 4)))); }
+
+    /** Pinceles que pintan directo en la capa (para poder tomar los colores que tocan). */
+    static boolean direct(int t) { return t == MIX || t == SMUDGE; }
     static final String[] BLEND_NAMES = {"Normal", "Multiplicar", "Trama", "Superponer", "Sumar"};
 
     static boolean eraser(int t) { return t == ERASER || t == SOFT_ERASER; }
@@ -42,8 +54,20 @@ final class DrawDoc {
 
     final List<Layer> layers = new ArrayList<>();
     int cur = 0;
-    final Bitmap buf = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);   // trazo en curso
-    private final Canvas bufC = new Canvas(buf);
+    Bitmap buf = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);   // trazo en curso
+    private Canvas bufC = new Canvas(buf);
+
+    // pinceles directos: la capa antes del trazo (para deshacer), el color que lleva "Mezcla" y la muestra de "Difuminar"
+    private Bitmap before;
+    private Canvas layC;
+    private final float[][] mixCol = new float[2][];
+    private final Bitmap[] smPatch = new Bitmap[2];
+    private Bitmap smTmp, smTip;
+    private int smR;
+
+    // selección (máscara: negro opaco = seleccionado)
+    Bitmap sel;
+    boolean hasSel;
 
     // trazo en curso
     boolean stroking, sSym;
@@ -67,7 +91,7 @@ final class DrawDoc {
     // ---------------- capas ----------------
 
     void addLayer() {
-        if (layers.size() >= MAX_LAYERS) return;
+        if (layers.size() >= maxLayers()) return;
         Layer l = new Layer();
         l.bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);
         l.name = "Capa " + (layers.size() + 1);
@@ -120,6 +144,9 @@ final class DrawDoc {
             case CHALK: return Math.max(1.5f, sSize * 0.55f * (0.6f + 0.4f * p));
             case CALLI: return Math.max(1f, sSize * 0.6f * (0.5f + 0.5f * p));
             case SOFT_ERASER: return Math.max(2f, sSize * 0.8f);
+            case MIX: return Math.max(1.5f, sSize * 0.6f * (0.5f + 0.5f * p));
+            case SMUDGE: return Math.max(2f, smR > 0 ? smR : sSize * 0.6f);
+            case VALUE: return Math.max(0.4f, sSize * 0.5f * p);   // p = el grosor elegido en vivo con la barra
             default: return Math.max(0.6f, sSize * 0.5f);   // rotulador y borrador: parejos
         }
     }
@@ -137,6 +164,8 @@ final class DrawDoc {
         stampN++;
         int col = sColor | 0xFF000000;
         switch (sType) {
+            case MIX: mixDab(x, y, r, p, mirrored ? 1 : 0); break;
+            case SMUDGE: smudgeDab(x, y, r, p, mirrored ? 1 : 0); break;
             case AIR: case SOFT_ERASER: case BRUSH: {
                 soft.setColorFilter(new PorterDuffColorFilter(sType == SOFT_ERASER ? 0xFF000000 : col, PorterDuff.Mode.SRC_IN));
                 float a = sType == AIR ? 0.05f + 0.16f * p : sType == BRUSH ? 0.35f + 0.5f * p : 0.5f;
@@ -175,6 +204,8 @@ final class DrawDoc {
 
     private float spacing(float p) {
         float r = radius(p);
+        if (sType == MIX) return Math.max(0.8f, r * 0.15f);
+        if (sType == SMUDGE) return Math.max(1f, r * 0.12f);
         return sType == AIR || sType == SOFT_ERASER ? Math.max(1f, r * 0.18f) : sType == BRUSH ? Math.max(0.5f, r * 0.12f)
                 : sType == CHALK ? Math.max(1f, r * 0.45f) : sType == CALLI ? Math.max(0.4f, r * 0.08f) : Math.max(0.5f, r * 0.28f);
     }
@@ -191,6 +222,14 @@ final class DrawDoc {
         sType = type; sSize = size; sColor = color; sOpacity = opacity;
         buf.eraseColor(Color.TRANSPARENT);
         dirty.setEmpty();
+        if (direct(type)) {
+            Bitmap lb = layers.get(sLayer).bmp;
+            before = lb.copy(Bitmap.Config.ARGB_8888, false);
+            layC = new Canvas(lb);
+            mixCol[0] = mixCol[1] = null;
+            smR = type == SMUDGE ? Math.max(3, Math.round(size * 0.6f)) : 0;
+            for (int i = 0; i < 2; i++) { if (smPatch[i] != null) smPatch[i].recycle(); smPatch[i] = null; }
+        }
         hasLast = false;
         carry = 0;
     }
@@ -219,6 +258,19 @@ final class DrawDoc {
         if (!stroking) return;
         stroking = false;
         Rect r = new Rect(dirty);
+        if (direct(sType)) {
+            Layer l = layers.get(Math.min(sLayer, layers.size() - 1));
+            if (before != null && r.intersect(0, 0, W, H) && !r.isEmpty()) {
+                Step st = new Step();
+                st.layer = layers.indexOf(l);
+                st.r = r;
+                st.before = Bitmap.createBitmap(before, r.left, r.top, r.width(), r.height());
+                st.after = Bitmap.createBitmap(l.bmp, r.left, r.top, r.width(), r.height());
+                push(st);
+            }
+            dropDirect();
+            return;
+        }
         if (!r.intersect(0, 0, W, H) || r.isEmpty()) return;
         Layer l = layers.get(Math.min(sLayer, layers.size() - 1));
         Step st = new Step();
@@ -233,6 +285,92 @@ final class DrawDoc {
         st.after = Bitmap.createBitmap(l.bmp, r.left, r.top, r.width(), r.height());
         push(st);
         buf.eraseColor(Color.TRANSPARENT);
+    }
+
+    private void dropDirect() {
+        if (before != null) before.recycle();
+        before = null;
+        layC = null;
+        for (int i = 0; i < 2; i++) { if (smPatch[i] != null) smPatch[i].recycle(); smPatch[i] = null; }
+    }
+
+    /** Se cancela el trazo en curso (por ejemplo, se pusieron dos dedos para hacer zoom). */
+    void cancel() {
+        if (stroking && direct(sType) && before != null && sLayer < layers.size()) {
+            Paint p = new Paint();
+            p.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SRC));
+            new Canvas(layers.get(sLayer).bmp).drawBitmap(before, 0, 0, p);
+        }
+        stroking = false;
+        if (direct(sType)) dropDirect();
+        buf.eraseColor(Color.TRANSPARENT);
+    }
+
+    // ---------------- mezcla y difuminado ----------------
+
+    /** "Mezcla": pinta con el color que lleva, y ese color se va mezclando con lo que toca (como pintura húmeda). */
+    private void mixDab(float x, float y, float r, float p, int k) {
+        Bitmap lb = layers.get(sLayer).bmp;
+        float[] c = mixCol[k];
+        if (c == null) c = mixCol[k] = new float[]{Color.red(sColor), Color.green(sColor), Color.blue(sColor)};
+        // muestra de lo que hay debajo (5 puntos dentro de la pincelada)
+        float sr = 0, sg = 0, sb = 0, sa = 0;
+        float[][] off = {{0, 0}, {-0.5f, 0}, {0.5f, 0}, {0, -0.5f}, {0, 0.5f}};
+        for (float[] o : off) {
+            int px = Math.round(x + o[0] * r), py = Math.round(y + o[1] * r);
+            if (px < 0 || py < 0 || px >= W || py >= H) continue;
+            int v = lb.getPixel(px, py);
+            float a = Color.alpha(v) / 255f;
+            sr += Color.red(v) * a; sg += Color.green(v) * a; sb += Color.blue(v) * a; sa += a;
+        }
+        if (sa > 0.01f) {
+            float k2 = 0.32f * (sa / off.length);   // cuánto color toma: más si debajo hay pintura
+            c[0] += (sr / sa - c[0]) * k2; c[1] += (sg / sa - c[1]) * k2; c[2] += (sb / sa - c[2]) * k2;
+        }
+        int col = Color.rgb(Math.round(c[0]), Math.round(c[1]), Math.round(c[2]));
+        soft.setColorFilter(new PorterDuffColorFilter(col, PorterDuff.Mode.SRC_IN));
+        soft.setAlpha((int) (255 * Math.max(0.05f, Math.min(1f, (0.22f + 0.45f * p) * sOpacity))));
+        layC.drawBitmap(tip(), null, new RectF(x - r, y - r, x + r, y + r), soft);
+    }
+
+    private final Paint smOut = new Paint(Paint.FILTER_BITMAP_FLAG), smAdd = new Paint(Paint.FILTER_BITMAP_FLAG), smIn = new Paint();
+
+    /** "Difuminar": arrastra la pintura que hay (sin color propio), como pasar el dedo. */
+    private void smudgeDab(float x, float y, float r, float p, int k) {
+        Bitmap lb = layers.get(sLayer).bmp;
+        int R = Math.max(2, smR), S = R * 2;
+        int lx0 = Math.round(x) - R, ly0 = Math.round(y) - R;
+        Rect src = new Rect(lx0, ly0, lx0 + S, ly0 + S);
+        Rect all = new Rect(0, 0, S, S);
+        if (smTip == null || smTip.getWidth() != S) {
+            if (smTip != null) smTip.recycle();
+            smTip = Bitmap.createScaledBitmap(tip(), S, S, true);
+            if (smTmp != null) smTmp.recycle();
+            smTmp = Bitmap.createBitmap(S, S, Bitmap.Config.ARGB_8888);
+        }
+        if (smPatch[k] == null) {   // primera pincelada: toma lo que hay debajo
+            smPatch[k] = Bitmap.createBitmap(S, S, Bitmap.Config.ARGB_8888);
+            new Canvas(smPatch[k]).drawBitmap(lb, src, all, null);
+            return;
+        }
+        float a = Math.max(0.05f, Math.min(1f, (0.45f + 0.45f * p) * sOpacity));
+        // capa = capa·(1 − m·a) + muestra·m·a   (m = la punta suave)
+        smOut.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_OUT));
+        smOut.setAlpha((int) (255 * a));
+        layC.drawBitmap(smTip, null, src, smOut);
+        smTmp.eraseColor(Color.TRANSPARENT);
+        Canvas tc = new Canvas(smTmp);
+        tc.drawBitmap(smPatch[k], 0, 0, null);
+        smIn.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_IN));
+        tc.drawBitmap(smTip, 0, 0, smIn);
+        smAdd.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.ADD));
+        smAdd.setAlpha((int) (255 * a));
+        layC.drawBitmap(smTmp, null, src, smAdd);
+        // la muestra se va pareciendo a lo que hay ahora debajo (la pintura se "gasta")
+        Canvas pc = new Canvas(smPatch[k]);
+        pc.drawColor(Color.argb((int) (255 * 0.8f), 0, 0, 0), PorterDuff.Mode.DST_IN);
+        smAdd.setAlpha((int) (255 * 0.2f));
+        pc.drawBitmap(lb, src, all, smAdd);
     }
 
     private void push(Step st) {
@@ -304,14 +442,18 @@ final class DrawDoc {
                 break;
             }
             case "end": end(); break;
-            case "cancel": stroking = false; buf.eraseColor(Color.TRANSPARENT); break;
+            case "cancel": cancel(); break;
             case "undo": end(); undo(); break;
             case "redo": end(); redo(); break;
             case "clear": end(); clearLayer(m.optInt("i", cur)); break;
             case "shape": end(); shape(m); break;
             case "fill": end(); fill(m.optInt("l", cur), m.optInt("x"), m.optInt("y"), m.optInt("c", 0xFF000000), m.optInt("tol", 40)); break;
             case "import": end(); importImage(m.optString("png")); break;
-            case "new": end(); reset(); break;
+            case "new": end(); reset(m.optInt("w", W), m.optInt("h", H)); break;
+            case "sel": end(); select(m); break;
+            case "selClear": clearSel(); break;
+            case "selInv": invertSel(); break;
+            case "selDel": end(); deleteSel(m.optInt("l", cur)); break;
             case "layer": {
                 end();
                 String a = m.optString("a");
@@ -347,7 +489,7 @@ final class DrawDoc {
             if (!l.visible || l.alpha <= 0.01f) continue;
             lp0.setAlpha((int) (255 * l.alpha));
             lp0.setXfermode(l.blend == 0 ? null : new PorterDuffXfermode(BLENDS[l.blend]));
-            if (stroking && i == sLayer) {
+            if (stroking && i == sLayer && !direct(sType)) {
                 // la capa con el trazo en curso se arma aparte y después se mezcla como la capa
                 int save = c.saveLayer(dst, lp0);
                 c.drawBitmap(l.bmp, null, dst, null);
@@ -452,7 +594,7 @@ final class DrawDoc {
     }
 
     private void importImage(String b64) {
-        if (layers.size() >= MAX_LAYERS) return;
+        if (layers.size() >= maxLayers()) return;
         try {
             byte[] d = android.util.Base64.decode(b64, android.util.Base64.DEFAULT);
             Bitmap b = BitmapFactory.decodeByteArray(d, 0, d.length);
@@ -467,7 +609,7 @@ final class DrawDoc {
     }
 
     private void duplicate(int i) {
-        if (layers.size() >= MAX_LAYERS || i < 0 || i >= layers.size()) return;
+        if (layers.size() >= maxLayers() || i < 0 || i >= layers.size()) return;
         Layer src = layers.get(i), l = new Layer();
         l.bmp = src.bmp.copy(Bitmap.Config.ARGB_8888, true);
         l.alpha = src.alpha; l.blend = src.blend;
@@ -507,14 +649,129 @@ final class DrawDoc {
         push(st);
     }
 
-    /** Dibujo nuevo: una capa en blanco. */
-    void reset() {
+    /** Dibujo nuevo, del tamaño pedido: una capa en blanco. */
+    void reset(int w, int h) {
         stroking = false;
+        dropDirect();
         for (Layer l : layers) l.bmp.recycle();
         layers.clear();
+        for (Step s : undo) { s.before.recycle(); s.after.recycle(); }
+        for (Step s : redo) { s.before.recycle(); s.after.recycle(); }
         undo.clear(); redo.clear(); undoBytes = 0;
+        resize(w, h);
         cur = 0;
         addLayer();
+    }
+
+    /** Ajusta el tamaño del lienzo (sin capas): límites para que quepa en la memoria. */
+    private void resize(int w, int h) {
+        w = Math.max(200, Math.min(MAX_SIDE, w));
+        h = Math.max(200, Math.min(MAX_SIDE, h));
+        if ((long) w * h > MAX_AREA) { double k = Math.sqrt(MAX_AREA / (double) ((long) w * h)); w = (int) (w * k); h = (int) (h * k); }
+        clearSel();
+        if (sel != null) { sel.recycle(); sel = null; }
+        if (w == W && h == H) return;
+        W = w; H = h;
+        buf.recycle();
+        buf = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);
+        bufC = new Canvas(buf);
+    }
+
+    // ---------------- selección: borrar partes y dejarlas transparentes ----------------
+
+    private Bitmap selMask() {
+        if (sel == null) sel = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);
+        return sel;
+    }
+
+    void clearSel() { if (sel != null) sel.eraseColor(Color.TRANSPARENT); hasSel = false; }
+
+    private void invertSel() {
+        Bitmap m = selMask();
+        Bitmap inv = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(inv);
+        c.drawColor(0xFF000000);
+        Paint p = new Paint();
+        p.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_OUT));
+        c.drawBitmap(m, 0, 0, p);
+        m.eraseColor(Color.TRANSPARENT);
+        new Canvas(m).drawBitmap(inv, 0, 0, null);
+        inv.recycle();
+        hasSel = true;
+    }
+
+    /** Agrega a la selección: varita (zona de color parecido, tocando un punto) o lazo (zona dibujada a mano). */
+    private void select(JSONObject m) {
+        Bitmap mask = selMask();
+        String k = m.optString("k");
+        if ("lasso".equals(k)) {
+            JSONArray p = m.optJSONArray("p");
+            if (p == null || p.length() < 6) return;
+            android.graphics.Path path = new android.graphics.Path();
+            path.moveTo((float) p.optDouble(0), (float) p.optDouble(1));
+            for (int i = 2; i + 1 < p.length(); i += 2) path.lineTo((float) p.optDouble(i), (float) p.optDouble(i + 1));
+            path.close();
+            Paint f = new Paint(Paint.ANTI_ALIAS_FLAG);
+            f.setColor(0xFF000000);
+            new Canvas(mask).drawPath(path, f);
+            hasSel = true;
+            return;
+        }
+        // varita mágica sobre la capa elegida (cuenta también lo transparente)
+        int layer = m.optInt("l", cur), x = m.optInt("x"), y = m.optInt("y"), tol = m.optInt("tol", 32);
+        if (layer < 0 || layer >= layers.size() || x < 0 || y < 0 || x >= W || y >= H) return;
+        int[] px = new int[W * H];
+        layers.get(layer).bmp.getPixels(px, 0, W, 0, 0, W, H);
+        int target = px[y * W + x];
+        boolean[] mark = new boolean[W * H];
+        int[] stack = new int[W * H];
+        int sp = 0, minX = x, maxX = x, minY = y, maxY = y;
+        stack[sp++] = y * W + x;
+        mark[y * W + x] = true;
+        while (sp > 0) {
+            int i = stack[--sp], cx = i % W, cy = i / W;
+            if (cx < minX) minX = cx; if (cx > maxX) maxX = cx; if (cy < minY) minY = cy; if (cy > maxY) maxY = cy;
+            if (cx > 0 && !mark[i - 1] && nearA(px[i - 1], target, tol)) { mark[i - 1] = true; stack[sp++] = i - 1; }
+            if (cx < W - 1 && !mark[i + 1] && nearA(px[i + 1], target, tol)) { mark[i + 1] = true; stack[sp++] = i + 1; }
+            if (cy > 0 && !mark[i - W] && nearA(px[i - W], target, tol)) { mark[i - W] = true; stack[sp++] = i - W; }
+            if (cy < H - 1 && !mark[i + W] && nearA(px[i + W], target, tol)) { mark[i + W] = true; stack[sp++] = i + W; }
+        }
+        // se agranda 1 px para no dejar un borde del fondo alrededor del dibujo
+        Rect r = new Rect(Math.max(0, minX - 1), Math.max(0, minY - 1), Math.min(W, maxX + 2), Math.min(H, maxY + 2));
+        int rw = r.width(), rh = r.height();
+        int[] out = new int[rw * rh];
+        for (int yy = 0; yy < rh; yy++) for (int xx = 0; xx < rw; xx++) {
+            int gx = r.left + xx, gy = r.top + yy, i = gy * W + gx;
+            boolean in = mark[i] || (gx > 0 && mark[i - 1]) || (gx < W - 1 && mark[i + 1]) || (gy > 0 && mark[i - W]) || (gy < H - 1 && mark[i + W]);
+            out[yy * rw + xx] = in ? 0xFF000000 : 0;
+        }
+        Bitmap patch = Bitmap.createBitmap(out, rw, rh, Bitmap.Config.ARGB_8888);
+        new Canvas(mask).drawBitmap(patch, r.left, r.top, null);
+        patch.recycle();
+        hasSel = true;
+    }
+
+    /** Parecido de color contando la transparencia. */
+    private static boolean nearA(int a, int b, int tol) {
+        int aa = (a >>> 24), ba = (b >>> 24);
+        if (aa < 8 && ba < 8) return true;   // los dos transparentes
+        return Math.abs(aa - ba) + Math.abs(((a >> 16) & 255) - ((b >> 16) & 255)) + Math.abs(((a >> 8) & 255) - ((b >> 8) & 255))
+                + Math.abs((a & 255) - (b & 255)) <= tol * 4;
+    }
+
+    /** Borra lo seleccionado en la capa: queda transparente (se puede deshacer). */
+    private void deleteSel(int layer) {
+        if (!hasSel || sel == null || layer < 0 || layer >= layers.size()) return;
+        Layer l = layers.get(layer);
+        Step st = new Step();
+        st.layer = layer;
+        st.r = new Rect(0, 0, W, H);
+        st.before = l.bmp.copy(Bitmap.Config.ARGB_8888, false);
+        Paint p = new Paint();
+        p.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_OUT));
+        new Canvas(l.bmp).drawBitmap(sel, 0, 0, p);
+        st.after = l.bmp.copy(Bitmap.Config.ARGB_8888, false);
+        push(st);
     }
 
     /** Imagen plana (fondo blanco) para exportar. */
@@ -528,12 +785,13 @@ final class DrawDoc {
     // ---------------- todo el dibujo (para guardar y para el otro teléfono) ----------------
 
     /** Copia del dibujo (en el hilo de la pantalla); se convierte a texto después, en otro hilo. */
-    static final class Snap { final List<Bitmap> bmps = new ArrayList<>(); final List<Boolean> vis = new ArrayList<>(); final List<float[]> ab = new ArrayList<>(); int cur; }
+    static final class Snap { final List<Bitmap> bmps = new ArrayList<>(); final List<Boolean> vis = new ArrayList<>(); final List<float[]> ab = new ArrayList<>(); int cur, w, h; }
 
     Snap snapshot() {
         Snap s = new Snap();
         for (Layer l : layers) { s.bmps.add(l.bmp.copy(Bitmap.Config.ARGB_8888, false)); s.vis.add(l.visible); s.ab.add(new float[]{l.alpha, l.blend}); }
         s.cur = cur;
+        s.w = W; s.h = H;
         return s;
     }
 
@@ -554,6 +812,8 @@ final class DrawDoc {
             }
             o.put("layers", arr);
             o.put("cur", s.cur);
+            o.put("w", s.w);
+            o.put("h", s.h);
         } catch (Exception ignored) { }
         return o;
     }
@@ -562,10 +822,12 @@ final class DrawDoc {
         JSONArray arr = o.optJSONArray("layers");
         if (arr == null || arr.length() == 0) return;
         stroking = false;
+        dropDirect();
         for (Layer l : layers) l.bmp.recycle();
         layers.clear();
         undo.clear(); redo.clear(); undoBytes = 0;
-        for (int i = 0; i < arr.length() && i < MAX_LAYERS; i++) {
+        resize(o.optInt("w", 1600), o.optInt("h", 900));
+        for (int i = 0; i < arr.length() && i < maxLayers(); i++) {
             JSONObject j = arr.optJSONObject(i);
             Layer l = new Layer();
             l.bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);

@@ -54,7 +54,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
     static DrawDoc doc;   // uno por proceso
 
     static final int ORANGE = 0xFFF57C1F, BG = 0xFF101418;
-    static final int T_DRAW = 0, T_LINE = 1, T_RECT = 2, T_OVAL = 3, T_FILL = 4, T_PICK = 5;
+    static final int T_DRAW = 0, T_LINE = 1, T_RECT = 2, T_OVAL = 3, T_FILL = 4, T_PICK = 5, T_WAND = 6, T_LASSO = 7;
 
     private final Handler h = new Handler(Looper.getMainLooper());
     private Hub hub;
@@ -80,6 +80,11 @@ public class DualDrawActivity extends Activity implements Link.Listener {
     private TextView blendBtn;
     private Glass2 leftPanel, rightPanel;
     private boolean panelsOn = true;
+    private ValueBar valueBar;          // "Valor de trazo": grosor en vivo con la otra mano
+    private float valueLevel;
+    private LinearLayout selBar;        // selección: borrar, invertir, quitar, tolerancia
+    private TextView tolLabel;
+    private int selTol;
 
     private int dp(float v) { return Math.round(v * dp); }
     private boolean editing() { return !"view".equals(mode); }
@@ -106,7 +111,10 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         tool = T_DRAW;
         sym = prefs.getBoolean("dwSym", false);
         steady = prefs.getBoolean("dwSteady", false);
-        if (doc == null) { doc = new DrawDoc(); if (editing()) load(); }
+        valueLevel = prefs.getFloat("dwValue", 0.5f);
+        selTol = prefs.getInt("dwTol", 32);
+        boolean fresh = false;
+        if (doc == null) { doc = new DrawDoc(); if (editing()) fresh = !load(); }
 
         View content;
         if ("view".equals(mode)) content = buildViewer();
@@ -124,6 +132,55 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         setContentView(content);
         refreshTools();
         immersive();
+        // sin un dibujo en curso: primero se elige el tamaño
+        if (fresh) h.postDelayed(this::askSize, 400);
+    }
+
+    // ======================= tamaño del dibujo =======================
+
+    /** Pregunta el tamaño y empieza un dibujo nuevo (en los dos teléfonos). */
+    private void askSize() {
+        if (isFinishing()) return;
+        int[][] sz = {{1600, 900}, {1920, 1080}, {2560, 1440}, {1500, 1500}, {1080, 1920}, {1240, 1754}};
+        String[] nm = {"Pantalla horizontal", "HD horizontal", "Grande horizontal", "Cuadrado", "Vertical (historia)", "Hoja carta / A4"};
+        Ui.Sheet sh = new Ui.Sheet(this).title("Tamaño del dibujo");
+        for (int i = 0; i < sz.length; i++) {
+            final int w = sz[i][0], hh = sz[i][1];
+            int layersFit = Math.max(3, Math.min(10, (int) (100L * 1024 * 1024 / ((long) w * hh * 4))));
+            sh.option(Ui.IMAGE, nm[i], w + " × " + hh + " px · hasta " + layersFit + " capas", () -> request(opj("new", "w", w, "h", hh)));
+        }
+        sh.option(Ui.GEAR, "Personalizado", "Ancho y alto a elección (hasta " + DrawDoc.MAX_SIDE + " px por lado)", this::askCustomSize);
+        sh.button("Cancelar", false, null).show();
+    }
+
+    private void askCustomSize() {
+        LinearLayout box = new LinearLayout(this);
+        box.setGravity(Gravity.CENTER);
+        android.widget.EditText w = num(String.valueOf(doc.W)), hh = num(String.valueOf(doc.H));
+        box.addView(w, new LinearLayout.LayoutParams(dp(110), -2));
+        TextView x = new TextView(this);
+        x.setText("  ×  ");
+        box.addView(x);
+        box.addView(hh, new LinearLayout.LayoutParams(dp(110), -2));
+        new Ui.Sheet(this).title("Tamaño personalizado (px)").view(box)
+                .button("Cancelar", false, null)
+                .button("Crear", true, () -> {
+                    int a, b;
+                    try { a = Integer.parseInt(w.getText().toString().trim()); b = Integer.parseInt(hh.getText().toString().trim()); }
+                    catch (Exception e) { Toast.makeText(this, "Escribe dos números", Toast.LENGTH_SHORT).show(); return; }
+                    request(opj("new", "w", a, "h", b));
+                    if ((long) a * b > DrawDoc.MAX_AREA || a > DrawDoc.MAX_SIDE || b > DrawDoc.MAX_SIDE)
+                        Toast.makeText(this, "Era muy grande para la memoria: se achicó manteniendo la forma", Toast.LENGTH_LONG).show();
+                }).show();
+    }
+
+    private android.widget.EditText num(String v) {
+        android.widget.EditText e = new android.widget.EditText(this);
+        e.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        e.setText(v);
+        e.setGravity(Gravity.CENTER);
+        e.setSelectAllOnFocus(true);
+        return e;
     }
 
     private void immersive() {
@@ -185,7 +242,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         top.addView(t);
         top.addView(pill("◫ Paneles", v -> { panelsOn = !panelsOn; applyPanels(); }));
         top.addView(pill("Nuevo", v -> new Ui.Sheet(this).title("¿Empezar un dibujo nuevo?").message("Se borra el dibujo actual (guarda antes un PNG si lo quieres).")
-                .button("Cancelar", false, null).button("Nuevo", true, () -> request(opj("new"))).show()));
+                .button("Cancelar", false, null).button("Nuevo", true, this::askSize).show()));
         top.addView(pill("Guardar PNG", v -> exportPng()));
         top.addView(pill("✕", v -> closeBoth()));
         FrameLayout.LayoutParams tl = new FrameLayout.LayoutParams(-2, dp(46), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
@@ -315,34 +372,62 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         Glass2 left = new Glass2(null);
         left.setPadding(dp(8), dp(6), dp(8), dp(8));
         left.addView(label("Pinceles", 11));
-        String[][] br = {{"✎", "Lápiz"}, {"✒", "Tinta"}, {"▮", "Rotulador"}, {"☁", "Aerógrafo"}, {"🖌", "Pincel"}, {"▒", "Tiza"},
-                {"∕", "Caligrafía"}, {"⌫", "Borrador"}, {"◌", "Borr. suave"}};
-        int[] brIds = {DrawDoc.PENCIL, DrawDoc.INK, DrawDoc.MARKER, DrawDoc.AIR, DrawDoc.BRUSH, DrawDoc.CHALK, DrawDoc.CALLI, DrawDoc.ERASER, DrawDoc.SOFT_ERASER};
-        left.addView(grid3(br, cell, (i, b) -> { b.tag = brIds[i]; brushBtns.add(b); b.setOnClickListener(v -> { set("brush", brIds[i]); set("tool", T_DRAW); }); }));
+        String[][] br = {{"✎", "Lápiz"}, {"✒", "Tinta"}, {"✐", "Valor"}, {"▮", "Rotulador"}, {"🖌", "Pincel"}, {"◐", "Mezcla"},
+                {"☝", "Difuminar"}, {"☁", "Aerógrafo"}, {"▒", "Tiza"}, {"∕", "Caligrafía"}, {"⌫", "Borrador"}, {"◌", "Borr. suave"}};
+        int[] brIds = {DrawDoc.PENCIL, DrawDoc.INK, DrawDoc.VALUE, DrawDoc.MARKER, DrawDoc.BRUSH, DrawDoc.MIX, DrawDoc.SMUDGE, DrawDoc.AIR,
+                DrawDoc.CHALK, DrawDoc.CALLI, DrawDoc.ERASER, DrawDoc.SOFT_ERASER};
+        left.addView(grid(br, cell, 4, (i, b) -> { b.tag = brIds[i]; brushBtns.add(b); b.setOnClickListener(v -> { set("brush", brIds[i]); set("tool", T_DRAW); }); }));
         left.addView(label("Herramientas", 11));
-        String[][] tl = {{"╱", "Línea"}, {"▭", "Rectáng."}, {"◯", "Óvalo"}, {"◧", "Balde"}, {"⊙", "Gotero"}, {"⇹", "Simetría"},
-                {"〰", "Estable"}, {"⤢", "Ver todo"}, {"⇋", "Voltear"}};
-        left.addView(grid3(tl, cell, (i, b) -> {
+        String[][] tl = {{"╱", "Línea"}, {"▭", "Rectáng."}, {"◯", "Óvalo"}, {"◧", "Balde"}, {"⊙", "Gotero"}, {"✦", "Varita"},
+                {"➰", "Lazo"}, {"⬚", "Importar"}, {"⇹", "Simetría"}, {"〰", "Estable"}, {"⤢", "Ver todo"}, {"⇋", "Voltear"}};
+        left.addView(grid(tl, cell, 4, (i, b) -> {
             switch (i) {
-                case 0: case 1: case 2: case 3: case 4: {
-                    final int t = new int[]{T_LINE, T_RECT, T_OVAL, T_FILL, T_PICK}[i];
+                case 0: case 1: case 2: case 3: case 4: case 5: case 6: {
+                    final int t = new int[]{T_LINE, T_RECT, T_OVAL, T_FILL, T_PICK, T_WAND, T_LASSO}[i];
                     b.tag = t;
                     toolBtns.add(b);
                     b.setOnClickListener(v -> set("tool", tool == t ? T_DRAW : t));
                     break;
                 }
-                case 5: symBtn = b; b.setOnClickListener(v -> set("sym", !sym)); break;
-                case 6: steadyBtn = b; b.setOnClickListener(v -> set("steady", !steady)); break;
-                case 7: b.setOnClickListener(v -> editor.fit()); break;
-                case 8: flipBtn = b; b.setOnClickListener(v -> { editor.flip = !editor.flip; if (viewer != null) viewer.flip = editor.flip; flipBtn.on = editor.flip; flipBtn.invalidate(); editor.invalidate(); if (viewer != null) viewer.invalidate(); }); break;
+                case 7: b.setOnClickListener(v -> pickImage()); break;
+                case 8: symBtn = b; b.setOnClickListener(v -> set("sym", !sym)); break;
+                case 9: steadyBtn = b; b.setOnClickListener(v -> set("steady", !steady)); break;
+                case 10: b.setOnClickListener(v -> editor.fit()); break;
+                case 11: flipBtn = b; b.setOnClickListener(v -> { editor.flip = !editor.flip; if (viewer != null) viewer.flip = editor.flip; flipBtn.on = editor.flip; flipBtn.invalidate(); editor.invalidate(); if (viewer != null) viewer.invalidate(); }); break;
             }
         }));
         row.addView(left, new LinearLayout.LayoutParams(-2, -1));
 
+        // el lienzo, con la barra de "Valor de trazo" a un costado y la barra de selección arriba
+        FrameLayout boardBox = new FrameLayout(this);
         editor = new Board(true);
+        boardBox.addView(editor, new FrameLayout.LayoutParams(-1, -1));
+        valueBar = new ValueBar();
+        boardBox.addView(valueBar, valueBarLp());
+        selBar = new LinearLayout(this);
+        selBar.setGravity(Gravity.CENTER_VERTICAL);
+        selBar.setPadding(dp(6), dp(2), dp(6), dp(2));
+        android.graphics.drawable.GradientDrawable sg = new android.graphics.drawable.GradientDrawable();
+        sg.setColor(0xCC101418);
+        sg.setStroke(dp(1), 0x40FFFFFF);
+        sg.setCornerRadius(dp(18));
+        selBar.setBackground(sg);
+        selBar.addView(pill("Borrar selección", v -> {
+            if (!doc.hasSel) { Toast.makeText(this, "Primero selecciona con la varita o el lazo", Toast.LENGTH_SHORT).show(); return; }
+            request(opj("selDel", "l", doc.cur));
+        }));
+        selBar.addView(pill("Invertir", v -> request(opj("selInv"))));
+        selBar.addView(pill("Quitar", v -> request(opj("selClear"))));
+        selBar.addView(pill("−", v -> setTol(selTol - 8)));
+        tolLabel = label("", 12);
+        selBar.addView(tolLabel);
+        selBar.addView(pill("+", v -> setTol(selTol + 8)));
+        FrameLayout.LayoutParams sbl = new FrameLayout.LayoutParams(-2, dp(42), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        sbl.topMargin = dp(6);
+        boardBox.addView(selBar, sbl);
         LinearLayout.LayoutParams el = new LinearLayout.LayoutParams(0, -1, 1);
         el.setMargins(dp(6), 0, dp(6), 0);
-        row.addView(editor, el);
+        row.addView(boardBox, el);
 
         Glass2 right = new Glass2(null);
         right.setPadding(dp(8), dp(6), dp(8), dp(8));
@@ -378,14 +463,28 @@ public class DualDrawActivity extends Activity implements Link.Listener {
 
     private interface Each { void on(int i, Tool b); }
 
-    private View grid3(String[][] items, int cell, Each each) {
+    private void setTol(int t) {
+        selTol = Math.max(0, Math.min(120, t));
+        prefs.edit().putInt("dwTol", selTol).apply();
+        refreshTools();
+    }
+
+    private FrameLayout.LayoutParams valueBarLp() {
+        boolean right = prefs.getBoolean("dwValRight", false);
+        FrameLayout.LayoutParams l = new FrameLayout.LayoutParams(dp(66), -1, right ? Gravity.END : Gravity.START);
+        l.topMargin = dp(54);
+        l.bottomMargin = dp(8);
+        return l;
+    }
+
+    private View grid(String[][] items, int cell, int cols, Each each) {
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(0, dp(3), 0, dp(6));
-        for (int r = 0; r * 3 < items.length; r++) {
+        for (int r = 0; r * cols < items.length; r++) {
             LinearLayout row = new LinearLayout(this);
-            for (int c = 0; c < 3 && r * 3 + c < items.length; c++) {
-                int i = r * 3 + c;
+            for (int c = 0; c < cols && r * cols + c < items.length; c++) {
+                int i = r * cols + c;
                 Tool b = new Tool(items[i][0], items[i][1], true);
                 each.on(i, b);
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(cell), dp(cell));
@@ -468,6 +567,9 @@ public class DualDrawActivity extends Activity implements Link.Listener {
                 recentRow.addView(v, lp);
             }
         }
+        if (valueBar != null) valueBar.setVisibility(brush == DrawDoc.VALUE && tool == T_DRAW ? View.VISIBLE : View.GONE);
+        if (selBar != null) selBar.setVisibility(tool == T_WAND || tool == T_LASSO || doc.hasSel ? View.VISIBLE : View.GONE);
+        if (tolLabel != null) tolLabel.setText("Tolerancia " + selTol);
         if (editor != null) editor.invalidate();
         if (viewer != null) viewer.invalidate();
     }
@@ -521,7 +623,15 @@ public class DualDrawActivity extends Activity implements Link.Listener {
     private final Runnable blurLater = () -> { if (viewer != null) viewer.rebuildBlur(); };
 
     /** Cambió el dibujo: se repinta, y el panel de capas y el cristal se ponen al día (sin apuro). */
+    private int seenW, seenH;
+
     private void changed() {
+        if (doc.W != seenW || doc.H != seenH) {   // dibujo nuevo de otro tamaño: se vuelve a encuadrar
+            seenW = doc.W; seenH = doc.H;
+            if (editor != null && editor.getWidth() > 0) editor.fit();
+            if (viewer != null && viewer.getWidth() > 0) { viewer.fit(); viewer.rebuildBlur(); }
+        }
+        if (selBar != null) selBar.setVisibility(tool == T_WAND || tool == T_LASSO || doc.hasSel ? View.VISIBLE : View.GONE);
         if (editor != null) editor.invalidate();
         if (viewer != null) viewer.invalidate();
         if (doc.stroking) return;   // mientras se dibuja solo se repinta; capas y cristal, al terminar el trazo
@@ -620,15 +730,17 @@ public class DualDrawActivity extends Activity implements Link.Listener {
 
     private File file() { return new File(getFilesDir(), "dualdraw.json"); }
 
-    private void load() {
+    /** true si había un dibujo en curso guardado. */
+    private boolean load() {
         File f = file();
-        if (!f.exists()) return;
+        if (!f.exists()) return false;
         try (FileInputStream in = new FileInputStream(f)) {
             byte[] d = new byte[(int) f.length()];
             int n = 0, r;
             while (n < d.length && (r = in.read(d, n, d.length - n)) > 0) n += r;
             doc.fromJson(new JSONObject(new String(d, 0, n, StandardCharsets.UTF_8)));
-        } catch (Exception ignored) { }
+            return true;
+        } catch (Exception e) { return false; }
     }
 
     private void save() {
@@ -679,7 +791,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
     }
 
     private void pickImage() {
-        if (doc.layers.size() >= DrawDoc.MAX_LAYERS) { Toast.makeText(this, "Máximo " + DrawDoc.MAX_LAYERS + " capas", Toast.LENGTH_SHORT).show(); return; }
+        if (doc.layers.size() >= doc.maxLayers()) { Toast.makeText(this, "Máximo " + doc.maxLayers() + " capas", Toast.LENGTH_SHORT).show(); return; }
         try { startActivityForResult(new Intent(Intent.ACTION_GET_CONTENT).setType("image/*"), 51); }
         catch (Exception e) { Toast.makeText(this, "No hay galería para elegir", Toast.LENGTH_SHORT).show(); }
     }
@@ -692,7 +804,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
             try (InputStream in = getContentResolver().openInputStream(u)) {
                 Bitmap b = BitmapFactory.decodeStream(in);
                 if (b == null) return;
-                float k = Math.min(1f, Math.min(DrawDoc.W / (float) b.getWidth(), DrawDoc.H / (float) b.getHeight()));
+                float k = Math.min(1f, Math.min(doc.W / (float) b.getWidth(), doc.H / (float) b.getHeight()));
                 Bitmap s = k < 1 ? Bitmap.createScaledBitmap(b, Math.max(1, (int) (b.getWidth() * k)), Math.max(1, (int) (b.getHeight() * k)), true) : b;
                 ByteArrayOutputStream bos = new ByteArrayOutputStream();
                 s.compress(Bitmap.CompressFormat.PNG, 100, bos);
@@ -828,6 +940,65 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         }
     }
 
+    /**
+     * "Valor de trazo": barra vertical a un costado del lienzo. Con un dedo se dibuja y con el otro se sube o baja
+     * en la barra para engrosar o afinar la línea mientras se traza (como apretar más o menos el lápiz).
+     */
+    private final class ValueBar extends View {
+        final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG), t = new Paint(Paint.ANTI_ALIAS_FLAG);
+        ValueBar() {
+            super(DualDrawActivity.this);
+            t.setTextAlign(Paint.Align.CENTER);
+            t.setColor(Color.WHITE);
+            t.setShadowLayer(2 * dp, 0, dp / 2, 0x99000000);
+        }
+        private RectF track() { return new RectF(dp(10), dp(40), getWidth() - dp(10), getHeight() - dp(26)); }
+        @Override protected void onDraw(Canvas c) {
+            float w = getWidth(), hh = getHeight();
+            p.setColor(0xCC101418);
+            c.drawRoundRect(new RectF(0, 0, w, hh), dp(18), dp(18), p);
+            t.setTextSize(10 * dp);
+            c.drawText("⇄ lado", w / 2, dp(14), t);
+            t.setTextSize(12 * dp);
+            c.drawText(Math.round(valueLevel * 100) + "%", w / 2, dp(32), t);
+            RectF tr = track();
+            // cuña: fina abajo, gruesa arriba
+            android.graphics.Path wedge = new android.graphics.Path();
+            wedge.moveTo(tr.centerX() - dp(1), tr.bottom);
+            wedge.lineTo(tr.centerX() + dp(1), tr.bottom);
+            wedge.lineTo(tr.right - dp(4), tr.top);
+            wedge.lineTo(tr.left + dp(4), tr.top);
+            wedge.close();
+            p.setColor(0x33FFFFFF);
+            c.drawPath(wedge, p);
+            float y = tr.bottom - valueLevel * tr.height();
+            c.save();
+            c.clipRect(tr.left, y, tr.right, tr.bottom);
+            p.setColor(ORANGE);
+            c.drawPath(wedge, p);
+            c.restore();
+            p.setColor(Color.WHITE);
+            c.drawRoundRect(new RectF(dp(6), y - dp(3), w - dp(6), y + dp(3)), dp(3), dp(3), p);
+            // muestra del grosor real a este zoom
+            float r = Math.max(1, size * 0.5f * valueLevel * (editor != null && editor.zoom > 0 ? editor.zoom : 1));
+            p.setColor(color);
+            c.drawCircle(w / 2, hh - dp(13), Math.min(dp(11), r), p);
+        }
+        @Override public boolean onTouchEvent(MotionEvent e) {
+            if (e.getActionMasked() == MotionEvent.ACTION_DOWN && e.getY() < dp(22)) {   // cambiar de lado
+                prefs.edit().putBoolean("dwValRight", !prefs.getBoolean("dwValRight", false)).apply();
+                setLayoutParams(valueBarLp());
+                return true;
+            }
+            RectF tr = track();
+            valueLevel = Math.max(0.03f, Math.min(1f, (tr.bottom - e.getY()) / tr.height()));
+            invalidate();
+            getParent().requestDisallowInterceptTouchEvent(true);
+            if (e.getActionMasked() == MotionEvent.ACTION_UP) prefs.edit().putFloat("dwValue", valueLevel).apply();
+            return true;
+        }
+    }
+
     // ======================= el lienzo =======================
 
     private int strokes;
@@ -848,6 +1019,8 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         private float lastX, lastY, ps = 0.6f, pMin = 2, pMax = -1, sx0, sy0, sx1, sy1, smX, smY;
         private long lastT;
         private float z0, ox0, oy0, mx0, my0, dist0;
+        private final List<Float> lasso = new ArrayList<>();
+        private final Paint selP = new Paint(Paint.FILTER_BITMAP_FLAG), lassoP = new Paint(Paint.ANTI_ALIAS_FLAG);
 
         Board(boolean edit) {
             super(DualDrawActivity.this);
@@ -860,14 +1033,19 @@ public class DualDrawActivity extends Activity implements Link.Listener {
             axis.setPathEffect(new android.graphics.DashPathEffect(new float[]{8 * dp, 6 * dp}, 0));
             prev.setStyle(Paint.Style.STROKE);
             prev.setStrokeCap(Paint.Cap.ROUND);
+            selP.setColorFilter(new android.graphics.PorterDuffColorFilter(0x6633A0FF, android.graphics.PorterDuff.Mode.SRC_IN));
+            lassoP.setStyle(Paint.Style.STROKE);
+            lassoP.setStrokeWidth(2 * dp);
+            lassoP.setColor(0xFF33A0FF);
+            lassoP.setPathEffect(new android.graphics.DashPathEffect(new float[]{6 * dp, 4 * dp}, 0));
         }
 
-        float fitZoom() { return Math.min(getWidth() / (float) DrawDoc.W, getHeight() / (float) DrawDoc.H); }
+        float fitZoom() { return Math.min(getWidth() / (float) doc.W, getHeight() / (float) doc.H); }
 
         void fit() {
             zoom = fitZoom();
-            ox = -(getWidth() / zoom - DrawDoc.W) / 2f;
-            oy = -(getHeight() / zoom - DrawDoc.H) / 2f;
+            ox = -(getWidth() / zoom - doc.W) / 2f;
+            oy = -(getHeight() / zoom - doc.H) / 2f;
             sendView();
             invalidate();
         }
@@ -876,7 +1054,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
 
         void rebuildBlur() {
             if (edit) return;
-            Bitmap s = Bitmap.createBitmap(DrawDoc.W / 10, DrawDoc.H / 10, Bitmap.Config.ARGB_8888);
+            Bitmap s = Bitmap.createBitmap(doc.W / 10, doc.H / 10, Bitmap.Config.ARGB_8888);
             doc.draw(new Canvas(s), new RectF(0, 0, s.getWidth(), s.getHeight()));
             Glass.boxBlur(s, 3);
             blur = s;
@@ -888,15 +1066,15 @@ public class DualDrawActivity extends Activity implements Link.Listener {
             float fz = fitZoom();
             zoom = Math.max(fz, Math.min(fz * 10, zoom));
             float vw = getWidth() / zoom, vh = getHeight() / zoom;
-            ox = vw >= DrawDoc.W ? -(vw - DrawDoc.W) / 2f : Math.max(0, Math.min(DrawDoc.W - vw, ox));
-            oy = vh >= DrawDoc.H ? -(vh - DrawDoc.H) / 2f : Math.max(0, Math.min(DrawDoc.H - vh, oy));
+            ox = vw >= doc.W ? -(vw - doc.W) / 2f : Math.max(0, Math.min(doc.W - vw, ox));
+            oy = vh >= doc.H ? -(vh - doc.H) / 2f : Math.max(0, Math.min(doc.H - vh, oy));
         }
 
         private long lastViewSent;
 
         private void sendView() {
             if (!edit) return;
-            RectF r = new RectF(Math.max(0, ox), Math.max(0, oy), Math.min(DrawDoc.W, ox + getWidth() / zoom), Math.min(DrawDoc.H, oy + getHeight() / zoom));
+            RectF r = new RectF(Math.max(0, ox), Math.max(0, oy), Math.min(doc.W, ox + getWidth() / zoom), Math.min(doc.H, oy + getHeight() / zoom));
             if (viewer != null) { viewer.frame = r; viewer.invalidate(); }
             if (online() && SystemClock.uptimeMillis() - lastViewSent > 60) {
                 lastViewSent = SystemClock.uptimeMillis();
@@ -910,10 +1088,17 @@ public class DualDrawActivity extends Activity implements Link.Listener {
             if (zoom <= 0) fit();
             c.save();
             if (flip) c.scale(-1, 1, getWidth() / 2f, 0);
-            dst.set(-ox * zoom, -oy * zoom, (DrawDoc.W - ox) * zoom, (DrawDoc.H - oy) * zoom);
+            dst.set(-ox * zoom, -oy * zoom, (doc.W - ox) * zoom, (doc.H - oy) * zoom);
             doc.draw(c, dst);
             if (sym) c.drawLine(dst.centerX(), dst.top, dst.centerX(), dst.bottom, axis);
-            if (!edit && frame != null && (frame.width() < DrawDoc.W - 2 || frame.height() < DrawDoc.H - 2))
+            if (doc.hasSel && doc.sel != null) c.drawBitmap(doc.sel, null, dst, selP);   // lo seleccionado, en celeste
+            if (edit && lasso.size() >= 4) {
+                android.graphics.Path lp = new android.graphics.Path();
+                lp.moveTo((lasso.get(0) - ox) * zoom, (lasso.get(1) - oy) * zoom);
+                for (int i = 2; i + 1 < lasso.size(); i += 2) lp.lineTo((lasso.get(i) - ox) * zoom, (lasso.get(i + 1) - oy) * zoom);
+                c.drawPath(lp, lassoP);
+            }
+            if (!edit && frame != null && (frame.width() < doc.W - 2 || frame.height() < doc.H - 2))
                 c.drawRect(dst.left + frame.left * zoom, dst.top + frame.top * zoom, dst.left + frame.right * zoom, dst.top + frame.bottom * zoom, framePaint);
             if (edit && shaping) {   // vista previa de la forma
                 prev.setColor(DrawDoc.eraser(brush) ? 0x88FF4444 : color);
@@ -932,6 +1117,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
 
         /** Presión: la del dedo si el teléfono la entrega de verdad; si no, sale de la velocidad (lento = más grueso). */
         private float pressure(MotionEvent e, float x, float y, long t) {
+            if (brush == DrawDoc.VALUE) return Math.max(0.03f, valueLevel);   // el grosor lo pone la barra, en vivo
             float raw = e.getPressure(0);
             pMin = Math.min(pMin, raw); pMax = Math.max(pMax, raw);
             float p;
@@ -984,8 +1170,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
             if (!drawing) return;
             drawing = false;
             pend.clear();
-            doc.stroking = false;
-            doc.buf.eraseColor(Color.TRANSPARENT);
+            doc.cancel();
             if (online() && !pendStart) hub.send("dw", "op", "cancel");
         }
 
@@ -1006,6 +1191,8 @@ public class DualDrawActivity extends Activity implements Link.Listener {
                         postDelayed(flush, 40);
                     } else if (tool == T_LINE || tool == T_RECT || tool == T_OVAL) {
                         shaping = true; sx0 = sx1 = x; sy0 = sy1 = y;
+                    } else if (tool == T_LASSO) {
+                        lasso.clear(); lasso.add(x); lasso.add(y);
                     }
                     changed();
                     return true;
@@ -1014,6 +1201,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
                     if (e.getPointerCount() == 2) {
                         cancelStroke();
                         shaping = false;
+                        lasso.clear();
                         two = true;
                         z0 = zoom; ox0 = ox; oy0 = oy;
                         mx0 = (sxv(e.getX(0)) + sxv(e.getX(1))) / 2; my0 = (e.getY(0) + e.getY(1)) / 2;
@@ -1034,6 +1222,11 @@ public class DualDrawActivity extends Activity implements Link.Listener {
                         return true;
                     }
                     if (shaping) { sx1 = toX(e.getX()); sy1 = toY(e.getY()); invalidate(); return true; }
+                    if (tool == T_LASSO && !lasso.isEmpty()) {
+                        float lx = toX(e.getX()), ly = toY(e.getY());
+                        if (Math.hypot(lx - lasso.get(lasso.size() - 2), ly - lasso.get(lasso.size() - 1)) * zoom > 3 * dp) { lasso.add(lx); lasso.add(ly); invalidate(); }
+                        return true;
+                    }
                     if (!drawing) return true;
                     for (int i = 0; i < e.getHistorySize(); i++) {
                         float hx = e.getHistoricalX(i), hy = e.getHistoricalY(i);
@@ -1068,6 +1261,17 @@ public class DualDrawActivity extends Activity implements Link.Listener {
                         return true;
                     }
                     if (tool == T_PICK) { set("color", doc.colorAt((int) x, (int) y)); return true; }
+                    if (tool == T_WAND) { op(opj("sel", "k", "wand", "x", (int) x, "y", (int) y, "tol", selTol, "l", doc.cur)); return true; }
+                    if (tool == T_LASSO) {
+                        if (lasso.size() >= 6) {
+                            JSONArray a = new JSONArray();
+                            try { for (Float f : lasso) a.put(Math.round(f * 10) / 10.0); } catch (Exception ignored) { }
+                            op(opj("sel", "k", "lasso", "p", a));
+                        }
+                        lasso.clear();
+                        invalidate();
+                        return true;
+                    }
                     if (!drawing) return true;
                     drawing = false;
                     flush();
@@ -1080,6 +1284,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
                 case MotionEvent.ACTION_CANCEL:
                     cancelStroke();
                     shaping = false;
+                    lasso.clear();
                     two = false;
                     changed();
                     return true;
