@@ -154,36 +154,71 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         sh.button("Cancelar", false, null).show();
     }
 
+    /** Tamaño personalizado con botones (sin teclado): ancho y alto con − / +, y "Cuadrado" para igualarlos. */
     private void askCustomSize() {
+        final int[] v = {prefs.getInt("dwCustW", 1080), prefs.getInt("dwCustH", 1080)};
+        final boolean[] square = {v[0] == v[1]};
         LinearLayout box = new LinearLayout(this);
-        box.setGravity(Gravity.CENTER);
-        // campos vacíos (con el ejemplo de fondo): así lo escrito no se pega al número que había
-        android.widget.EditText w = num("Ancho"), hh = num("Alto");
-        box.addView(w, new LinearLayout.LayoutParams(dp(110), -2));
-        TextView x = new TextView(this);
-        x.setText("  ×  ");
-        box.addView(x);
-        box.addView(hh, new LinearLayout.LayoutParams(dp(110), -2));
-        new Ui.Sheet(this).title("Tamaño personalizado (px)").view(box)
+        box.setOrientation(LinearLayout.VERTICAL);
+        final TextView[] lab = new TextView[2];
+        final TextView sq = new TextView(this);
+        Runnable show = () -> {
+            lab[0].setText("Ancho  " + v[0] + " px");
+            lab[1].setText("Alto  " + v[1] + " px");
+            sq.setText(square[0] ? "■ Cuadrado (alto = ancho)" : "□ Cuadrado (alto = ancho)");
+        };
+        for (int k = 0; k < 2; k++) {
+            final int kk = k;
+            lab[k] = new TextView(this);
+            lab[k].setTextSize(17);
+            lab[k].setGravity(Gravity.CENTER);
+            lab[k].setPadding(0, dp(8), 0, dp(2));
+            box.addView(lab[k]);
+            LinearLayout r = new LinearLayout(this);
+            r.setGravity(Gravity.CENTER);
+            for (int d : new int[]{-500, -100, -10, 10, 100, 500}) {
+                TextView b = stepBtn((d > 0 ? "+" : "−") + Math.abs(d));
+                b.setOnClickListener(x -> {
+                    v[kk] = Math.max(200, Math.min(DrawDoc.MAX_SIDE, v[kk] + d));
+                    if (square[0]) v[1 - kk] = v[kk];
+                    show.run();
+                });
+                r.addView(b);
+            }
+            box.addView(r);
+        }
+        sq.setTextSize(15);
+        sq.setGravity(Gravity.CENTER);
+        sq.setPadding(0, dp(14), 0, dp(4));
+        sq.setOnClickListener(x -> { square[0] = !square[0]; if (square[0]) v[1] = v[0]; show.run(); });
+        box.addView(sq);
+        show.run();
+        new Ui.Sheet(this).title("Tamaño personalizado").view(box)
                 .button("Cancelar", false, null)
                 .button("Crear", true, () -> {
-                    int a, b;
-                    try { a = Integer.parseInt(w.getText().toString().trim()); b = Integer.parseInt(hh.getText().toString().trim()); }
-                    catch (Exception e) { Toast.makeText(this, "Escribe dos números", Toast.LENGTH_SHORT).show(); return; }
-                    request(opj("new", "w", a, "h", b));
-                    if ((long) a * b > DrawDoc.MAX_AREA || a > DrawDoc.MAX_SIDE || b > DrawDoc.MAX_SIDE)
+                    prefs.edit().putInt("dwCustW", v[0]).putInt("dwCustH", v[1]).apply();
+                    request(opj("new", "w", v[0], "h", v[1]));
+                    if ((long) v[0] * v[1] > DrawDoc.MAX_AREA)
                         Toast.makeText(this, "Era muy grande para la memoria: se achicó manteniendo la forma", Toast.LENGTH_LONG).show();
                 }).show();
     }
 
-    private android.widget.EditText num(String hint) {
-        android.widget.EditText e = new android.widget.EditText(this);
-        e.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
-        e.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(4)});
-        e.setHint(hint);
-        e.setGravity(Gravity.CENTER);
-        return e;
+    private TextView stepBtn(String t) {
+        TextView b = new TextView(this);
+        b.setText(t);
+        b.setTextSize(13);
+        b.setGravity(Gravity.CENTER);
+        b.setTextColor(0xFF1B1B1B);
+        android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
+        g.setColor(0xFFE8E2DA);
+        g.setCornerRadius(dp(12));
+        b.setBackground(g);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(46), dp(38));
+        lp.setMargins(dp(3), dp(3), dp(3), dp(3));
+        b.setLayoutParams(lp);
+        return b;
     }
+
 
     private void immersive() {
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_FULLSCREEN
@@ -1091,7 +1126,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
 
         private void clamp() {
             float fz = fitZoom();
-            zoom = Math.max(fz, Math.min(fz * 10, zoom));
+            zoom = Math.max(fz * 0.25f, Math.min(fz * 12, zoom));   // se puede alejar más que "ver todo"
             float vw = getWidth() / zoom, vh = getHeight() / zoom;
             ox = vw >= doc.W ? -(vw - doc.W) / 2f : Math.max(0, Math.min(doc.W - vw, ox));
             oy = vh >= doc.H ? -(vh - doc.H) / 2f : Math.max(0, Math.min(doc.H - vh, oy));
