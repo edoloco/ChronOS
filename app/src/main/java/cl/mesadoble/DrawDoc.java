@@ -65,6 +65,10 @@ final class DrawDoc {
     private Bitmap smTmp, smTip;
     private int smR;
 
+    // transformar: vista previa de la capa movida/escalada/girada (aún sin aplicar)
+    int xfLayer = -1;
+    android.graphics.Matrix xfM;
+
     // selección (máscara: negro opaco = seleccionado)
     Bitmap sel;
     boolean hasSel;
@@ -451,6 +455,20 @@ final class DrawDoc {
             case "import": end(); importImage(m.optString("png")); break;
             case "new": end(); reset(m.optInt("w", W), m.optInt("h", H)); break;
             case "sel": end(); select(m); break;
+            case "xfPrev": {
+                JSONArray a = m.optJSONArray("m");
+                if (a == null || a.length() < 9) { xfLayer = -1; xfM = null; break; }
+                xfLayer = m.optInt("l", cur);
+                xfM = matrix(a);
+                break;
+            }
+            case "xform": {
+                end();
+                JSONArray a = m.optJSONArray("m");
+                xfLayer = -1; xfM = null;
+                if (a != null && a.length() >= 9) transformLayer(m.optInt("l", cur), matrix(a));
+                break;
+            }
             case "selClear": clearSel(); break;
             case "selInv": invertSel(); break;
             case "selDel": end(); deleteSel(m.optInt("l", cur)); break;
@@ -497,6 +515,12 @@ final class DrawDoc {
                 bufP.setAlpha((int) (255 * Math.max(0.05f, Math.min(1f, sOpacity))));
                 c.drawBitmap(buf, null, dst, bufP);
                 c.restoreToCount(save);
+            } else if (i == xfLayer && xfM != null) {
+                android.graphics.Matrix mm = new android.graphics.Matrix(xfM);
+                mm.postScale(dst.width() / W, dst.height() / H);
+                mm.postTranslate(dst.left, dst.top);
+                lp0.setAntiAlias(true);
+                c.drawBitmap(l.bmp, mm, lp0);
             } else c.drawBitmap(l.bmp, null, dst, lp0);
         }
         lp0.setXfermode(null);
@@ -649,9 +673,35 @@ final class DrawDoc {
         push(st);
     }
 
+    static android.graphics.Matrix matrix(JSONArray a) {
+        float[] v = new float[9];
+        for (int i = 0; i < 9; i++) v[i] = (float) a.optDouble(i);
+        android.graphics.Matrix m = new android.graphics.Matrix();
+        m.setValues(v);
+        return m;
+    }
+
+    /** Transformar: la capa se mueve, escala y gira según la matriz (se puede deshacer). */
+    private void transformLayer(int i, android.graphics.Matrix mx) {
+        if (i < 0 || i >= layers.size()) return;
+        Layer l = layers.get(i);
+        Step st = new Step();
+        st.layer = i;
+        st.r = new Rect(0, 0, W, H);
+        st.before = l.bmp.copy(Bitmap.Config.ARGB_8888, false);
+        Bitmap nb = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);
+        new Canvas(nb).drawBitmap(l.bmp, mx, new Paint(Paint.FILTER_BITMAP_FLAG | Paint.ANTI_ALIAS_FLAG));
+        l.bmp.eraseColor(Color.TRANSPARENT);
+        new Canvas(l.bmp).drawBitmap(nb, 0, 0, null);
+        nb.recycle();
+        st.after = l.bmp.copy(Bitmap.Config.ARGB_8888, false);
+        push(st);
+    }
+
     /** Dibujo nuevo, del tamaño pedido: una capa en blanco. */
     void reset(int w, int h) {
         stroking = false;
+        xfLayer = -1; xfM = null;
         dropDirect();
         for (Layer l : layers) l.bmp.recycle();
         layers.clear();
