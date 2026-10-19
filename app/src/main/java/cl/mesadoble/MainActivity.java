@@ -1143,7 +1143,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             if (barTicker != null) barTicker.set(tickerItems);
             if (floatTicker != null) floatTicker.set(null);
         } else {
-            if (navTicker != null) navTicker.set(tickerItems);   // en la barra del extendido
+            // abajo solo cuando el principal está mostrando otra app (si no, ya se ven en la barra del reloj)
+            if (navTicker != null) navTicker.set(tickerHere ? null : tickerItems);
             if (floatTicker != null) floatTicker.set(null);
         }
     }
