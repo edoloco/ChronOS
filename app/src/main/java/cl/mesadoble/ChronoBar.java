@@ -21,8 +21,10 @@ import java.util.Locale;
  * Action bar de ChronOS. Una franja delgada pegada a un borde de la pantalla y una "pestaña" más alta con un
  * corte en diagonal:
  *   CLOCK (principal): la pestaña a la izquierda tiene el reloj con la fecha; a su derecha salen las notificaciones.
- *   NAV   (extendido): botones de navegación al centro de la franja; la pestaña a la derecha tiene el logo
- *                      (menú inicio). Cuando suena música, el reproductor aparece a la izquierda.
+ *   NAV   (extendido): franja recta con un "tope" en diagonal que sube a la pestaña del logo (menú inicio), a la
+ *                      derecha. La franja tiene dos renglones: abajo la barra de tareas (apps abiertas del principal,
+ *                      como en Windows) y arriba la banda de notificaciones; cuando suena música, el reproductor
+ *                      ocupa ese renglón y la banda sube un renglón más (sobre la barra).
  * edgeTop: la franja va pegada al borde de arriba (la pestaña cuelga hacia abajo) o al de abajo (sube).
  * Deslizar la barra hacia el centro de la pantalla abre el gestor de archivos; al revés, lo cierra.
  */
@@ -76,11 +78,13 @@ public class ChronoBar extends FrameLayout {
 
     // ---------------- medidas ----------------
 
-    float strip() { return 36 * dp; }
+    // extendido: renglón de la barra de tareas (abajo), renglón de banda/reproductor (arriba) y espacio de arriba
+    static final float ROW_T = 38, ROW_U = 46, ABOVE = 44;
+    float strip() { return (kind == NAV ? 4 + ROW_T + 4 + ROW_U + 4 : 36) * dp; }
     /** Avance del reproductor al abrirse (0 = cerrado, 1 = abierto): sale desde el logo hacia la izquierda. */
     private float pp;
     private android.animation.ValueAnimator ppAnim;
-    float tab() { return (kind == NAV ? 74 + 24 * pp : 74) * dp; }
+    float tab() { return kind == NAV ? strip() + 16 * dp : 74 * dp; }
     float diag() { return 46 * dp; }
     float tabW() { return kind == CLOCK ? Math.min(getWidth() * 0.6f, Math.max(200 * dp, clockNeeded())) : 112 * dp; }
 
@@ -98,9 +102,9 @@ public class ChronoBar extends FrameLayout {
         return pad + 12 * dp + timeP.measureText(time) + 10 * dp + dateW + cut + 18 * dp;
     }
     /** Alto de la barra (lo que ocupa en la pantalla). */
-    int barHeight() { return Math.round((kind == NAV ? 98 : 74) * dp); }
+    int barHeight() { return Math.round(kind == NAV ? tab() + ABOVE * dp : 74 * dp); }
     /** Lo que se ve de la barra (para dejar espacio al gestor de archivos). */
-    int visualHeight() { return Math.round(tab()); }
+    int visualHeight() { return Math.round(tab() + (kind == NAV ? ABOVE * dp * pp : 0)); }
 
     private float y(float depth) { return edgeTop ? depth : getHeight() - depth; }
 
@@ -109,6 +113,15 @@ public class ChronoBar extends FrameLayout {
     public void setNotif(View v) { notif = v; addView(v, new LayoutParams(-2, -2)); }
     /** Banda de notificaciones tipo noticiero: corre en la franja, a la derecha del reloj. */
     public void setTicker(View v) { ticker = v; addView(v, new LayoutParams(-2, -2)); }
+    /** Barra de tareas del extendido: las apps abiertas del principal. */
+    private View taskbar;
+    public void setTaskbar(View v) { taskbar = v; addView(v, new LayoutParams(-2, -2)); }
+
+    /** Renglón [cerca, lejos] del borde (en dp) → rectángulo en la vista, según si la barra está arriba o abajo. */
+    private void placeRow(View v, float x0, float x1, float near, float far) {
+        int top = Math.round(edgeTop ? near * dp : getHeight() - far * dp), h = Math.round((far - near) * dp);
+        v.layout(Math.round(x0), top, Math.round(Math.max(x0 + 1, x1)), top + h);
+    }
 
     // ---- apps recientes: pestaña a la izquierda de la barra del extendido (se esconde con el gestor de archivos)
     private View recents;
@@ -145,7 +158,7 @@ public class ChronoBar extends FrameLayout {
         ppAnim = android.animation.ValueAnimator.ofFloat(pp, on ? 1f : 0f);
         ppAnim.setDuration(on ? 520 : 360);
         ppAnim.setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f));
-        ppAnim.addUpdateListener(a -> { pp = (float) a.getAnimatedValue(); requestLayout(); placePlayer(); invalidate(); });
+        ppAnim.addUpdateListener(a -> { pp = (float) a.getAnimatedValue(); placePlayer(); invalidate(); });
         ppAnim.addListener(new android.animation.AnimatorListenerAdapter() {
             @Override public void onAnimationEnd(android.animation.Animator a) { if (!playerOn && player != null) player.setVisibility(GONE); }
         });
@@ -160,6 +173,12 @@ public class ChronoBar extends FrameLayout {
 
     /** El reproductor se descubre de derecha a izquierda, junto con la parte alta de la barra. */
     private void placePlayer() {
+        if (kind == NAV) {   // el reproductor aparece en su renglón y la banda sube un renglón
+            if (player != null) { player.setAlpha(pp); player.setTranslationY((edgeTop ? -1 : 1) * (1 - pp) * 10 * dp); }
+            if (ticker != null) ticker.setTranslationY((edgeTop ? 1 : -1) * pp * (ROW_U + 6) * dp);
+            if (onTickerMove != null) onTickerMove.run();
+            return;
+        }
         if (player == null || getWidth() == 0) return;
         float lmin = player.getLeft(), L = tallLeft();
         player.setTranslationX(L - lmin);
@@ -168,11 +187,21 @@ public class ChronoBar extends FrameLayout {
         player.setAlpha(Math.min(1f, pp * 1.4f));
     }
     public boolean playerShown() { return playerOn; }
+    /** Avisa cuando la banda cambia de renglón (para cambiar su fondo). */
+    Runnable onTickerMove;
+    float playerProgress() { return pp; }
 
     @Override protected void onMeasure(int ws, int hs) {
         int W = MeasureSpec.getSize(ws), H = barHeight();
         for (int i = 0; i < getChildCount(); i++) {
             View v = getChildAt(i);
+            if (kind == NAV && (v == player || v == ticker || v == taskbar)) {
+                float rowW = W - tabW() - (v == taskbar ? 0 : diag()) - 14 * dp;
+                float rh = v == taskbar ? ROW_T : v == player ? ROW_U : ROW_U - 8;
+                v.measure(MeasureSpec.makeMeasureSpec(Math.max(1, Math.round(rowW)), MeasureSpec.EXACTLY),
+                        MeasureSpec.makeMeasureSpec(Math.round(rh * dp), MeasureSpec.EXACTLY));
+                continue;
+            }
             if (v == player) v.measure(MeasureSpec.makeMeasureSpec(Math.max(0, Math.round(W - tabW() - recWFor(W) - diag() * 1.6f - 12 * dp)), MeasureSpec.EXACTLY),
                     MeasureSpec.makeMeasureSpec(Math.round(98 * dp - strip() - 6 * dp), MeasureSpec.EXACTLY));
             else if (v == recents) v.measure(MeasureSpec.makeMeasureSpec(Math.max(1, Math.round(recWFor(W) / Math.max(0.01f, rp) - 10 * dp)), MeasureSpec.EXACTLY),
@@ -188,6 +217,15 @@ public class ChronoBar extends FrameLayout {
 
     @Override protected void onLayout(boolean ch, int l, int t, int r, int b) {
         int W = r - l, H = b - t;
+        if (kind == NAV) {
+            float x0 = 6 * dp;
+            if (taskbar != null) placeRow(taskbar, x0, x0 + taskbar.getMeasuredWidth(), 4, 4 + ROW_T);
+            if (player != null) placeRow(player, x0, x0 + player.getMeasuredWidth(), 4 + ROW_T + 4, 4 + ROW_T + 4 + ROW_U);
+            if (ticker != null) placeRow(ticker, x0, x0 + ticker.getMeasuredWidth(), 4 + ROW_T + 8, 4 + ROW_T + 8 + ROW_U - 8);
+            if (navRow != null) navRow.layout(0, 0, 0, 0);
+            placePlayer();
+            return;
+        }
         if (navRow != null) {
             int x = (W - navRow.getMeasuredWidth()) / 2, cy = Math.round(edgeTop ? strip() / 2 : H - strip() / 2);
             navRow.layout(x, cy - navRow.getMeasuredHeight() / 2, x + navRow.getMeasuredWidth(), cy + navRow.getMeasuredHeight() / 2);
@@ -228,7 +266,7 @@ public class ChronoBar extends FrameLayout {
             shape.lineTo(TW + D, y(S));
             shape.lineTo(TW, y(T));
             shape.lineTo(0, y(T));
-        } else if (pp > 0.001f) {
+        } else if (pp > 0.001f && false) {
             // con música: la parte alta crece desde el logo hacia la izquierda, con su diagonal
             float L = tallLeft();
             shape.moveTo(0, y(0));
@@ -245,8 +283,8 @@ public class ChronoBar extends FrameLayout {
             shape.lineTo(W, y(T - rr));
             shape.quadTo(W, y(T), W - rr, y(T));
             shape.lineTo(W - TW, y(T));
-            shape.lineTo(W - TW - D, y(S));
-            recentsEdge(S, D);
+            shape.lineTo(W - TW - D * 0.7f, y(S));
+            shape.lineTo(0, y(S));
         }
         shape.close();
         region.setPath(shape, new Region(0, 0, Math.max(1, (int) W), Math.max(1, getHeight())));
@@ -393,9 +431,9 @@ public class ChronoBar extends FrameLayout {
     @Override public boolean dispatchTouchEvent(MotionEvent e) {
         if (e.getActionMasked() == MotionEvent.ACTION_DOWN && !region.contains((int) e.getX(), (int) e.getY())) {
             boolean onChild = false;
-            for (View v : new View[]{notif, player, recents, ticker})
+            for (View v : new View[]{notif, player, recents, ticker, taskbar})
                 if (v != null && v.getVisibility() == VISIBLE && v.getAlpha() > 0.1f && e.getX() >= v.getLeft() && e.getX() <= v.getRight()
-                        && e.getY() >= v.getTop() && e.getY() <= v.getBottom()) onChild = true;
+                        && e.getY() >= v.getTop() + v.getTranslationY() && e.getY() <= v.getBottom() + v.getTranslationY()) onChild = true;
             if (!onChild) return false;
         }
         return super.dispatchTouchEvent(e);

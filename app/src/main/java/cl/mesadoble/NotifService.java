@@ -140,7 +140,7 @@ public class NotifService extends NotificationListenerService {
                 try { ic = AppsDialog.iconPng(pm.getApplicationIcon(pkg), 96); } catch (Exception e) { ic = ""; }
                 icons.put(pkg, ic);
             }
-            m.put("t", "notif"); m.put("pkg", pkg); m.put("app", label);
+            m.put("t", "notif"); m.put("pkg", pkg); m.put("app", label); m.put("key", sbn.getKey());
             m.put("title", title == null ? "" : title.toString()); m.put("text", text == null ? "" : text.toString()); m.put("icon", ic);
             m.put("here", hub.foreground);   // ¿ChronOS está a la vista en el principal?
         } catch (Exception ignored) { }

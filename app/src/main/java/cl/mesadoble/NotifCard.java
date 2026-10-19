@@ -19,54 +19,58 @@ import org.json.JSONObject;
 import java.util.ArrayDeque;
 
 /**
- * Tarjeta de notificación: sale de izquierda a derecha (como desenrollándose desde el reloj), se queda unos
- * segundos y vuelve. Si llegan varias, se muestran una tras otra. Al tocarla se abre la app (en el principal).
+ * Burbuja de notificación. Sale de la action bar, se detiene un par de segundos para destacar la notificación
+ * recién llegada y vuelve hacia la barra desvaneciéndose:
+ *   - principal (barra arriba): baja desde arriba y se va hacia arriba;
+ *   - extendido (barra abajo, cuando el principal está en otra app): sube desde abajo y se va hacia abajo.
+ * Si llegan varias, salen una tras otra. Al tocarla se abre lo que está notificando (en el principal).
  */
 public class NotifCard extends View {
 
-    public interface Tap { void onNotifTap(String pkg); }
+    public interface Tap { void onNotifTap(String pkg, String key); }
+
+    private static final long HOLD = 3200;   // ms que queda a la vista
 
     private final float dp;
     private final ArrayDeque<JSONObject> queue = new ArrayDeque<>();
     private JSONObject cur;
     private Bitmap icon;
-    private float reveal;            // 0..1: cuánto se ve (de izquierda a derecha)
     private final Paint bg = new Paint(Paint.ANTI_ALIAS_FLAG), edge = new Paint(Paint.ANTI_ALIAS_FLAG), bmp = new Paint(Paint.FILTER_BITMAP_FLAG);
-    private final TextPaint title = new TextPaint(Paint.ANTI_ALIAS_FLAG), body = new TextPaint(Paint.ANTI_ALIAS_FLAG), app = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-    private boolean night, floating;
+    private final TextPaint title = new TextPaint(Paint.ANTI_ALIAS_FLAG), body = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+    private boolean night, fromTop = true;
     private Tap tap;
-    private android.animation.ValueAnimator anim;
 
-    public NotifCard(Context c, boolean night, boolean floating) {
+    public NotifCard(Context c, boolean night, boolean unused) {
         super(c);
         this.night = night;
-        this.floating = floating;   // tarjeta suelta (en el extendido) en vez de dentro de la barra
         dp = c.getResources().getDisplayMetrics().density;
         title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-        app.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
-        app.setLetterSpacing(0.06f);
         edge.setStyle(Paint.Style.STROKE);
-        edge.setStrokeWidth(dp);
+        edge.setStrokeWidth(1.2f * dp);
         setVisibility(INVISIBLE);
-        if (floating) {
-            setElevation(10 * dp);
-            setOutlineProvider(new ViewOutlineProvider() {
-                @Override public void getOutline(View v, Outline o) {
-                    o.setRoundRect(0, 0, Math.max(1, Math.round(v.getWidth() * reveal)), v.getHeight(), 18 * dp);
-                }
-            });
-        }
-        setOnClickListener(v -> { if (cur != null && tap != null) tap.onNotifTap(cur.optString("pkg")); hideNow(); });
+        setElevation(10 * dp);
+        setOutlineProvider(new ViewOutlineProvider() {
+            @Override public void getOutline(View v, Outline o) { o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), 20 * dp); }
+        });
+        setOnClickListener(v -> {
+            if (cur != null && tap != null) tap.onNotifTap(cur.optString("pkg"), cur.optString("key"));
+            leave(160);
+        });
     }
 
     public void setTap(Tap t) { tap = t; }
+    /** true: la barra está arriba (la burbuja baja); false: abajo (sube). */
+    public void setFromTop(boolean t) { fromTop = t; }
 
     public void show(JSONObject n) {
         queue.add(n);
         if (cur == null) next();
     }
 
+    private float away() { return (fromTop ? -1 : 1) * (getHeight() > 0 ? getHeight() + 12 * dp : 80 * dp); }
+
     private void next() {
+        removeCallbacks(hold);
         cur = queue.poll();
         if (cur == null) { setVisibility(INVISIBLE); return; }
         icon = null;
@@ -74,62 +78,54 @@ public class NotifCard extends View {
             byte[] b = Base64.decode(cur.optString("icon"), Base64.DEFAULT);
             icon = BitmapFactory.decodeByteArray(b, 0, b.length);
         } catch (Exception ignored) { }
+        invalidate();
+        // sale desde la barra: se desliza y aparece, con un pequeño rebote al detenerse
         setVisibility(VISIBLE);
-        animateTo(1f, 420, () -> postDelayed(hide, 5000));
+        animate().cancel();
+        setTranslationY(away());
+        setAlpha(0f);
+        setScaleX(0.96f);
+        setScaleY(0.96f);
+        animate().translationY(0).alpha(1f).scaleX(1f).scaleY(1f).setDuration(460)
+                .setInterpolator(new android.view.animation.OvershootInterpolator(1.1f))
+                .withEndAction(() -> postDelayed(hold, HOLD)).start();
     }
 
-    private final Runnable hide = () -> animateTo(0f, 320, this::next);
+    private final Runnable hold = () -> leave(520);
 
-    private void hideNow() { removeCallbacks(hide); animateTo(0f, 200, this::next); }
-
-    private void animateTo(float to, long ms, Runnable end) {
-        if (anim != null) anim.cancel();
-        anim = android.animation.ValueAnimator.ofFloat(reveal, to);
-        anim.setDuration(ms);
-        anim.setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f));
-        anim.addUpdateListener(a -> { reveal = (float) a.getAnimatedValue(); invalidate(); invalidateOutline(); });
-        anim.addListener(new android.animation.AnimatorListenerAdapter() {
-            boolean cancelled;
-            @Override public void onAnimationCancel(android.animation.Animator a) { cancelled = true; }
-            @Override public void onAnimationEnd(android.animation.Animator a) { if (!cancelled && end != null) end.run(); }
-        });
-        anim.start();
+    /** Vuelve hacia la barra desvaneciéndose, y sale la siguiente. */
+    private void leave(long ms) {
+        removeCallbacks(hold);
+        animate().cancel();
+        animate().translationY(away() * 0.6f).alpha(0f).setDuration(ms)
+                .setInterpolator(new android.view.animation.AccelerateInterpolator(1.3f))
+                .withEndAction(() -> { cur = null; next(); }).start();
     }
 
     @Override protected void onDraw(Canvas c) {
-        if (cur == null || reveal <= 0) return;
-        float W = getWidth(), H = getHeight(), r = (floating ? 18 : H / 2.6f) * dp / dp;
-        c.save();
-        c.clipRect(0, 0, W * reveal, H);
-        boolean lt = floating ? night : ChronoBar.ink(night) == 0xFFF5F8FA;
-        bg.setColor(floating ? (night ? 0xF21E2934 : 0xF7FFFFFF) : (lt ? 0x33FFFFFF : 0xE6FFFFFF));
-        RectF box = new RectF(0, 0, W, H);
-        c.drawRoundRect(box, r, r, bg);
-        edge.setColor(lt ? 0x40FFFFFF : 0x22000000);
-        c.drawRoundRect(new RectF(dp / 2, dp / 2, W - dp / 2, H - dp / 2), r, r, edge);
-        float pad = 10 * dp, is = Math.min(H - 2 * pad, 40 * dp);
-        if (icon != null) c.drawBitmap(icon, null, new RectF(pad, (H - is) / 2, pad + is, (H + is) / 2), bmp);
-        float tx = pad + is + 10 * dp, tw = W - tx - pad;
-        int ink = lt ? 0xFFF5F8FA : 0xFF1D2733;
-        String a = cur.optString("app"), t = cur.optString("title"), b = cur.optString("text");
-        boolean two = H > 46 * dp;
-        app.setColor((ink & 0x00FFFFFF) | 0x99000000);
+        if (cur == null) return;
+        float W = getWidth(), H = getHeight(), r = 20 * dp;
+        bg.setColor(night ? 0xF21E2934 : 0xFAFFFFFF);
+        c.drawRoundRect(new RectF(0, 0, W, H), r, r, bg);
+        edge.setColor(night ? 0x40FFFFFF : 0x33000000);
+        c.drawRoundRect(new RectF(dp, dp, W - dp, H - dp), r, r, edge);
+        float pad = 12 * dp, is = Math.min(H - 2 * pad, 38 * dp);
+        if (icon != null) c.drawBitmap(icon, null, new RectF(pad + 4 * dp, (H - is) / 2, pad + 4 * dp + is, (H + is) / 2), bmp);
+        float tx = pad + 4 * dp + is + 12 * dp, tw = W - tx - pad;
+        int ink = night ? 0xFFF5F8FA : 0xFF1D2733;
+        String t = cur.optString("title"), b = cur.optString("text");
         title.setColor(ink);
-        body.setColor((ink & 0x00FFFFFF) | 0xCC000000);
-        if (two) {
-            app.setTextSize(10.5f * dp);
-            title.setTextSize(14 * dp);
+        body.setColor((ink & 0x00FFFFFF) | 0xBB000000);
+        if (H > 52 * dp && !t.isEmpty() && !b.isEmpty()) {
+            title.setTextSize(14.5f * dp);
             body.setTextSize(13 * dp);
-            float y0 = H / 2 - 13 * dp;
-            c.drawText(TextUtils.ellipsize(a.toUpperCase(), app, tw, TextUtils.TruncateAt.END).toString(), tx, y0, app);
-            c.drawText(TextUtils.ellipsize(t, title, tw, TextUtils.TruncateAt.END).toString(), tx, y0 + 17 * dp, title);
-            c.drawText(TextUtils.ellipsize(b, body, tw, TextUtils.TruncateAt.END).toString(), tx, y0 + 34 * dp, body);
+            c.drawText(TextUtils.ellipsize(t, title, tw, TextUtils.TruncateAt.END).toString(), tx, H / 2 - 3 * dp, title);
+            c.drawText(TextUtils.ellipsize(b, body, tw, TextUtils.TruncateAt.END).toString(), tx, H / 2 + 15 * dp, body);
         } else {
-            title.setTextSize(13.5f * dp);
-            String line = t.isEmpty() ? b : b.isEmpty() ? t : t + ": " + b;
+            title.setTextSize(14.5f * dp);
+            String line = t.isEmpty() ? b : b.isEmpty() ? t : t + " " + b;
             c.drawText(TextUtils.ellipsize(line, title, tw, TextUtils.TruncateAt.END).toString(), tx, H / 2 + 5 * dp, title);
         }
-        c.restore();
     }
 
     public void setNight(boolean n) { night = n; invalidate(); }

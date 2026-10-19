@@ -73,7 +73,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private ChronoBar cbar;
     private FilePane pane;
     private NotifCard barNotif, floatNotif;
-    private TickerView barTicker, floatTicker;
+    private TickerView barTicker, floatTicker, navTicker;
+    private TaskbarView taskbar;          // extendido: apps abiertas del principal (como en Windows)
+    private LinearLayout sidePill;        // extendido: Atrás, Inicio, Recientes… en una píldora vertical a la derecha
     private org.json.JSONArray tickerItems;
     private boolean tickerHere;
     private BarPlayer barPlayer;
@@ -211,7 +213,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (savedStacked != stacked()) { desk.convertAll(stacked()); prefs.edit().putBoolean(sk("savedStacked"), stacked()).apply(); scheduleSave(); }
         for (Item it : desk.items) desk.normalize(it);
         desk.setPages(Math.max(prefs.getInt(sk("pages"), 1), maxPage() + 1), prefs.getInt(sk("page"), 0), 0);
-        desk.setAppsMode(prefs.getBoolean("appsLock", false), prefs.getBoolean("appsAuto", false));
+        desk.setAppsMode(prefs.getBoolean("appsLock", false), prefs.getBoolean("appsAuto", true));
         desk.setSnap(prefs.getBoolean("snapGrid", false));
         cleanWidgets();
 
@@ -357,7 +359,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         hub.send("cardTheme", "c", CardTheme.color, "g", CardTheme.glass, "k", CardTheme.console);
         hub.send("flip", "p", prefs.getBoolean("flipP", false), "e", prefs.getBoolean("flipE", false));
         if (!solo) hub.send("pages", "n", desk.pages(), "cur", desk.page());
-        hub.send("apps", "lock", prefs.getBoolean("appsLock", false), "auto", prefs.getBoolean("appsAuto", false));
+        hub.send("apps", "lock", prefs.getBoolean("appsLock", false), "auto", prefs.getBoolean("appsAuto", true));
         hub.send("snap", "on", prefs.getBoolean("snapGrid", false));
     }
 
@@ -1139,7 +1141,10 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (side == 1) {
             if (barTicker != null) barTicker.set(tickerItems);
             if (floatTicker != null) floatTicker.set(null);
-        } else if (floatTicker != null) floatTicker.set(tickerHere ? null : tickerItems);
+        } else {
+            if (navTicker != null) navTicker.set(tickerItems);   // en la barra del extendido
+            if (floatTicker != null) floatTicker.set(null);
+        }
     }
 
     /** "Acerca de" en el menú inicio (con el punto rojo si hay una versión nueva). */
@@ -1202,31 +1207,23 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             @Override public void onLogoLong() { showStart(true); }
         });
         if (kind == ChronoBar.NAV) {
-            navRow = new LinearLayout(this);
-            navRow.setGravity(Gravity.CENTER);
-            while (navPill.getChildCount() > 0) {
-                View v = navPill.getChildAt(0);
-                navPill.removeViewAt(0);
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(32), dp(32));
-                lp.setMargins(dp(12), 0, dp(12), 0);
-                navRow.addView(v, lp);
-            }
-            cbar.setNavRow(navRow);
+            toSidePill(navPill);   // Atrás, Inicio, Recientes y Teclado: píldora vertical a la derecha
             barPlayer = new BarPlayer(this, hub, ChronoBar.ink(night));
             barPlayer.setOnClose(() -> { cbar.showPlayer(false); main.postDelayed(() -> layoutChrono(false), 400); });
             cbar.setPlayer(barPlayer);
-            recentsBar = new RecentsBar(this, ChronoBar.ink(night));
-            recentsBar.setPick(this::onRecent);
-            cbar.setRecents(recentsBar);
+            recentsBar = null;
+            taskbar = newTaskbar();
+            cbar.setTaskbar(taskbar);
+            navTicker = newNavTicker(cbar);
+            cbar.setTicker(navTicker);
+            if (tickerItems != null) applyTicker();
+            main.post(pollRecents);
         } else {
             recentsBar = null;
             barPlayer = null;
-            if (navRow != null) {   // vuelve a ser principal: los botones vuelven a su lugar
-                while (navRow.getChildCount() > 0) { View v = navRow.getChildAt(0); navRow.removeViewAt(0); navPill.addView(v); }
-            }
-            barNotif = new NotifCard(this, night, false);
-            barNotif.setTap(this::onNotifTap);
-            cbar.setNotif(barNotif);
+            taskbar = null;
+            navTicker = null;
+            if (!solo) fromSidePill(navPill);   // vuelve a ser principal: los botones vuelven a su lugar
             barTicker = new TickerView(this, false);
             barTicker.setTap(pkg -> showNotifList());
             barTicker.setInk(Ui.fg(CardTheme.sheetNight(night)));
@@ -1234,6 +1231,10 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             if (tickerItems != null) applyTicker();
         }
         int at = rootView.indexOfChild(startOverlay);
+        // la barra va por encima de la burbuja de notificación (la burbuja "sale" de la barra)
+        cbar.setOutlineProvider(null);
+        cbar.setElevation(dp(20));
+        startOverlay.setElevation(dp(30));
         rootView.addView(cbar, at, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
     }
 
@@ -1279,10 +1280,17 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 pane2.animate().translationY(0).setDuration(380).setInterpolator(new android.view.animation.DecelerateInterpolator(1.4f)).start();
             } else pane2.animate().translationY(H).setDuration(320).withEndAction(() -> { if (!fileMode) pane2.setVisibility(View.GONE); }).start();
         } else pane.setPadding(0, pTop, 0, pBottom);
-        // la tarjeta de notificación del extendido va arriba a la izquierda, sin taparse con la barra
+        // la burbuja de notificación sale de la barra: en el principal baja (bajo el reloj), en el extendido sube
         FrameLayout.LayoutParams fl = (FrameLayout.LayoutParams) floatNotif.getLayoutParams();
-        fl.topMargin = top ? vh + dp(8) : dp(14);
+        int W = rootView.getWidth();
+        fl.width = Math.min(dp(470), W - dp(40));
+        fl.height = dp(64);
+        fl.gravity = (top ? Gravity.TOP : Gravity.BOTTOM) | Gravity.START;
+        fl.leftMargin = Math.min(top ? Math.round(cbar.tabW()) + dp(12) : dp(80), Math.max(dp(10), W - fl.width - dp(10)));
+        fl.topMargin = top ? vh + dp(6) : 0;
+        fl.bottomMargin = top ? 0 : vh + dp(10);
         floatNotif.setLayoutParams(fl);
+        floatNotif.setFromTop(top);
         // el gestor entra junto con la barra: en el principal desde arriba, en el extendido desde abajo
         float out = stacked() ? (side == 1 ? -H : H) : H;
         if (!animate) {
@@ -1319,9 +1327,74 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (!fromRemote && hub.connected()) hub.send("fileMode", "on", on);
     }
 
-    private void onNotifTap(String pkg) {
+    /** Tocar la burbuja: se abre lo que está notificando (la notificación misma, si se puede; si no, la app). */
+    private void onNotifTap(String pkg, String key) {
         if (pkg == null || pkg.isEmpty()) return;
+        if (key != null && !key.isEmpty()) {
+            if (hub.isPrincipal()) { hub.notifOpen(key, pkg); return; }
+            if (hub.connected()) { hub.send("notifOpen", "key", key, "pkg", pkg); return; }
+        }
         openOnPrincipal(pkg, "");
+    }
+
+    // ---------------- extendido: píldora de navegación (derecha) y barra de tareas ----------------
+
+    /** Pasa estos botones a una píldora vertical a la derecha de la pantalla (encima de la barra). */
+    private void toSidePill(LinearLayout from) {
+        if (sidePill == null) {
+            sidePill = new LinearLayout(this);
+            sidePill.setOrientation(LinearLayout.VERTICAL);
+            sidePill.setGravity(Gravity.CENTER_HORIZONTAL);
+            sidePill.setPadding(dp(6), dp(8), dp(6), dp(8));
+            sidePill.setBackground(barBg());
+            sidePill.setElevation(dp(14));
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(-2, -2, Gravity.END | Gravity.CENTER_VERTICAL);
+            lp.rightMargin = dp(10);
+            rootView.addView(sidePill, rootView.indexOfChild(startOverlay), lp);
+        }
+        while (from.getChildCount() > 0) {
+            View v = from.getChildAt(0);
+            from.removeViewAt(0);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(34), dp(34));
+            lp.setMargins(0, dp(7), 0, dp(7));
+            sidePill.addView(v, lp);
+        }
+        sidePill.setVisibility(View.VISIBLE);
+    }
+
+    /** Vuelve a ser principal: los botones regresan a su lugar y la píldora se va. */
+    private void fromSidePill(LinearLayout to) {
+        if (sidePill == null) return;
+        while (sidePill.getChildCount() > 0) { View v = sidePill.getChildAt(0); sidePill.removeViewAt(0); to.addView(v); }
+        sidePill.setVisibility(View.GONE);
+    }
+
+    private TaskbarView newTaskbar() {
+        TaskbarView tb = new TaskbarView(this, ChronoBar.ink(night));
+        tb.setHost(new TaskbarView.Host() {
+            @Override public void onOpen(String pkg, String label) { onRecent(pkg, label); }
+            @Override public void onClose(String pkg, String label) {
+                if (hub.isPrincipal()) hub.closeApp(pkg);
+                else if (hub.connected()) hub.send("closeApp", "pkg", pkg);
+                else { Toast.makeText(MainActivity.this, "El principal no está conectado", Toast.LENGTH_SHORT).show(); return; }
+                Toast.makeText(MainActivity.this, "Cerrando " + label, Toast.LENGTH_SHORT).show();
+            }
+            @Override public void onNeedAccess() { onRecent(null, null); }
+        });
+        return tb;
+    }
+
+    /** Banda de notificaciones dentro de la barra del extendido; con música sube un renglón y lleva su propio fondo. */
+    private TickerView newNavTicker(ChronoBar b) {
+        TickerView tk = new TickerView(this, false);
+        tk.setTap(pkg -> showNotifList());
+        tk.setInk(ChronoBar.ink(night));
+        b.onTickerMove = () -> {
+            boolean above = b.playerProgress() > 0.5f;
+            tk.setBand(above ? (night ? 0xE61E2934 : 0xEFFFFFFF) : 0);
+            tk.setInk(above ? (night ? 0xFFF5F8FA : 0xFF1D2733) : ChronoBar.ink(night));
+        };
+        return tk;
     }
 
     private void avoidBar() { }
@@ -1358,7 +1431,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     private void desksMenu() {
         int n = desk.pages(), cur = desk.page();
-        boolean lock = prefs.getBoolean("appsLock", false), auto = prefs.getBoolean("appsAuto", false);
+        boolean lock = prefs.getBoolean("appsLock", false), auto = prefs.getBoolean("appsAuto", true);
         Ui.Sheet sh = new Ui.Sheet(this)
                 .title("Escritorios")
                 .message("Estás en el " + (cur + 1) + " de " + n + ". Desliza a los lados sobre un espacio vacío para cambiar. "
@@ -1372,7 +1445,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     /** Ordenar y alinear apps y elementos del escritorio actual (se ve igual en los dos teléfonos). */
     private void arrangeMenu() {
-        boolean lock = prefs.getBoolean("appsLock", false), auto = prefs.getBoolean("appsAuto", false), snap = prefs.getBoolean("snapGrid", false);
+        boolean lock = prefs.getBoolean("appsLock", false), auto = prefs.getBoolean("appsAuto", true), snap = prefs.getBoolean("snapGrid", false);
         new Ui.Sheet(this)
                 .title("Ordenar y alinear")
                 .option(Ui.GRID, "Ordenar todo", "En filas: apps por nombre, después reloj, batería, widgets, notas e imágenes", () -> {
@@ -1919,7 +1992,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         it.page = desk.page();
         addItem(it);
         sendImage(it);
-        main.postDelayed(() -> desk.startEditing(it.id), 200);
+        if (prefs.getBoolean("appsAuto", true)) main.postDelayed(() -> desk.arrangeApps(), 250);
+        else main.postDelayed(() -> desk.startEditing(it.id), 200);
     }
 
     /** Catálogo: redes sociales hechas para el teléfono en vertical; al activarlas aparecen en tus apps. */
@@ -2482,10 +2556,11 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             lp.setMargins(dp(12), 0, dp(12), 0);
             row.addView(sb, lp);
         }
-        nbar.setNavRow(row);
-        recentsBar = new RecentsBar(this, ChronoBar.ink(night));
-        recentsBar.setPick(this::onRecent);
-        nbar.setRecents(recentsBar);
+        toSidePill(row);   // accesos de la pantalla única: también en la píldora de la derecha
+        taskbar = newTaskbar();
+        nbar.setTaskbar(taskbar);
+        navTicker = newNavTicker(nbar);
+        nbar.setTicker(navTicker);
         root.addView(nbar, root.indexOfChild(startOverlay), new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
         // gestor de archivos en dos mitades (arriba y abajo), como si fueran las dos pantallas
         pane2 = new FilePane(this, hub(), night);
@@ -2860,15 +2935,15 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         @Override public void run() {
             main.removeCallbacks(this);
             if (!resumed) return;
-            boolean barRec = recentsBar != null && !fileMode;
+            boolean barRec = taskbar != null && !fileMode;
             if (!desk.hasRecentsWidget() && !barRec) { /* nada que mostrar */ }
             else if (hub.isPrincipal()) {
                 RecentApps.worker.execute(() -> {
                     org.json.JSONObject m = RecentApps.message(getApplicationContext());
-                    main.post(() -> { desk.setRecents(m); if (recentsBar != null) recentsBar.set(m); });
+                    main.post(() -> { desk.setRecents(m); if (taskbar != null) taskbar.set(m); });
                 });
             } else if (hub.connected()) {
-                String have = barRec ? recentsBar.sig() : desk.recentsSig();
+                String have = barRec ? taskbar.sig() : desk.recentsSig();
                 if (barRec && desk.hasRecentsWidget() && !have.equals(desk.recentsSig())) have = "?";
                 hub.send("recReq", "sig", have);
             }
@@ -2897,8 +2972,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 it.page = desk.page();
                 addItem(it);
                 sendImage(it);
-                // queda en modo edición en la pantalla donde se puso, para ubicarla a gusto
-                if (screen == deskSide()) main.postDelayed(() -> desk.startEditing(it.id), 200);
+                // con "ordenar apps" (por defecto) se acomoda en la grilla; si no, queda en modo edición para ubicarla
+                if (prefs.getBoolean("appsAuto", true)) main.postDelayed(() -> desk.arrangeApps(), 250);
+                else if (screen == deskSide()) main.postDelayed(() -> desk.startEditing(it.id), 200);
                 else if (hub.connected()) main.postDelayed(() -> hub.send("editItem", "id", it.id), 400);
             }
         });
@@ -3653,7 +3729,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             case "fileMode":
                 main.post(() -> setFileMode(m.optBoolean("on"), true));
                 break;
-            case "notif":   // ahora las notificaciones corren en la banda (ticker); la tarjeta ya no se usa
+            case "notif":   // burbuja: en el principal (si ChronOS está a la vista) o en el extendido (si el principal está en otra app)
+                main.post(() -> { if (floatNotif != null) floatNotif.show(m); });
                 break;
             case "ticker":
                 main.post(() -> { tickerItems = m.optJSONArray("items"); tickerHere = m.optBoolean("here"); applyTicker(); fillNotifList(); });
@@ -3728,7 +3805,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                     main.post(() -> { cbar.showPlayer(false); main.postDelayed(() -> layoutChrono(false), 400); });
                 break;
             case "notifs":
-                main.post(() -> { desk.setNotified(m.optJSONArray("p")); if (recentsBar != null) recentsBar.setNotified(m.optJSONArray("p")); });
+                main.post(() -> { desk.setNotified(m.optJSONArray("p")); if (taskbar != null) taskbar.setNotified(m.optJSONArray("p")); });
                 break;
             case "gameBg":
                 main.post(() -> desk.setBgImage(GameBg.current));
@@ -3750,7 +3827,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 main.post(() -> Toast.makeText(this, "El principal no encontró la app de alarmas", Toast.LENGTH_SHORT).show());
                 break;
             case "recList":
-                main.post(() -> { desk.setRecents(m); if (recentsBar != null) recentsBar.set(m); });
+                main.post(() -> { desk.setRecents(m); if (taskbar != null) taskbar.set(m); });
                 break;
             case "introPlay":
                 if (!solo) main.post(this::playIntroAgain);

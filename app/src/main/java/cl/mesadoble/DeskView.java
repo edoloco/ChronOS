@@ -611,13 +611,16 @@ public class DeskView extends View {
             Collections.sort(apps, (p, q) -> col.compare(p.title, q.title));
             float gap = 10 * dp, mx = 14 * dp, top, bottom;
             // horizontal: la barra está arriba en el principal y abajo en el extendido; vertical: abajo en ambos
-            if (vertical) { top = s == 0 ? 86 * dp : 16 * dp; bottom = s == 0 ? 30 * dp : 86 * dp; }
-            else { top = 16 * dp; bottom = 86 * dp; }
+            float right = 0;
+            if (vertical) { top = s == 0 ? 86 * dp : 16 * dp; bottom = s == 0 ? 30 * dp : 150 * dp; }
+            // horizontal: el principal tiene el reloj arriba; el extendido, la barra abajo y la píldora de navegación a la derecha
+            else if (s == 0) { top = 84 * dp; bottom = 16 * dp; }
+            else { top = 16 * dp; bottom = 156 * dp; right = 64 * dp; }
             squareApps(W);
             float cellW = 0;
             for (Item it : apps) cellW = Math.max(cellW, appPx(it, W));
             float cellH = cellW;
-            int cols = Math.max(1, (int) ((W - 2 * mx + gap) / (cellW + gap)));
+            int cols = Math.max(1, (int) ((W - 2 * mx - right + gap) / (cellW + gap)));
             for (int i = 0; i < apps.size(); i++) {
                 Item it = apps.get(i);
                 double ux = (mx + (i % cols) * (cellW + gap)) / W, uy = (top + (i / cols) * (cellH + gap)) / H;

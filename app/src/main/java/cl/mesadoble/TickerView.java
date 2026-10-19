@@ -59,6 +59,9 @@ public class TickerView extends View {
 
     public void setTap(Tap t) { tap = t; }
     public void setInk(int c) { ink = c; invalidate(); }
+    private int bandColor;
+    /** Fondo propio de la banda (0 = sin fondo, va sobre la barra). */
+    public void setBand(int color) { if (bandColor != color) { bandColor = color; invalidate(); } }
 
     /** Lista de notificaciones pendientes: [{pkg, app, title, text, time, icon}] (las más nuevas primero). */
     public void set(JSONArray a) {
@@ -115,6 +118,16 @@ public class TickerView extends View {
         if (items.isEmpty()) return;
         float W = getWidth(), H = getHeight();
         if (floating) c.drawRoundRect(new RectF(0, 0, W, H), H / 2, H / 2, band);
+        else if (bandColor != 0) {
+            band.setColor(bandColor);
+            c.drawRoundRect(new RectF(0, 0, W, H), H / 2, H / 2, band);
+            band.setColor(0x33000000);
+            band.setStyle(Paint.Style.STROKE);
+            band.setStrokeWidth(dp);
+            c.drawRoundRect(new RectF(dp / 2, dp / 2, W - dp / 2, H - dp / 2), H / 2, H / 2, band);
+            band.setStyle(Paint.Style.FILL);
+            band.setColor(0xCC0E1A22);
+        }
         c.save();
         c.clipRect(floating ? H / 2 : 0, 0, floating ? W - H / 2 : W, H);
         long now = android.os.SystemClock.uptimeMillis();

@@ -437,6 +437,7 @@ public class Hub implements Link.Listener {
             });
             return;
         }
+        if ("closeApp".equals(t)) { if (isPrincipal()) { String pk = m.optString("pkg"); main.post(() -> closeApp(pk)); } return; }
         if ("recAccess".equals(t)) {
             if (isPrincipal()) startOrNotify(RecentApps.accessIntent().addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), 44,
                     "Apps recientes", "Toca y activa ChronOS en \"Acceso a datos de uso\"");
@@ -618,6 +619,21 @@ public class Hub implements Link.Listener {
         for (int ms : new int[]{60, 250, 600, 1100})
             main.postDelayed(() -> { if (!shown.getAsBoolean()) try { app.startActivity(i); } catch (Exception ignored) { } }, ms);
         main.postDelayed(() -> { if (!shown.getAsBoolean()) startOrNotify(i, code, title, text); }, 1700);
+    }
+
+    /**
+     * Cerrar una app del principal (barra de tareas del extendido). Si está al frente, primero se vuelve a la mesa;
+     * después Android la termina (sale de la memoria) y no vuelve a la barra hasta que se abra de nuevo.
+     */
+    void closeApp(String pkg) {
+        if (pkg == null || pkg.isEmpty() || pkg.equals(app.getPackageName())) return;
+        RecentApps.close(pkg);
+        boolean front = pkg.equals(RecentApps.active(app));
+        if (front) goDesk();
+        main.postDelayed(() -> {
+            try { ((android.app.ActivityManager) app.getSystemService(Context.ACTIVITY_SERVICE)).killBackgroundProcesses(pkg); } catch (Exception ignored) { }
+            RecentApps.worker.execute(() -> { JSONObject r = RecentApps.message(app); if (connected()) send(r); main.post(() -> local(r)); });
+        }, front ? 900 : 100);
     }
 
     public int launchHere(String pkg, String label) {

@@ -51,6 +51,10 @@ final class RecentApps {
     private static final Map<String, Long> last = new HashMap<>();
     private static long queriedTo;
     private static String lastResumed = "";
+    // apps cerradas desde la barra de tareas: no vuelven a la lista hasta que se abran de nuevo
+    private static final Map<String, Long> closed = new HashMap<>();
+
+    static synchronized void close(String pkg) { closed.put(pkg, System.currentTimeMillis()); }
     // última notificación que sonó/vibró/apareció de cada app (evento 12 de Android: NOTIFICATION_INTERRUPTION)
     private static final Map<String, Long> notifAt = new HashMap<>();
 
@@ -119,6 +123,8 @@ final class RecentApps {
         Collections.sort(pk, (a, b) -> Long.compare(last.get(b), last.get(a)));
         for (String p : pk) {
             if (skip.contains(p) || pm.getLaunchIntentForPackage(p) == null) continue;
+            Long cl = closed.get(p);
+            if (cl != null && last.get(p) <= cl) continue;   // la cerraron y no se ha vuelto a abrir
             out.add(p);
             if (out.size() >= MAX) break;
         }
