@@ -624,7 +624,10 @@ public class Hub implements Link.Listener {
         if (pkg.equals(app.getPackageName())) { goDesk(); return LAUNCHED; }
         if (Pals.isPal(pkg)) {   // un PAL: se abre en el principal como una app más
             if (Pals.get(app, pkg.substring(4)) == null) return NOT_INSTALLED;
-            return startExternal(Pals.intent(app, pkg.substring(4)), app.getPackageName(), label);
+            Pals.Pal pal = Pals.get(app, pkg.substring(4));
+            Intent pi = Pals.intent(app, pal.id);
+            // PAL en Chrome: lo que queda al frente es Chrome, no ChronOS
+            return startExternal(pi, pal.chrome && pi.getPackage() != null ? pi.getPackage() : app.getPackageName(), label);
         }
         Intent i = app.getPackageManager().getLaunchIntentForPackage(pkg);
         if (i == null) return NOT_INSTALLED;

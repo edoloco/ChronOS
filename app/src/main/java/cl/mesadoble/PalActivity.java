@@ -270,6 +270,11 @@ public class PalActivity extends Activity {
         prefs = getSharedPreferences("mesa", MODE_PRIVATE);
         pal = Pals.get(this, getIntent().getStringExtra("pal"));
         if (pal == null) pal = Pals.ALL.get(0);
+        if (pal.chrome) {   // PAL en Chrome: se abre la pestaña y esta pantalla no se queda
+            try { startActivity(Pals.chromeIntent(this, pal)); } catch (Exception e) { Toast.makeText(this, "No hay un navegador para abrirlo", Toast.LENGTH_SHORT).show(); }
+            finish();
+            return;
+        }
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
         FrameLayout root = new FrameLayout(this) {
@@ -744,7 +749,7 @@ public class PalActivity extends Activity {
 
     @Override protected void onPause() { CookieManager.getInstance().flush(); web.onPause(); audioFocus(false); super.onPause(); }
     @Override protected void onResume() { super.onResume(); web.onResume(); if (soundOn()) audioFocus(true); }
-    @Override protected void onDestroy() { web.destroy(); super.onDestroy(); }
+    @Override protected void onDestroy() { if (web != null) web.destroy(); super.onDestroy(); }
 
     // ---------------- piezas ----------------
 

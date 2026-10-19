@@ -1889,8 +1889,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private void palsMenu() {
         Ui.Sheet sh = new Ui.Sheet(this).title("PALS");
         for (Pals.Pal p : Pals.active(this))
-            sh.option(Ui.OPEN, p.name, p.custom ? "PAL propio" : "social".equals(p.group) ? "Red social" : "Inteligencia artificial", () -> palMenu(p));
+            sh.option(Ui.OPEN, p.name, (p.custom ? "PAL propio" : "social".equals(p.group) ? "Red social" : "google".equals(p.group) ? "Google" : "Inteligencia artificial") + (p.chrome ? " · en Chrome" : ""), () -> palMenu(p));
         sh.option(Ui.GRID, "Catálogo de redes sociales", "Instagram, Facebook, X, TikTok, WhatsApp Web… en horizontal y con tu cuenta", this::palsCatalog);
+        sh.option(Ui.GRID, "Catálogo de Google", "Gmail, YouTube, Drive, Calendar… se abren en Chrome con tu cuenta de Google", this::palsGoogle);
         sh.option(Ui.PLUS, "Crear un PAL de cualquier página", "Una página que no se vea bien en ChronOS", this::palCreate);
         sh.button("Cerrar", false, null).show();
     }
@@ -1923,16 +1924,27 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     /** Catálogo: redes sociales hechas para el teléfono en vertical; al activarlas aparecen en tus apps. */
     private void palsCatalog() {
-        Ui.Sheet sh = new Ui.Sheet(this).title("Catálogo de redes sociales")
-                .message("Las que actives aparecen en tus apps. Al abrirlas inicias sesión una vez (con usuario y contraseña, no con el botón de Google) y queda guardada.");
+        palsCatalog("social", "Catálogo de redes sociales",
+                "Las que actives aparecen en tus apps. Al abrirlas inicias sesión una vez (con usuario y contraseña, no con el botón de Google) y queda guardada.");
+    }
+
+    /** PALS en Chrome: Google no deja iniciar sesión dentro de apps, así que estos se abren en una pestaña de Chrome. */
+    private void palsGoogle() {
+        palsCatalog("google", "Catálogo de Google",
+                "Se abren en una pestaña de Chrome con el color del servicio, porque Google no deja iniciar sesión dentro de apps. "
+                + "Usan la misma cuenta de Google de tu Chrome. No llevan el panel de cristal.");
+    }
+
+    private void palsCatalog(String group, String title, String msg) {
+        Ui.Sheet sh = new Ui.Sheet(this).title(title).message(msg);
         for (Pals.Pal p : Pals.ALL) {
-            if (!"social".equals(p.group)) continue;
+            if (!group.equals(p.group)) continue;
             boolean on = Pals.enabled(this, p);
             sh.option(on ? Ui.CHECK : Ui.PLUS, -1, p.name.replace(" PAL", ""), on ? "Activo · toca para quitarlo" : "Toca para agregarlo", on, () -> {
                 Pals.setEnabled(this, p.id, !on);
                 palsSync();
                 Toast.makeText(this, !on ? p.name + " está en tus apps" : p.name + " quitado", Toast.LENGTH_SHORT).show();
-                palsCatalog();
+                palsCatalog(group, title, msg);
             });
         }
         sh.button("Listo", true, null).show();
@@ -1964,6 +1976,18 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         wide.setText("Vista de computador (más ancha, mejor en horizontal)");
         wide.setChecked(true);
         box.addView(wide);
+        android.widget.CheckBox chrome = new android.widget.CheckBox(this);
+        chrome.setText("Abrir en Chrome (para páginas donde se entra con la cuenta de Google)");
+        box.addView(chrome);
+        url.addTextChangedListener(new android.text.TextWatcher() {   // si es de Google, se marca solo
+            public void beforeTextChanged(CharSequence a, int b, int c, int d) { }
+            public void onTextChanged(CharSequence a, int b, int c, int d) { }
+            public void afterTextChanged(android.text.Editable e) {
+                String t = e.toString().trim();
+                Uri uu = Uri.parse(t.startsWith("http") ? t : "https://" + t);
+                if (Pals.googleHost(uu.getHost())) chrome.setChecked(true);
+            }
+        });
         new Ui.Sheet(this).title("Crear un PAL").view(box)
                 .button("Cancelar", false, null)
                 .button("Crear", true, () -> {
@@ -1973,7 +1997,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                     if (uu.getHost() == null || !uu.getHost().contains(".")) { Toast.makeText(this, "Falta una dirección válida", Toast.LENGTH_SHORT).show(); return; }
                     String n = name.getText().toString().trim();
                     if (n.isEmpty()) n = uu.getHost().replaceFirst("^www\\.", "");
-                    Pals.addCustom(this, n + " PAL", u, wide.isChecked());
+                    Pals.addCustom(this, n + " PAL", u, wide.isChecked(), chrome.isChecked());
                     palsSync();
                     Toast.makeText(this, n + " PAL está en tus apps", Toast.LENGTH_SHORT).show();
                 }).show();

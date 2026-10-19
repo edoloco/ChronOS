@@ -35,7 +35,8 @@ final class Pals {
     static final class Pal {
         final String id, name, home;
         String login, group = "ia";
-        boolean desktop, custom;   // desktop: la página se pide como computador (vista ancha, mejor en horizontal)
+        boolean desktop, custom;
+        boolean chrome;            // se abre en Chrome (servicios de Google: Google no deja iniciar sesión dentro de apps)   // desktop: la página se pide como computador (vista ancha, mejor en horizontal)
         int vw;                    // ancho virtual de la página en modo computador (0 = el real)
         int accent;                // color base del PAL: el de la red social (o el promedio de su logo)
         String app;                // paquete de la app oficial en Android (para tomar su ícono si está instalada)
@@ -51,6 +52,7 @@ final class Pals {
         Pal desk(int width) { desktop = true; vw = width; return this; }
         Pal group(String g) { group = g; return this; }
         Pal app(String pkg) { app = pkg; return this; }
+        Pal chrome() { chrome = true; return this; }
     }
 
     static final List<Pal> ALL = new ArrayList<>();
@@ -126,6 +128,51 @@ final class Pals {
         ALL.add(new Pal("telegram", "Telegram Web PAL", "https://web.telegram.org/a/", 0xFF2AABEE, "telegram.org", "t.me")
                 .app("org.telegram.messenger").group("social").desk(1150)
                 .item("✉", "Chats", "https://web.telegram.org/a/"));
+
+        // ---- catálogo de Google: se abren en Chrome, con la sesión de Google de tu Chrome
+        ALL.add(new Pal("gmail", "Gmail PAL", "https://mail.google.com/", 0xFFEA4335, "mail.google.com")
+                .app("com.google.android.gm").group("google").chrome());
+        ALL.add(new Pal("youtube", "YouTube PAL", "https://www.youtube.com/", 0xFFFF0000, "youtube.com")
+                .app("com.google.android.youtube").group("google").chrome());
+        ALL.add(new Pal("drive", "Drive PAL", "https://drive.google.com/", 0xFF1E8E3E, "drive.google.com")
+                .app("com.google.android.apps.docs").group("google").chrome());
+        ALL.add(new Pal("gdocs", "Documentos PAL", "https://docs.google.com/", 0xFF4285F4, "docs.google.com")
+                .app("com.google.android.apps.docs.editors.docs").group("google").chrome());
+        ALL.add(new Pal("calendar", "Calendar PAL", "https://calendar.google.com/", 0xFF4285F4, "calendar.google.com")
+                .app("com.google.android.calendar").group("google").chrome());
+        ALL.add(new Pal("photos", "Fotos PAL", "https://photos.google.com/", 0xFFF9AB00, "photos.google.com")
+                .app("com.google.android.apps.photos").group("google").chrome());
+        ALL.add(new Pal("maps", "Maps PAL", "https://www.google.com/maps", 0xFF34A853, "google.com")
+                .app("com.google.android.apps.maps").group("google").chrome());
+        ALL.add(new Pal("classroom", "Classroom PAL", "https://classroom.google.com/", 0xFF1E8E3E, "classroom.google.com")
+                .app("com.google.android.apps.classroom").group("google").chrome());
+    }
+
+    /** Páginas que piden la cuenta de Google: un PAL propio de ellas se abre en Chrome. */
+    static boolean googleHost(String host) {
+        if (host == null) return false;
+        String h = host.toLowerCase(java.util.Locale.ROOT);
+        return h.equals("google.com") || h.endsWith(".google.com") || h.endsWith("youtube.com") || h.equals("youtu.be")
+                || h.endsWith("blogger.com") || h.endsWith("google.cl");
+    }
+
+    /**
+     * Abre el PAL en una pestaña de Chrome (pestaña personalizada, con el color del PAL). Ahí Google sí deja iniciar
+     * sesión y se usa la misma cuenta de tu Chrome. Si no hay Chrome, el navegador que tengas.
+     */
+    static Intent chromeIntent(Context c, Pal p) {
+        Intent i = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(p.home));
+        android.os.Bundle b = new android.os.Bundle();
+        b.putBinder("android.support.customtabs.extra.SESSION", null);   // esto la vuelve pestaña personalizada
+        i.putExtras(b);
+        i.putExtra("android.support.customtabs.extra.TOOLBAR_COLOR", p.accent);
+        i.putExtra("androidx.browser.customtabs.extra.SHARE_STATE", 2);
+        i.putExtra("android.support.customtabs.extra.TITLE_VISIBILITY", 1);
+        for (String pk : new String[]{"com.android.chrome", "com.chrome.beta", "com.chrome.dev"}) {
+            try { c.getPackageManager().getPackageInfo(pk, 0); i.setPackage(pk); break; } catch (Exception ignored) { }
+        }
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        return i;
     }
 
     // ---------------- cuáles están activos y los PALS propios (de cualquier página) ----------------
@@ -159,6 +206,7 @@ final class Pals {
                 int col = prefs(c).getInt("pal_" + p.id + "_color", 0);
                 if (col != 0) p.accent = col;   // el promedio del logo de la página, cuando ya se descargó
                 if (o.optBoolean("desk", true)) p.desk(1150);
+                p.chrome = o.optBoolean("chrome", googleHost(host));
                 p.item("⌂", "Inicio", url);
                 l.add(p);
             }
@@ -166,7 +214,9 @@ final class Pals {
         return l;
     }
 
-    static void addCustom(Context c, String name, String url, boolean desk) {
+    static void addCustom(Context c, String name, String url, boolean desk) { addCustom(c, name, url, desk, false); }
+
+    static void addCustom(Context c, String name, String url, boolean desk, boolean chrome) {
         try {
             org.json.JSONArray a = new org.json.JSONArray(prefs(c).getString("pals_custom", "[]"));
             org.json.JSONObject o = new org.json.JSONObject();
@@ -174,6 +224,7 @@ final class Pals {
             o.put("name", name);
             o.put("url", url);
             o.put("desk", desk);
+            o.put("chrome", chrome);
             a.put(o);
             prefs(c).edit().putString("pals_custom", a.toString()).apply();
         } catch (Exception ignored) { }
@@ -227,6 +278,8 @@ final class Pals {
     static boolean isPal(String pkg) { return pkg != null && pkg.startsWith("pal:"); }
 
     static Intent intent(Context c, String id) {
+        Pal p = get(c, id);
+        if (p != null && p.chrome) return chromeIntent(c, p);
         return new Intent(c, PalActivity.class).putExtra("pal", id)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
     }
