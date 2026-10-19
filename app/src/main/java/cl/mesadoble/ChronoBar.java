@@ -22,9 +22,10 @@ import java.util.Locale;
  * corte en diagonal:
  *   CLOCK (principal): la pestaña a la izquierda tiene el reloj con la fecha; a su derecha salen las notificaciones.
  *   NAV   (extendido): franja recta con un "tope" en diagonal que sube a la pestaña del logo (menú inicio), a la
- *                      derecha. La franja tiene dos renglones: abajo la barra de tareas (apps abiertas del principal,
- *                      como en Windows) y arriba la banda de notificaciones; cuando suena música, el reproductor
- *                      ocupa ese renglón y la banda sube un renglón más (sobre la barra).
+ *                      derecha; en la franja, la barra de tareas (apps abiertas del principal, como en Windows).
+ * La barra es un FICHERO: la banda de notificaciones y el reproductor son hojas aparte, más claras, que asoman por
+ * detrás del fichero (se dibujan antes que él). Con música, la hoja del reproductor sale de detrás y empuja la de
+ * las notificaciones un renglón más afuera.
  * edgeTop: la franja va pegada al borde de arriba (la pestaña cuelga hacia abajo) o al de abajo (sube).
  * Deslizar la barra hacia el centro de la pantalla abre el gestor de archivos; al revés, lo cierra.
  */
@@ -73,18 +74,21 @@ public class ChronoBar extends FrameLayout {
     /** Círculo rojo sobre el logo (por ejemplo: hay una actualización). */
     public void setBadge(boolean b) { if (badge != b) { badge = b; invalidate(); } }
     public boolean edgeTop() { return edgeTop; }
-    public void setEdgeTop(boolean t) { if (edgeTop != t) { edgeTop = t; requestLayout(); invalidate(); } }
+    public void setEdgeTop(boolean t) { if (edgeTop != t) { edgeTop = t; requestLayout(); invalidate(); placePlayer(); } }
     public void setNight(boolean n) { night = n; invalidate(); }
 
     // ---------------- medidas ----------------
 
     // extendido: renglón de la barra de tareas (abajo), renglón de banda/reproductor (arriba) y espacio de arriba
-    static final float ROW_T = 38, ROW_U = 46, ABOVE = 44;
-    float strip() { return (kind == NAV ? 4 + ROW_T + 4 + ROW_U + 4 : 36) * dp; }
+    // extendido: renglón de la barra de tareas; hojas: lo que asoma del reproductor (PV) y de la banda (TV), y lo
+    // que queda escondido detrás del fichero (OVL)
+    static final float ROW_T = 38, PV = 46, TV = 34, OVL = 12;
+    float strip() { return (kind == NAV ? 4 + ROW_T + 4 : 36) * dp; }
+    private boolean tickerOn() { return ticker != null && ticker.getVisibility() == VISIBLE; }
     /** Avance del reproductor al abrirse (0 = cerrado, 1 = abierto): sale desde el logo hacia la izquierda. */
     private float pp;
     private android.animation.ValueAnimator ppAnim;
-    float tab() { return kind == NAV ? strip() + 16 * dp : 74 * dp; }
+    float tab() { return kind == NAV ? strip() + (PV + 6) * dp : 74 * dp; }
     float diag() { return 46 * dp; }
     float tabW() { return kind == CLOCK ? Math.min(getWidth() * 0.6f, Math.max(200 * dp, clockNeeded())) : 112 * dp; }
 
@@ -102,9 +106,12 @@ public class ChronoBar extends FrameLayout {
         return pad + 12 * dp + timeP.measureText(time) + 10 * dp + dateW + cut + 18 * dp;
     }
     /** Alto de la barra (lo que ocupa en la pantalla). */
-    int barHeight() { return Math.round(kind == NAV ? tab() + ABOVE * dp : 74 * dp); }
-    /** Lo que se ve de la barra (para dejar espacio al gestor de archivos). */
-    int visualHeight() { return Math.round(tab() + (kind == NAV ? ABOVE * dp * pp : 0)); }
+    int barHeight() { return Math.round(kind == NAV ? strip() + (PV + TV + 8) * dp : 74 * dp); }
+    /** Lo que se ve de la barra con sus hojas (para dejar espacio al gestor de archivos y a la burbuja). */
+    int visualHeight() {
+        if (kind != NAV) return Math.round(Math.max(tab(), strip() + (tickerOn() ? TV * dp : 0)));
+        return Math.round(Math.max(tab(), strip() + (tickerOn() ? TV * dp : 0) + pp * PV * dp));
+    }
 
     private float y(float depth) { return edgeTop ? depth : getHeight() - depth; }
 
@@ -173,10 +180,12 @@ public class ChronoBar extends FrameLayout {
 
     /** El reproductor se descubre de derecha a izquierda, junto con la parte alta de la barra. */
     private void placePlayer() {
-        if (kind == NAV) {   // el reproductor aparece en su renglón y la banda sube un renglón
-            if (player != null) { player.setAlpha(pp); player.setTranslationY((edgeTop ? -1 : 1) * (1 - pp) * 10 * dp); }
-            if (ticker != null) ticker.setTranslationY((edgeTop ? 1 : -1) * pp * (ROW_U + 6) * dp);
+        if (kind == NAV) {   // la hoja del reproductor sale de detrás del fichero y empuja la banda un renglón más afuera
+            float out = edgeTop ? 1 : -1;
+            if (player != null) player.setTranslationY(-out * (1 - pp) * (PV + 4) * dp);
+            if (ticker != null) ticker.setTranslationY(out * pp * PV * dp);
             if (onTickerMove != null) onTickerMove.run();
+            invalidate();
             return;
         }
         if (player == null || getWidth() == 0) return;
@@ -196,10 +205,16 @@ public class ChronoBar extends FrameLayout {
         for (int i = 0; i < getChildCount(); i++) {
             View v = getChildAt(i);
             if (kind == NAV && (v == player || v == ticker || v == taskbar)) {
-                float rowW = W - tabW() - (v == taskbar ? 0 : diag()) - 14 * dp;
-                float rh = v == taskbar ? ROW_T : v == player ? ROW_U : ROW_U - 8;
+                // la hoja del reproductor llega hasta debajo de la pestaña; la banda termina donde empieza la pestaña
+                float rowW = v == taskbar ? W - tabW() - 14 * dp : v == player ? W - tabW() + 10 * dp : W - tabW() - 14 * dp;
+                float rh = v == taskbar ? ROW_T : v == player ? OVL + PV : OVL + TV;
                 v.measure(MeasureSpec.makeMeasureSpec(Math.max(1, Math.round(rowW)), MeasureSpec.EXACTLY),
                         MeasureSpec.makeMeasureSpec(Math.round(rh * dp), MeasureSpec.EXACTLY));
+                continue;
+            }
+            if (kind == CLOCK && v == ticker) {   // hoja de la banda: asoma bajo la franja, desde detrás del reloj
+                v.measure(MeasureSpec.makeMeasureSpec(Math.max(1, Math.round(W - tabW() + 12 * dp - 10 * dp)), MeasureSpec.EXACTLY),
+                        MeasureSpec.makeMeasureSpec(Math.round((OVL + TV) * dp), MeasureSpec.EXACTLY));
                 continue;
             }
             if (v == player) v.measure(MeasureSpec.makeMeasureSpec(Math.max(0, Math.round(W - tabW() - recWFor(W) - diag() * 1.6f - 12 * dp)), MeasureSpec.EXACTLY),
@@ -219,9 +234,11 @@ public class ChronoBar extends FrameLayout {
         int W = r - l, H = b - t;
         if (kind == NAV) {
             float x0 = 6 * dp;
+            float S = strip() / dp;
             if (taskbar != null) placeRow(taskbar, x0, x0 + taskbar.getMeasuredWidth(), 4, 4 + ROW_T);
-            if (player != null) placeRow(player, x0, x0 + player.getMeasuredWidth(), 4 + ROW_T + 4, 4 + ROW_T + 4 + ROW_U);
-            if (ticker != null) placeRow(ticker, x0, x0 + ticker.getMeasuredWidth(), 4 + ROW_T + 8, 4 + ROW_T + 8 + ROW_U - 8);
+            if (player != null) placeRow(player, 8 * dp, 8 * dp + player.getMeasuredWidth(), S - OVL, S + PV);
+            if (ticker != null) placeRow(ticker, 14 * dp, 14 * dp + ticker.getMeasuredWidth(), S - OVL, S + TV);
+            paperInsets();
             if (navRow != null) navRow.layout(0, 0, 0, 0);
             placePlayer();
             return;
@@ -242,9 +259,9 @@ public class ChronoBar extends FrameLayout {
             recents.layout(x, top, x + recents.getMeasuredWidth(), top + h);
         }
         if (ticker != null) {
-            int x = Math.round(tabW() + diag() * 0.5f), h = ticker.getMeasuredHeight();
-            int top = Math.round(edgeTop ? 2 * dp : H - 2 * dp - h);
-            ticker.layout(x, top, x + ticker.getMeasuredWidth(), top + h);
+            float x = tabW() - 12 * dp, S = strip() / dp;
+            placeRow(ticker, x, x + ticker.getMeasuredWidth(), S - OVL, S + TV);
+            paperInsets();
         }
         if (notif != null) {
             int x = Math.round(tabW() + diag() * 0.4f), h = notif.getMeasuredHeight();
@@ -301,7 +318,36 @@ public class ChronoBar extends FrameLayout {
 
     // ---------------- dibujo ----------------
 
-    @Override protected void onDraw(Canvas c) {
+    /** Lo escondido de cada hoja (detrás del fichero) no lleva contenido: se corre al lado que asoma. */
+    private void paperInsets() {
+        int o = Math.round(OVL * dp);
+        if (ticker instanceof TickerView) ((TickerView) ticker).setHidden(o, !edgeTop);
+        if (player != null) player.setPadding(player.getPaddingLeft(), edgeTop ? o : 0, player.getPaddingRight(), edgeTop ? 0 : o);
+    }
+
+    private final Paint paperShadow = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+    @Override protected void dispatchDraw(Canvas c) {
+        long t = getDrawingTime();
+        // 1) las hojas (reproductor y banda), con su sombra; 2) el fichero encima; 3) lo que va sobre el fichero
+        for (View v : new View[]{ticker, player}) {
+            if (v == null || v.getVisibility() != VISIBLE || v.getAlpha() <= 0.01f) continue;
+            paperShadow.setColor(0x01000000);
+            paperShadow.setShadowLayer(8 * dp, 0, (edgeTop ? 2 : -2) * dp, night ? 0x80000000 : 0x40000000);
+            float ty = v.getTranslationY();
+            c.drawRoundRect(v.getLeft(), v.getTop() + ty, v.getRight(), v.getBottom() + ty, 12 * dp, 12 * dp, paperShadow);
+            drawChild(c, v, t);
+        }
+        drawFolder(c);
+        for (int i = 0; i < getChildCount(); i++) {
+            View v = getChildAt(i);
+            if (v != ticker && v != player && v.getVisibility() == VISIBLE) drawChild(c, v, t);
+        }
+    }
+
+    @Override protected void onDraw(Canvas c) { }
+
+    private void drawFolder(Canvas c) {
         buildShape();
         float W = getWidth(), H = getHeight();
         // sombra suave hacia el centro de la pantalla
@@ -345,7 +391,6 @@ public class ChronoBar extends FrameLayout {
 
         if (kind == CLOCK) drawClock(c);
         else drawLogo(c);
-        super.onDraw(c);
     }
 
     private boolean lightText() {

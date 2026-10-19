@@ -1138,6 +1138,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     /** Banda de notificaciones: en la barra del reloj del principal; en el extendido solo si el principal está en otra app. */
     private void applyTicker() {
+        main.post(() -> layoutChrono(false));   // con o sin hoja de notificaciones, la barra ocupa distinto
         if (side == 1) {
             if (barTicker != null) barTicker.set(tickerItems);
             if (floatTicker != null) floatTicker.set(null);
@@ -1208,8 +1209,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         });
         if (kind == ChronoBar.NAV) {
             toSidePill(navPill);   // Atrás, Inicio, Recientes y Teclado: píldora vertical a la derecha
-            barPlayer = new BarPlayer(this, hub, ChronoBar.ink(night));
-            barPlayer.setOnClose(() -> { cbar.showPlayer(false); main.postDelayed(() -> layoutChrono(false), 400); });
+            barPlayer = newPlayer(cbar);
             cbar.setPlayer(barPlayer);
             recentsBar = null;
             taskbar = newTaskbar();
@@ -1226,7 +1226,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             if (!solo) fromSidePill(navPill);   // vuelve a ser principal: los botones vuelven a su lugar
             barTicker = new TickerView(this, false);
             barTicker.setTap(pkg -> showNotifList());
-            barTicker.setInk(Ui.fg(CardTheme.sheetNight(night)));
+            paper(barTicker);   // hoja que asoma bajo la barra del reloj
             cbar.setTicker(barTicker);
             if (tickerItems != null) applyTicker();
         }
@@ -1384,16 +1384,29 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         return tb;
     }
 
-    /** Banda de notificaciones dentro de la barra del extendido; con música sube un renglón y lleva su propio fondo. */
+    /** La banda como hoja aparte, más clara que la barra (asoma por detrás del fichero). */
+    private void paper(TickerView tk) {
+        tk.setBand(night ? 0xF2333F4C : 0xF7FFFFFF);
+        tk.setInk(night ? 0xFFF5F8FA : 0xFF1D2733);
+    }
+
+    /** El reproductor como hoja blanca con sus controles en negro. */
+    private BarPlayer newPlayer(ChronoBar b) {
+        BarPlayer pl = new BarPlayer(this, hub, 0xFF151515);
+        android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
+        g.setColor(0xFFFFFFFF);
+        g.setStroke(dp(1), 0x26000000);
+        g.setCornerRadius(dp(12));
+        pl.setBackground(g);
+        pl.setOnClose(() -> { b.showPlayer(false); main.postDelayed(() -> layoutChrono(false), 400); });
+        return pl;
+    }
+
+    /** Banda de notificaciones del extendido: hoja que asoma por detrás de la barra (con música, un renglón más afuera). */
     private TickerView newNavTicker(ChronoBar b) {
         TickerView tk = new TickerView(this, false);
         tk.setTap(pkg -> showNotifList());
-        tk.setInk(ChronoBar.ink(night));
-        b.onTickerMove = () -> {
-            boolean above = b.playerProgress() > 0.5f;
-            tk.setBand(above ? (night ? 0xE61E2934 : 0xEFFFFFFF) : 0);
-            tk.setInk(above ? (night ? 0xFFF5F8FA : 0xFF1D2733) : ChronoBar.ink(night));
-        };
+        paper(tk);
         return tk;
     }
 

@@ -59,7 +59,10 @@ public class TickerView extends View {
 
     public void setTap(Tap t) { tap = t; }
     public void setInk(int c) { ink = c; invalidate(); }
-    private int bandColor;
+    private int bandColor, hidden;
+    private boolean hiddenBottom = true;
+    /** Parte de la hoja escondida detrás de la barra (sin contenido): abajo (bottom) o arriba. */
+    public void setHidden(int px, boolean bottom) { if (hidden != px || hiddenBottom != bottom) { hidden = px; hiddenBottom = bottom; invalidate(); } }
     /** Fondo propio de la banda (0 = sin fondo, va sobre la barra). */
     public void setBand(int color) { if (bandColor != color) { bandColor = color; invalidate(); } }
 
@@ -120,16 +123,18 @@ public class TickerView extends View {
         if (floating) c.drawRoundRect(new RectF(0, 0, W, H), H / 2, H / 2, band);
         else if (bandColor != 0) {
             band.setColor(bandColor);
-            c.drawRoundRect(new RectF(0, 0, W, H), H / 2, H / 2, band);
-            band.setColor(0x33000000);
+            float r = 12 * dp;   // hoja: esquinas apenas redondeadas
+            c.drawRoundRect(new RectF(0, 0, W, H), r, r, band);
+            band.setColor(0x26000000);
             band.setStyle(Paint.Style.STROKE);
             band.setStrokeWidth(dp);
-            c.drawRoundRect(new RectF(dp / 2, dp / 2, W - dp / 2, H - dp / 2), H / 2, H / 2, band);
+            c.drawRoundRect(new RectF(dp / 2, dp / 2, W - dp / 2, H - dp / 2), r, r, band);
             band.setStyle(Paint.Style.FILL);
             band.setColor(0xCC0E1A22);
         }
         c.save();
-        c.clipRect(floating ? H / 2 : 0, 0, floating ? W - H / 2 : W, H);
+        if (hidden > 0) { if (!hiddenBottom) c.translate(0, hidden); H -= hidden; }
+        c.clipRect(floating ? H / 2 : bandColor != 0 ? 10 * dp : 0, 0, floating ? W - H / 2 : bandColor != 0 ? W - 10 * dp : W, H);
         long now = android.os.SystemClock.uptimeMillis();
         if (last != 0) offset += (now - last) * 0.055f * dp;   // ~55 dp por segundo
         last = now;
