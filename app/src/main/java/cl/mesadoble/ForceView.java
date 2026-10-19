@@ -18,10 +18,12 @@ final class ForceView {
 
     private ForceView() { }
 
-    static final String[] NAMES = {"No forzar", "Horizontal", "Horizontal invertido", "Vertical", "Vertical invertido"};
+    static final String[] NAMES = {"No forzar", "Horizontal", "Horizontal invertido", "Vertical", "Vertical invertido", "Forzar automático"};
+    // "Forzar automático": gira según el acelerómetro del principal hacia los 4 lados, aunque la app sea solo
+    // vertical y aunque la rotación automática del teléfono esté bloqueada
     private static final int[] ORIENT = {ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED, ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE,
             ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE, ActivityInfo.SCREEN_ORIENTATION_PORTRAIT,
-            ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT};
+            ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT, ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR};
 
     private static View view;
     private static WindowManager wm;

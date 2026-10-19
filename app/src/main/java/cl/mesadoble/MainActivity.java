@@ -1983,9 +1983,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private void forceViewMenu() {
         int cur = ForceView.mode(this);
         Ui.Sheet sh = new Ui.Sheet(this).title("Forzar vista");
-        int[] icons = {Ui.AUTO, Ui.LAYOUT_STACK, Ui.LAYOUT_STACK, Ui.LAYOUT_SIDE_H, Ui.LAYOUT_SIDE_H};
+        int[] icons = {Ui.CROSS, Ui.LAYOUT_STACK, Ui.LAYOUT_STACK, Ui.LAYOUT_SIDE_H, Ui.LAYOUT_SIDE_H, Ui.AUTO};
         String[] subs = {"Cada app decide (como siempre)", "Acostado, como se usa ChronOS", "Acostado, girado al otro lado",
-                "De pie", "De pie, cabeza abajo"};
+                "De pie", "De pie, cabeza abajo", "Gira según cómo tengas el principal (los 4 lados), aunque la app sea solo vertical"};
         for (int i = 0; i < ForceView.NAMES.length; i++) {
             final int v = i;
             sh.option(icons[i], -1, ForceView.NAMES[i], subs[i], cur == i, () -> {
