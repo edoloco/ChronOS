@@ -142,6 +142,7 @@ public class Hub implements Link.Listener {
         boolean changed = s != side;
         side = s;
         prefs.edit().putInt("side", s).apply();
+        ForceView.apply(app);   // la vista forzada es solo del principal
         if (changed || !started) { started = true; link.start(s == 0); }
     }
 
@@ -260,6 +261,10 @@ public class Hub implements Link.Listener {
             if (isPrincipal()) main.postDelayed(this::resendTicker, 1500);
             sendImeState();
             sendBattery();
+            if (!isPrincipal() && prefs.getBoolean("forceViewPending", false)) {   // vista forzada elegida sin conexión
+                prefs.edit().putBoolean("forceViewPending", false).apply();
+                send("forceView", "v", ForceView.mode(app));
+            }
             FileServer fs = FileServer.get(app);
             fs.start();
             send("fsTok", "k", fs.token, "port", FileServer.PORT);

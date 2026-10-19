@@ -1580,7 +1580,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         }
         int fv = ForceView.mode(this);
         sh.option(Ui.LAYOUT_STACK, -1, "Forzar vista: " + ForceView.NAMES[fv].toLowerCase(),
-                "Gira los dos teléfonos así, incluso en apps hechas solo para vertical", fv != 0, this::forceViewMenu);
+                "Gira las apps del principal, incluso las hechas solo para vertical", fv != 0, this::forceViewMenu);
         boolean laOn = LockArt.enabled(this);
         sh.option(Ui.PALETTE, -1, "Pantalla de bloqueo naranja: " + (laOn ? "sí" : "no"),
                 "Fondo naranja en los dos, con el mensaje para desbloquear en el sentido de las pantallas", laOn, () -> {
@@ -1989,9 +1989,11 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         for (int i = 0; i < ForceView.NAMES.length; i++) {
             final int v = i;
             sh.option(icons[i], -1, ForceView.NAMES[i], subs[i], cur == i, () -> {
-                boolean ok = ForceView.possible(this);
+                boolean here = side == 1;   // se aplica solo en el principal (allá se abren las apps)
+                boolean ok = !here || ForceView.possible(this);
                 ForceView.set(this, v);
                 if (hub.connected() && !solo) hub.send("forceView", "v", v);
+                else if (!here && !solo) prefs.edit().putBoolean("forceViewPending", true).apply();   // se manda al conectarse
                 if (v != 0 && !ok) {
                     new Ui.Sheet(this).title("Falta un permiso en este teléfono")
                             .message("Para forzar la vista, ChronOS necesita su accesibilidad (versión completa) o el permiso \"Mostrar sobre otras apps\".")
@@ -2000,7 +2002,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                                 catch (Exception e) { Toast.makeText(this, "No se pudo abrir el ajuste", Toast.LENGTH_SHORT).show(); }
                             })
                             .button("Después", false, null).show();
-                } else Toast.makeText(this, v == 0 ? "Cada app vuelve a decidir su vista" : "Vista forzada: " + ForceView.NAMES[v].toLowerCase(), Toast.LENGTH_SHORT).show();
+                } else Toast.makeText(this, v == 0 ? "Las apps del principal vuelven a decidir su vista"
+                        : "Apps del principal en " + ForceView.NAMES[v].toLowerCase() + (here || hub.connected() ? "" : " (se aplica al conectarse)"), Toast.LENGTH_SHORT).show();
             });
         }
         sh.button("Cerrar", false, null).show();

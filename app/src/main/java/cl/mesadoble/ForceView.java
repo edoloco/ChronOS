@@ -8,8 +8,9 @@ import android.view.View;
 import android.view.WindowManager;
 
 /**
- * Forzar vista: una ventanita invisible (0 × 0) encima de todo que le pide a Android una orientación. Como está
- * sobre cualquier app, el teléfono entero gira así, incluso las apps hechas solo para vertical.
+ * Forzar vista (solo en el PRINCIPAL, que es donde se abren las apps): una ventanita invisible (0 × 0) encima de
+ * todo que le pide a Android una orientación. Como está sobre cualquier app, todas giran así, incluso las hechas
+ * solo para vertical. El extendido guarda el mismo ajuste (para mostrarlo en Ajustes) pero no lo aplica.
  * Necesita la accesibilidad de ChronOS (versión completa) o el permiso "Mostrar sobre otras apps".
  *   forceView {v}: el otro teléfono aplica la misma (los dos van unidos, giran juntos)
  */
@@ -33,13 +34,15 @@ final class ForceView {
         apply(c);
     }
 
+    static boolean principal(Context c) { return c.getSharedPreferences("mesa", Context.MODE_PRIVATE).getInt("side", -1) == 1; }
+
     /** ¿Se puede forzar en este teléfono? */
     static boolean possible(Context c) { return MesaAccess.instance != null || Settings.canDrawOverlays(c); }
 
     /** Pone, cambia o quita la ventana según el ajuste. true si quedó aplicado. */
     static synchronized boolean apply(Context c) {
         int m = mode(c);
-        if (m <= 0 || m >= ORIENT.length) { remove(); return true; }
+        if (m <= 0 || m >= ORIENT.length || !principal(c)) { remove(); return true; }
         // con la accesibilidad, su propia capa (no pide permiso); si no, "Mostrar sobre otras apps"
         Context ctx = MesaAccess.instance != null ? MesaAccess.instance : c.getApplicationContext();
         int type = MesaAccess.instance != null ? WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
