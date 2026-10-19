@@ -54,6 +54,7 @@ public class MesaAccess extends AccessibilityService {
         instance = this;
         Hub h = Hub.get(this);
         h.ensureStarted();
+        ForceView.apply(this);   // con la accesibilidad, la vista forzada usa su propia capa
         if (h.isPrincipal() && h.connected()) switchToMesa();
     }
 

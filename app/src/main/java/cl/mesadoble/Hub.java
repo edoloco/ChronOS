@@ -62,6 +62,7 @@ public class Hub implements Link.Listener {
         link = new Link(c, this);
         ScreenSync.listen(c, this);
         LidWatch.update(c, this);
+        ForceView.apply(c);
         CallHub.listen(c, this);   // llamadas del principal → controles en el extendido
         // batería: la de este teléfono se comparte con el otro para el widget de baterías
         c.registerReceiver(new android.content.BroadcastReceiver() {
@@ -385,6 +386,7 @@ public class Hub implements Link.Listener {
             main.post(() -> { if ("close".equals(ls)) ScreenSync.lockNow(app, this); else ScreenSync.wakeNow(app); });
             return;
         }
+        if ("forceView".equals(t)) { int v = m.optInt("v"); main.post(() -> ForceView.set(app, v)); return; }
         if ("palsSync".equals(t)) { Pals.applySync(app, m.optJSONObject("s")); return; }
         if ("lockFlip".equals(t)) { prefs.edit().putBoolean("lockFlip", m.optBoolean("on")).apply(); main.post(() -> LockArt.apply(app, this)); return; }
         if ("lockArt".equals(t)) {

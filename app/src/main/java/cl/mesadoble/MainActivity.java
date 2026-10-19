@@ -258,6 +258,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     @Override protected void onResume() {
         super.onResume();
+        ForceView.apply(this);   // por si se acaba de dar el permiso
         LockArt.noteRotation(this, hub, getWindowManager().getDefaultDisplay().getRotation());
         immersive();
         hub.foreground = true;
@@ -1577,6 +1578,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                         Toast.makeText(this, !cl ? "Pantalla de bloqueo limpia" : "Se vuelven a ver las notificaciones al bloquear", Toast.LENGTH_SHORT).show();
                     });
         }
+        int fv = ForceView.mode(this);
+        sh.option(Ui.LAYOUT_STACK, -1, "Forzar vista: " + ForceView.NAMES[fv].toLowerCase(),
+                "Gira los dos teléfonos así, incluso en apps hechas solo para vertical", fv != 0, this::forceViewMenu);
         boolean laOn = LockArt.enabled(this);
         sh.option(Ui.PALETTE, -1, "Pantalla de bloqueo naranja: " + (laOn ? "sí" : "no"),
                 "Fondo naranja en los dos, con el mensaje para desbloquear en el sentido de las pantallas", laOn, () -> {
@@ -1973,6 +1977,33 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .badgeIf(Updater.updateAvailable(this), "1")
                 .button("Cerrar", false, null)
                 .show();
+    }
+
+    /** Forzar vista: horizontal, horizontal invertido, vertical o vertical invertido, en los dos teléfonos. */
+    private void forceViewMenu() {
+        int cur = ForceView.mode(this);
+        Ui.Sheet sh = new Ui.Sheet(this).title("Forzar vista");
+        int[] icons = {Ui.AUTO, Ui.LAYOUT_STACK, Ui.LAYOUT_STACK, Ui.LAYOUT_SIDE_H, Ui.LAYOUT_SIDE_H};
+        String[] subs = {"Cada app decide (como siempre)", "Acostado, como se usa ChronOS", "Acostado, girado al otro lado",
+                "De pie", "De pie, cabeza abajo"};
+        for (int i = 0; i < ForceView.NAMES.length; i++) {
+            final int v = i;
+            sh.option(icons[i], -1, ForceView.NAMES[i], subs[i], cur == i, () -> {
+                boolean ok = ForceView.possible(this);
+                ForceView.set(this, v);
+                if (hub.connected() && !solo) hub.send("forceView", "v", v);
+                if (v != 0 && !ok) {
+                    new Ui.Sheet(this).title("Falta un permiso en este teléfono")
+                            .message("Para forzar la vista, ChronOS necesita su accesibilidad (versión completa) o el permiso \"Mostrar sobre otras apps\".")
+                            .option(Ui.OPEN, "Dar \"Mostrar sobre otras apps\"", null, () -> {
+                                try { startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()))); }
+                                catch (Exception e) { Toast.makeText(this, "No se pudo abrir el ajuste", Toast.LENGTH_SHORT).show(); }
+                            })
+                            .button("Después", false, null).show();
+                } else Toast.makeText(this, v == 0 ? "Cada app vuelve a decidir su vista" : "Vista forzada: " + ForceView.NAMES[v].toLowerCase(), Toast.LENGTH_SHORT).show();
+            });
+        }
+        sh.button("Cerrar", false, null).show();
     }
 
     /** PALS: tus compañeritos, el catálogo de redes sociales y PALS propios de cualquier página. */
