@@ -6,6 +6,7 @@ name: Compilar ChronOS
 on:
   push:
     branches: [main]
+    paths-ignore: ['**.md']   # cambios solo en documentación no publican versión
   workflow_dispatch:
 
 permissions:
