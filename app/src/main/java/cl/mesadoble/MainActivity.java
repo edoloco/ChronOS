@@ -1370,6 +1370,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         sidePill.setVisibility(View.GONE);
     }
 
+    private final Runnable closedToast = () -> Toast.makeText(this, "Apps cerradas: memoria liberada en el principal", Toast.LENGTH_SHORT).show();
+
     private TaskbarView newTaskbar() {
         TaskbarView tb = new TaskbarView(this, ChronoBar.ink(night));
         tb.setHost(new TaskbarView.Host() {
@@ -1378,7 +1380,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 if (hub.isPrincipal()) hub.closeApp(pkg);
                 else if (hub.connected()) hub.send("closeApp", "pkg", pkg);
                 else { Toast.makeText(MainActivity.this, "El principal no está conectado", Toast.LENGTH_SHORT).show(); return; }
-                Toast.makeText(MainActivity.this, "Cerrando " + label, Toast.LENGTH_SHORT).show();
+                main.removeCallbacks(closedToast);
+                main.postDelayed(closedToast, 300);   // un solo aviso aunque se cierren varias
             }
             @Override public void onNeedAccess() { onRecent(null, null); }
         });

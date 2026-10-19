@@ -151,6 +151,8 @@ final class RecentApps {
                 }
                 JSONObject o = new JSONObject();
                 o.put("p", p); o.put("l", labels.get(p)); o.put("i", icons.get(p));
+                Long u = last.get(p);
+                if (u != null) o.put("u", (long) u);   // última vez que se usó (la barra de tareas muestra solo las de hace poco)
                 arr.put(o);
             } catch (Exception ignored) { }
         }

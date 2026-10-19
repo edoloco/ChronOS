@@ -23,7 +23,10 @@ import java.util.Set;
  * Barra de tareas del extendido, como la de Windows: las apps abiertas en el principal, en fila.
  *  - La que está al frente en el principal tiene el "foco" (marco y fondo).
  *  - Tocar una la abre en el principal (y pasa a tener el foco).
- *  - Mantener presionada muestra un círculo rojo con una X: al tocarlo se cierra esa app en el principal.
+ *  - Mantener presionada una app la marca para cerrar (círculo rojo con X). Con eso activo, tocar las demás
+ *    también las marca (o desmarca); "Cerrar" las cierra todas y libera memoria en el principal, como en Windows.
+ *  - Muestra las apps usadas en las últimas horas que no se han cerrado (Android no deja ver directamente qué
+ *    apps siguen en memoria; esto es lo más cercano).
  * Se alimenta con el mismo mensaje de apps recientes del principal (recList).
  */
 public class TaskbarView extends View {
@@ -34,12 +37,14 @@ public class TaskbarView extends View {
         void onNeedAccess();
     }
 
-    private static final class App { String pkg, label; Bitmap icon; }
+    private static final class App { String pkg, label; Bitmap icon; long used; }
+    private static final long RECENT = 6L * 3600 * 1000;   // "en memoria": usadas en las últimas 6 horas
 
     private final float dp;
     private final List<App> apps = new ArrayList<>();
     private final Set<String> notified = new HashSet<>();
-    private String sig = "", active = "", closing;
+    private String sig = "", active = "";
+    private final java.util.LinkedHashSet<String> marked = new java.util.LinkedHashSet<>();   // marcadas para cerrar
     private boolean loaded, access = true;
     private Host host;
     private int ink;
@@ -85,9 +90,12 @@ public class TaskbarView extends View {
                     catch (Exception ignored) { }
                 }
                 x.label = o.optString("l");
+                x.used = o.optLong("u");
+                if (x.used > 0 && System.currentTimeMillis() - x.used > RECENT && !x.pkg.equals(active)) continue;
                 apps.add(x);
             }
-            if (closing != null && indexOf(closing) < 0) closing = null;
+            java.util.Iterator<String> it = marked.iterator();
+            while (it.hasNext()) if (indexOf(it.next()) < 0) it.remove();
         }
         invalidate();
     }
@@ -105,8 +113,12 @@ public class TaskbarView extends View {
         return new RectF(x, (getHeight() - s) / 2, x + s, (getHeight() + s) / 2);
     }
 
+    /** Botones del modo cerrar, a la derecha: [Cerrar N] [Cancelar]. */
+    private RectF closeBtn, cancelBtn;
+
     @Override protected void onDraw(Canvas c) {
         float H = getHeight();
+        closeBtn = cancelBtn = null;
         if (!loaded || !access || apps.isEmpty()) {
             txt.setColor((ink & 0x00FFFFFF) | 0xAA000000);
             txt.setTextSize(12 * dp);
@@ -114,7 +126,24 @@ public class TaskbarView extends View {
             c.drawText(t, 10 * dp, H / 2 + 4 * dp, txt);
             return;
         }
-        int max = Math.max(1, (int) (getWidth() / slot()));
+        float W = getWidth();
+        if (!marked.isEmpty()) {   // modo cerrar: los dos botones al final de la fila
+            txt.setTextSize(12.5f * dp);
+            String a = "✕  Cerrar " + marked.size(), b = "Cancelar";
+            float bh = H - 8 * dp, aw = txt.measureText(a) + 24 * dp, bw = txt.measureText(b) + 24 * dp;
+            cancelBtn = new RectF(W - bw - 2 * dp, (H - bh) / 2, W - 2 * dp, (H + bh) / 2);
+            closeBtn = new RectF(cancelBtn.left - aw - 6 * dp, (H - bh) / 2, cancelBtn.left - 6 * dp, (H + bh) / 2);
+            p.setColor(0xFFE53935);
+            c.drawRoundRect(closeBtn, bh / 2, bh / 2, p);
+            p.setColor(0x26FFFFFF);
+            c.drawRoundRect(cancelBtn, bh / 2, bh / 2, p);
+            txt.setColor(0xFFFFFFFF);
+            c.drawText(a, closeBtn.left + 12 * dp, H / 2 + 4.5f * dp, txt);
+            txt.setColor(ink);
+            c.drawText(b, cancelBtn.left + 12 * dp, H / 2 + 4.5f * dp, txt);
+            W = closeBtn.left - 6 * dp;
+        }
+        int max = Math.max(1, (int) (W / slot()));
         for (int i = 0; i < apps.size() && i < max; i++) {
             App a = apps.get(i);
             RectF r = box(i);
@@ -142,7 +171,7 @@ public class TaskbarView extends View {
                 p.setColor(0xFF2FA866);
                 c.drawCircle(r.left + 5 * dp, r.top + 5 * dp, 3.3f * dp, p);
             }
-            if (a.pkg.equals(closing)) {   // círculo rojo con X: cerrar
+            if (marked.contains(a.pkg)) {   // círculo rojo con X: marcada para cerrar
                 float cx = r.right - 2 * dp, cy = r.top + 2 * dp, rad = 9 * dp;
                 p.setColor(0xFFFFFFFF);
                 c.drawCircle(cx, cy, rad + 1.5f * dp, p);
@@ -168,9 +197,23 @@ public class TaskbarView extends View {
         if (downI < 0 || downI >= apps.size()) return;
         longDone = true;
         performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
-        closing = apps.get(downI).pkg;
+        marked.add(apps.get(downI).pkg);
         invalidate();
     };
+
+    /** Cierra todas las marcadas (se quitan al tiro; el principal confirma con la lista nueva). */
+    private void closeMarked() {
+        for (String pk : new ArrayList<>(marked)) {
+            int k = indexOf(pk);
+            if (k < 0) continue;
+            App a = apps.get(k);
+            if (host != null) host.onClose(a.pkg, a.label);
+            apps.remove(k);
+        }
+        marked.clear();
+        sig = "?";
+        invalidate();
+    }
 
     private int hit(float x) {
         int i = (int) ((x - 2 * dp) / slot());
@@ -192,22 +235,20 @@ public class TaskbarView extends View {
                 removeCallbacks(longPress);
                 if (longDone || moved) return true;
                 if (!loaded || !access || apps.isEmpty()) { if (host != null && loaded && !access) host.onNeedAccess(); return true; }
-                // ¿tocó la X roja?
-                if (closing != null) {
-                    int ci = indexOf(closing);
-                    if (ci >= 0) {
-                        RectF r = box(ci);
-                        if (Math.hypot(e.getX() - (r.right - 2 * dp), e.getY() - (r.top + 2 * dp)) < 18 * dp) {
-                            App a = apps.get(ci);
-                            closing = null;
-                            if (host != null) host.onClose(a.pkg, a.label);
-                            apps.remove(ci);   // se quita al tiro (el principal confirma con la lista nueva)
-                            sig = "?";
-                            invalidate();
-                            return true;
-                        }
+                if (!marked.isEmpty()) {
+                    if (cancelBtn != null && cancelBtn.contains(e.getX(), e.getY())) { marked.clear(); invalidate(); return true; }
+                    if (closeBtn != null && closeBtn.contains(e.getX(), e.getY())) { closeMarked(); return true; }
+                    int ti = hit(e.getX());
+                    if (ti >= 0) {   // en modo cerrar, tocar otra app la marca (o la desmarca)
+                        String pk = apps.get(ti).pkg;
+                        RectF r = box(ti);
+                        // tocar justo la X de una marcada: se cierran todas las marcadas
+                        if (marked.contains(pk) && Math.hypot(e.getX() - (r.right - 2 * dp), e.getY() - (r.top + 2 * dp)) < 16 * dp) { closeMarked(); return true; }
+                        if (!marked.remove(pk)) marked.add(pk);
+                        invalidate();
+                        return true;
                     }
-                    closing = null;   // tocar en otro lado cancela
+                    marked.clear();   // tocar en otro lado cancela
                     invalidate();
                     return true;
                 }
