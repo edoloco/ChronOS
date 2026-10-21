@@ -242,7 +242,7 @@ public class TaskbarView extends View {
     @Override public boolean onTouchEvent(MotionEvent e) {
         switch (e.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
-                getParent().requestDisallowInterceptTouchEvent(true);
+                // sin bloquear a la barra: arrastrar hacia arriba o abajo sobre las apps abre/cierra el gestor de archivos
                 downX = e.getX(); downY = e.getY(); longDone = false; moved = false;
                 downI = hit(e.getX());
                 if (downI >= 0) postDelayed(longPress, 450);
