@@ -1009,6 +1009,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (!both) { showNotifSheet(); return; }
         if (tellOther) hub.send("nlOpen");
         nlSplit = -1;
+        if (nlAnim != null) nlAnim.cancel();
         boolean top = side == 1;   // el principal va primero (arriba)
         boolean n = CardTheme.sheetNight(night);
         android.app.Dialog d = new android.app.Dialog(this, android.R.style.Theme_Translucent_NoTitleBar_Fullscreen);
@@ -1041,11 +1042,19 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         }
         notifBox = new LinearLayout(this);
         notifBox.setOrientation(LinearLayout.VERTICAL);
-        if (top) card.addView(notifBox, new LinearLayout.LayoutParams(-1, 0, 1));   // lo que quepa; el resto, abajo
-        else {
-            android.widget.ScrollView sc = new android.widget.ScrollView(this);
-            sc.addView(notifBox);
-            card.addView(sc, new LinearLayout.LayoutParams(-1, 0, 1));
+        // UNA sola lista que pasa de una pantalla a la otra: cada teléfono muestra su tramo y, al arrastrar en
+        // cualquiera de los dos, se mueve entera (como si las dos pantallas fueran una)
+        nlS = 0; nlVp = -1; nlVe = -1;
+        NlPort port = new NlPort(this);
+        port.addView(notifBox, new FrameLayout.LayoutParams(-1, -2));
+        port.addOnLayoutChangeListener((v, l, t2, r2, b2, ol, ot, or, ob) -> {
+            float h = (b2 - t2) / getResources().getDisplayMetrics().density;
+            if (side == 1) nlVp = h; else nlVe = h;
+            if (hub.connected()) hub.send("nlVp", "h", h, "p", side == 1);
+            applyNl();
+        });
+        card.addView(port, new LinearLayout.LayoutParams(-1, 0, 1));
+        if (!top) {
             LinearLayout btns = new LinearLayout(this);
             btns.setGravity(Gravity.END);
             btns.setPadding(0, dp(8), 0, 0);
@@ -1132,27 +1141,110 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             return;
         }
         boolean split = nlSplit != -2 && notifDlg != null && !(notifDlg instanceof android.app.AlertDialog) && hub.connected() && !solo;
-        int from = 0, to = tickerItems.length();
-        if (split && side != 1) { if (nlSplit < 0) return; from = nlSplit; }   // el extendido sigue donde terminó el principal
-        for (int i = from; i < to; i++) {
+        for (int i = 0; i < tickerItems.length(); i++) {
             org.json.JSONObject o = tickerItems.optJSONObject(i);
             if (o == null) continue;
             View row = notifRow(o, n);
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
-            lp.bottomMargin = dp(6);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, split ? dp(NL_ROW) : -2);
+            lp.bottomMargin = dp(split ? NL_STEP - NL_ROW : 6);
             notifBox.addView(row, lp);
         }
-        if (split && side == 1) {
-            // el principal se queda con las que caben enteras y le dice al extendido desde cuál seguir
-            final LinearLayout box = notifBox;
-            box.post(() -> {
-                if (box != notifBox) return;
-                int h = box.getHeight(), k = 0;
-                for (int i = 0; i < box.getChildCount(); i++) { View v = box.getChildAt(i); if (v.getBottom() <= h) k = i + 1; }
-                for (int i = box.getChildCount() - 1; i >= k; i--) box.removeViewAt(i);
-                nlSplit = k;
-                hub.send("nlN", "n", k);
-            });
+        if (split) applyNl();
+    }
+
+    // ---- lista de notificaciones repartida en las dos pantallas: un solo desplazamiento (en dp) para las dos
+    private static final int NL_ROW = 76, NL_STEP = 84;   // filas de alto fijo: miden lo mismo en los dos teléfonos
+    private float nlS, nlVp = -1, nlVe = -1;   // desplazamiento y alto visible del principal y del extendido (dp)
+    private android.animation.ValueAnimator nlAnim;
+
+    private float nlMax() {
+        int count = tickerItems == null ? 0 : tickerItems.length();
+        float vis = (nlVp < 0 ? 0 : nlVp) + (nlVe < 0 ? 0 : nlVe);
+        return Math.max(0, count * NL_STEP - vis);
+    }
+
+    /** Coloca la lista: el principal ve desde nlS; el extendido sigue justo donde termina el principal. */
+    private void applyNl() {
+        if (notifBox == null) return;
+        float d = getResources().getDisplayMetrics().density;
+        if (side == 1) { notifBox.setTranslationY(-nlS * d); notifBox.setAlpha(1f); }
+        else { notifBox.setAlpha(nlVp < 0 ? 0f : 1f); notifBox.setTranslationY(-(nlS + Math.max(0, nlVp)) * d); }
+    }
+
+    /** Mover la lista (desde este teléfono): se aplica aquí y se le avisa al otro. */
+    private void nlScrollTo(float s) {
+        s = Math.max(0, Math.min(nlMax(), s));
+        if (Math.abs(s - nlS) < 0.3f) return;
+        nlS = s;
+        applyNl();
+        if (hub.connected()) hub.send("nlS", "s", s);
+    }
+
+    /** Contenedor que recorta su tramo de la lista y la arrastra en vertical (con impulso al soltar). */
+    private final class NlPort extends FrameLayout {
+        private float y0, lastY, x0;
+        private boolean drag;
+        private android.view.VelocityTracker vt;
+        NlPort(android.content.Context c) { super(c); setClipChildren(true); }
+
+        @Override protected void onMeasure(int ws, int hs) {
+            super.onMeasure(ws, hs);
+            for (int i = 0; i < getChildCount(); i++)   // la lista mide lo que necesite (no se achica al tramo visible)
+                getChildAt(i).measure(MeasureSpec.makeMeasureSpec(getMeasuredWidth(), MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED));
+        }
+
+        private void track(android.view.MotionEvent e) {
+            if (vt == null) vt = android.view.VelocityTracker.obtain();
+            vt.addMovement(e);
+        }
+
+        @Override public boolean onInterceptTouchEvent(android.view.MotionEvent e) {
+            switch (e.getActionMasked()) {
+                case android.view.MotionEvent.ACTION_DOWN:
+                    y0 = lastY = e.getRawY(); x0 = e.getRawX(); drag = false;
+                    if (nlAnim != null) nlAnim.cancel();
+                    if (vt != null) { vt.recycle(); vt = null; }
+                    track(e);
+                    return false;
+                case android.view.MotionEvent.ACTION_MOVE:
+                    track(e);
+                    float dy = e.getRawY() - y0, dx = e.getRawX() - x0;
+                    if (Math.abs(dy) > android.view.ViewConfiguration.get(getContext()).getScaledTouchSlop() && Math.abs(dy) > Math.abs(dx)) {
+                        drag = true; lastY = e.getRawY(); return true;
+                    }
+            }
+            return false;
+        }
+
+        @Override public boolean onTouchEvent(android.view.MotionEvent e) {
+            float d = getResources().getDisplayMetrics().density;
+            track(e);
+            switch (e.getActionMasked()) {
+                case android.view.MotionEvent.ACTION_DOWN: y0 = lastY = e.getRawY(); drag = true; return true;
+                case android.view.MotionEvent.ACTION_MOVE:
+                    nlScrollTo(nlS - (e.getRawY() - lastY) / d);
+                    lastY = e.getRawY();
+                    return true;
+                case android.view.MotionEvent.ACTION_UP: {
+                    float v = 0;
+                    if (vt != null) { vt.computeCurrentVelocity(1000); v = vt.getYVelocity() / d; vt.recycle(); vt = null; }
+                    drag = false;
+                    if (Math.abs(v) > 150) {   // impulso: sigue un poco y frena
+                        float from = nlS, to = nlS - v * 0.35f;
+                        nlAnim = android.animation.ValueAnimator.ofFloat(from, to);
+                        nlAnim.setDuration(600);
+                        nlAnim.setInterpolator(new android.view.animation.DecelerateInterpolator(2f));
+                        nlAnim.addUpdateListener(a -> nlScrollTo((float) a.getAnimatedValue()));
+                        nlAnim.start();
+                    }
+                    return true;
+                }
+                case android.view.MotionEvent.ACTION_CANCEL:
+                    drag = false;
+                    if (vt != null) { vt.recycle(); vt = null; }
+                    return true;
+            }
+            return true;
         }
     }
 
@@ -1190,7 +1282,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         b.setText(o.optString("text"));
         b.setTextSize(13);
         b.setTextColor(Ui.muted(n));
-        b.setMaxLines(2);
+        b.setMaxLines(nlSplit == -2 ? 2 : 1);   // en la lista de dos pantallas, filas de alto fijo
         b.setEllipsize(android.text.TextUtils.TruncateAt.END);
         tx.addView(a);
         if (!o.optString("title").isEmpty()) tx.addView(t);
@@ -1330,7 +1422,10 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         cbar = new ChronoBar(this, kind, night);
         cbar.setListener(new ChronoBar.Listener() {
             @Override public void onBarSwipe(ChronoBar b, boolean down) {
-                boolean toggle = !stacked() || (b.edgeTop() == down);   // se lleva la barra al otro extremo
+                // abrir: arrastrar la carpeta hacia el centro (abajo en el principal, arriba en el extendido);
+                // cerrar: el gesto contrario
+                boolean openDown = side == 1;
+                boolean toggle = !stacked() || (fileMode ? down != openDown : down == openDown);
                 if (toggle) setFileMode(!fileMode, false);
             }
             @Override public void onClockTap() { hub.openAlarms(); }
@@ -3942,8 +4037,11 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             case "nlOpen":
                 main.post(() -> showNotifList(false));
                 break;
-            case "nlN":
-                main.post(() -> { nlSplit = m.optInt("n"); fillNotifList(); });
+            case "nlVp":   // alto visible del tramo del otro teléfono
+                main.post(() -> { float h = (float) m.optDouble("h"); if (m.optBoolean("p")) nlVp = h; else nlVe = h; applyNl(); });
+                break;
+            case "nlS":    // el otro teléfono movió la lista
+                main.post(() -> { if (nlAnim != null && nlAnim.isRunning()) return; nlS = (float) m.optDouble("s"); applyNl(); });
                 break;
             case "nlClose":
                 main.post(() -> { if (notifDlg != null) { nlClosing = true; notifDlg.dismiss(); } });
