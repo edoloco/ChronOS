@@ -121,7 +121,9 @@ public class ChronoBar extends FrameLayout {
     /** Banda de notificaciones tipo noticiero: corre en la franja, a la derecha del reloj. */
     public void setTicker(View v) { ticker = v; addView(v, new LayoutParams(-2, -2)); }
     /** Barra de tareas del extendido: las apps abiertas del principal. */
-    private View taskbar;
+    private View taskbar, quick;
+    /** Accesos rápidos (linterna, bluetooth…): cuadros en la franja de la barra del reloj. */
+    public void setQuick(View v) { quick = v; addView(v, new LayoutParams(-2, -2)); }
     public void setTaskbar(View v) { taskbar = v; addView(v, new LayoutParams(-2, -2)); }
 
     /** Renglón [cerca, lejos] del borde (en dp) → rectángulo en la vista, según si la barra está arriba o abajo. */
@@ -204,6 +206,12 @@ public class ChronoBar extends FrameLayout {
         int W = MeasureSpec.getSize(ws), H = barHeight();
         for (int i = 0; i < getChildCount(); i++) {
             View v = getChildAt(i);
+            if (v == quick) {   // accesos rápidos: en la franja, a la derecha del corte del reloj
+                float qw = W - tabW() - diag() - 14 * dp;
+                v.measure(MeasureSpec.makeMeasureSpec(Math.max(1, Math.round(qw)), MeasureSpec.EXACTLY),
+                        MeasureSpec.makeMeasureSpec(Math.round(strip()), MeasureSpec.EXACTLY));
+                continue;
+            }
             if (kind == NAV && (v == player || v == ticker || v == taskbar)) {
                 // la hoja del reproductor llega hasta debajo de la pestaña; la banda termina donde empieza la pestaña
                 float rowW = v == taskbar ? W - tabW() - 14 * dp : v == player ? W - tabW() + 10 * dp : W - tabW() - 14 * dp;
@@ -262,6 +270,10 @@ public class ChronoBar extends FrameLayout {
             float x = tabW() - 12 * dp, S = strip() / dp;
             placeRow(ticker, x, x + ticker.getMeasuredWidth(), S - OVL, S + TV);
             paperInsets();
+        }
+        if (quick != null) {
+            int x = Math.round(W - 6 * dp - quick.getMeasuredWidth()), top = Math.round(edgeTop ? 0 : H - strip());
+            quick.layout(x, top, x + quick.getMeasuredWidth(), top + quick.getMeasuredHeight());
         }
         if (notif != null) {
             int x = Math.round(tabW() + diag() * 0.4f), h = notif.getMeasuredHeight();

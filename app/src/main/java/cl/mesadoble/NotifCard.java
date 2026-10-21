@@ -29,7 +29,7 @@ public class NotifCard extends View {
 
     public interface Tap { void onNotifTap(String pkg, String key); }
 
-    private static final long HOLD = 3200;   // ms que queda a la vista
+    private static final long HOLD = 4000;   // ms que queda a la vista antes de desvanecerse
 
     private final float dp;
     private final ArrayDeque<JSONObject> queue = new ArrayDeque<>();
@@ -105,14 +105,14 @@ public class NotifCard extends View {
     @Override protected void onDraw(Canvas c) {
         if (cur == null) return;
         float W = getWidth(), H = getHeight(), r = 20 * dp;
-        bg.setColor(night ? 0xF21E2934 : 0xFAFFFFFF);
+        bg.setColor(0xFFFFFFFF);   // siempre blanca, para que no pase desapercibida
         c.drawRoundRect(new RectF(0, 0, W, H), r, r, bg);
-        edge.setColor(night ? 0x40FFFFFF : 0x33000000);
+        edge.setColor(0x33000000);
         c.drawRoundRect(new RectF(dp, dp, W - dp, H - dp), r, r, edge);
         float pad = 12 * dp, is = Math.min(H - 2 * pad, 38 * dp);
         if (icon != null) c.drawBitmap(icon, null, new RectF(pad + 4 * dp, (H - is) / 2, pad + 4 * dp + is, (H + is) / 2), bmp);
         float tx = pad + 4 * dp + is + 12 * dp, tw = W - tx - pad;
-        int ink = night ? 0xFFF5F8FA : 0xFF1D2733;
+        int ink = 0xFF1D2733;
         String t = cur.optString("title"), b = cur.optString("text");
         title.setColor(ink);
         body.setColor((ink & 0x00FFFFFF) | 0xBB000000);

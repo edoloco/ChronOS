@@ -25,6 +25,7 @@ import java.util.Set;
  *  - Tocar una la abre en el principal (y pasa a tener el foco).
  *  - Mantener presionada una app la marca para cerrar (círculo rojo con X). Con eso activo, tocar las demás
  *    también las marca (o desmarca); "Cerrar" las cierra todas y libera memoria en el principal, como en Windows.
+ *    "Cerrar todo" (azul) cierra todas las de la lista menos ChronOS.
  *  - Muestra las apps usadas en las últimas horas que no se han cerrado (Android no deja ver directamente qué
  *    apps siguen en memoria; esto es lo más cercano).
  * Se alimenta con el mismo mensaje de apps recientes del principal (recList).
@@ -113,12 +114,12 @@ public class TaskbarView extends View {
         return new RectF(x, (getHeight() - s) / 2, x + s, (getHeight() + s) / 2);
     }
 
-    /** Botones del modo cerrar, a la derecha: [Cerrar N] [Cancelar]. */
-    private RectF closeBtn, cancelBtn;
+    /** Botones del modo cerrar, a la derecha: [Cerrar N] (rojo) [Cerrar todo] (azul) [Cancelar]. */
+    private RectF closeBtn, allBtn, cancelBtn;
 
     @Override protected void onDraw(Canvas c) {
         float H = getHeight();
-        closeBtn = cancelBtn = null;
+        closeBtn = allBtn = cancelBtn = null;
         if (!loaded || !access || apps.isEmpty()) {
             txt.setColor((ink & 0x00FFFFFF) | 0xAA000000);
             txt.setTextSize(12 * dp);
@@ -129,12 +130,17 @@ public class TaskbarView extends View {
         float W = getWidth();
         if (!marked.isEmpty()) {   // modo cerrar: los dos botones al final de la fila
             txt.setTextSize(12.5f * dp);
-            String a = "✕  Cerrar " + marked.size(), b = "Cancelar";
-            float bh = H - 8 * dp, aw = txt.measureText(a) + 24 * dp, bw = txt.measureText(b) + 24 * dp;
+            String a = "✕  Cerrar " + marked.size(), b = "Cancelar", t = "Cerrar todo";
+            float bh = H - 8 * dp, aw = txt.measureText(a) + 24 * dp, bw = txt.measureText(b) + 24 * dp, tw = txt.measureText(t) + 24 * dp;
             cancelBtn = new RectF(W - bw - 2 * dp, (H - bh) / 2, W - 2 * dp, (H + bh) / 2);
-            closeBtn = new RectF(cancelBtn.left - aw - 6 * dp, (H - bh) / 2, cancelBtn.left - 6 * dp, (H + bh) / 2);
+            allBtn = new RectF(cancelBtn.left - tw - 6 * dp, (H - bh) / 2, cancelBtn.left - 6 * dp, (H + bh) / 2);
+            closeBtn = new RectF(allBtn.left - aw - 6 * dp, (H - bh) / 2, allBtn.left - 6 * dp, (H + bh) / 2);
             p.setColor(0xFFE53935);
             c.drawRoundRect(closeBtn, bh / 2, bh / 2, p);
+            p.setColor(0xFF1E88E5);   // azul: cierra todas menos ChronOS
+            c.drawRoundRect(allBtn, bh / 2, bh / 2, p);
+            txt.setColor(0xFFFFFFFF);
+            c.drawText(t, allBtn.left + 12 * dp, H / 2 + 4.5f * dp, txt);
             p.setColor(0x26FFFFFF);
             c.drawRoundRect(cancelBtn, bh / 2, bh / 2, p);
             txt.setColor(0xFFFFFFFF);
@@ -215,6 +221,19 @@ public class TaskbarView extends View {
         invalidate();
     }
 
+    /** "Cerrar todo": cierra todas las apps de la lista, menos ChronOS. */
+    private void closeAll() {
+        String me = getContext().getPackageName();
+        for (App a : new ArrayList<>(apps)) {
+            if (a.pkg.isEmpty() || a.pkg.equals(me)) continue;
+            if (host != null) host.onClose(a.pkg, a.label);
+            apps.remove(a);
+        }
+        marked.clear();
+        sig = "?";
+        invalidate();
+    }
+
     private int hit(float x) {
         int i = (int) ((x - 2 * dp) / slot());
         return i >= 0 && i < apps.size() && x - 2 * dp - i * slot() <= cell() ? i : -1;
@@ -238,6 +257,7 @@ public class TaskbarView extends View {
                 if (!marked.isEmpty()) {
                     if (cancelBtn != null && cancelBtn.contains(e.getX(), e.getY())) { marked.clear(); invalidate(); return true; }
                     if (closeBtn != null && closeBtn.contains(e.getX(), e.getY())) { closeMarked(); return true; }
+                    if (allBtn != null && allBtn.contains(e.getX(), e.getY())) { closeAll(); return true; }
                     int ti = hit(e.getX());
                     if (ti >= 0) {   // en modo cerrar, tocar otra app la marca (o la desmarca)
                         String pk = apps.get(ti).pkg;

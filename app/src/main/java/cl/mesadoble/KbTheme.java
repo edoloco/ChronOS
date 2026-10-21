@@ -27,6 +27,15 @@ final class KbTheme {
         chip = key;
     }
 
+    /**
+     * Fichero abierto (gestor de archivos de la action bar): el cuerpo es del mismo color que la barra y lo de
+     * adentro va en una hoja blanca.
+     */
+    static KbTheme folder(Context c, boolean night) {
+        int bar = CardTheme.barFill(night) | 0xFF000000;
+        return new KbTheme(bar, 0xFFFFFFFF, 0x22000000);
+    }
+
     static KbTheme of(Context c, boolean night) {
         int desk = c.getSharedPreferences("mesa", Context.MODE_PRIVATE).getInt("deskColor", 0);
         int bg = desk == 0 ? (night ? 0xFF121920 : 0xFFCDD5DC) : CardTheme.shade(desk, CardTheme.dark(desk) ? -0.15f : -0.06f);

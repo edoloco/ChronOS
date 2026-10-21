@@ -160,13 +160,24 @@ public class KeyboardView extends View {
             rows.add(new Key[]{l("1"), l("2"), l("3"), l("4"), l("5"), l("6"), l("7"), l("8"), l("9"), l("0")});
             rows.add(new Key[]{l("@"), l("#"), l("$"), l("_"), l("&"), l("-"), l("+"), l("("), l(")"), l("/")});
             rows.add(new Key[]{page("=\\<", "page:2", 1.5f), l("*"), l("\""), l("'"), l(":"), l(";"), l("!"), l("?"), del});
+        } else if (page == 3) {   // emojis
+            String[][] em = {{"😀", "😂", "🥹", "😍", "😘", "😉", "😎", "🤔", "😅", "😭"},
+                    {"👍", "🙏", "👏", "💪", "🙌", "👋", "🤝", "❤️", "🔥", "✨"},
+                    {"🎉", "😢", "😡", "😴", "🤗", "🥳", "😇", "🤣"}};
+            for (int r = 0; r < 3; r++) {
+                Key[] row = new Key[em[r].length + (r == 2 ? 1 : 0)];
+                for (int i = 0; i < em[r].length; i++) row[i] = l(em[r][i]);
+                if (r == 2) row[em[r].length] = del;
+                rows.add(row);
+            }
         } else {
             rows.add(new Key[]{l("~"), l("`"), l("|"), l("•"), l("√"), l("π"), l("÷"), l("×"), l("¶"), l("∆")});
             rows.add(new Key[]{l("£"), l("€"), l("¥"), l("^"), l("°"), l("="), l("{"), l("}"), l("\\"), l("%")});
             rows.add(new Key[]{page("?123", "page:1", 1.5f), l("¿"), l("¡"), l("["), l("]"), l("<"), l(">"), l("´"), del});
         }
         rows.add(new Key[]{page(page == 0 ? "?123" : "ABC", page == 0 ? "page:1" : "page:0", 1.3f), page("PC", "layout:pc", 1f),
-                l(","), c(" ", null, null, 5f), l("."), sendKey()});   // sin "saltar línea": el punto en su lugar y el espacio más ancho
+                page(page == 3 ? "ABC" : "☺", page == 3 ? "page:0" : "page:3", 1f),   // emojis, al lado del cambio de teclado
+                l(","), c(" ", null, null, 4.5f), l("."), sendKey()});   // sin "saltar línea": el punto en su lugar y el espacio más ancho
     }
 
     public void setSink(Sink s) { sink = s; }
@@ -201,7 +212,8 @@ public class KeyboardView extends View {
                     || (k.type == MOD && k.code == 0 && caps) || (k.type == CHAR && k.label.equals(deadKey));
             boolean special = !(k.type == CHAR);
             boolean send = k.type == ACT && "send".equals(k.act);
-            keyBg.setColor(active || send ? accent : special ? keyDark : keyColor);
+            boolean layout = k.type == ACT && k.act != null && k.act.startsWith("layout:");   // PC / Android: verde agua
+            keyBg.setColor(layout ? 0xFF2EC4B6 : active || send ? accent : special ? keyDark : keyColor);
             float r = 7 * dp;
             cv.drawRoundRect(k.r, r, r, keyBg);
             if (keyStroke.getColor() != 0 && !(active || send)) cv.drawRoundRect(k.r, r, r, keyStroke);   // cristal: borde de luz
@@ -212,7 +224,7 @@ public class KeyboardView extends View {
             float size = Math.min(k.r.height() * (label.length() == 1 ? 0.42f : 0.28f), 26 * dp);
             if (label.length() > 1) size = Math.min(size, k.r.width() / (label.length() * 0.6f));
             main.setTextSize(size);
-            main.setColor(active || send ? bg : space ? muted : fg);
+            main.setColor(layout ? 0xFFFFFFFF : active || send ? bg : space ? muted : fg);
             cv.drawText(label, k.r.centerX(), k.r.centerY() + size * 0.36f, main);
             float ss = Math.min(11 * dp, k.r.height() * 0.24f);
             sub.setTextSize(ss);

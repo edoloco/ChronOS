@@ -142,7 +142,7 @@ public class Hub implements Link.Listener {
         boolean changed = s != side;
         side = s;
         prefs.edit().putInt("side", s).apply();
-        ForceView.apply(app);   // la vista forzada es solo del principal
+        ForceView.apply(app);   // cada teléfono aplica la vista forzada de su papel
         if (changed || !started) { started = true; link.start(s == 0); }
     }
 
@@ -261,9 +261,10 @@ public class Hub implements Link.Listener {
             if (isPrincipal()) main.postDelayed(this::resendTicker, 1500);
             sendImeState();
             sendBattery();
-            if (!isPrincipal() && prefs.getBoolean("forceViewPending", false)) {   // vista forzada elegida sin conexión
+            if (prefs.getBoolean("forceViewPending", false)) {   // vista forzada elegida sin conexión
                 prefs.edit().putBoolean("forceViewPending", false).apply();
-                send("forceView", "v", ForceView.mode(app));
+                send("forceView", "v", ForceView.mode(app, true), "w", 1);
+                send("forceView", "v", ForceView.mode(app, false), "w", 0);
             }
             FileServer fs = FileServer.get(app);
             fs.start();
@@ -391,7 +392,7 @@ public class Hub implements Link.Listener {
             main.post(() -> { if ("close".equals(ls)) ScreenSync.lockNow(app, this); else ScreenSync.wakeNow(app); });
             return;
         }
-        if ("forceView".equals(t)) { int v = m.optInt("v"); main.post(() -> ForceView.set(app, v)); return; }
+        if ("forceView".equals(t)) { int v = m.optInt("v"); boolean w = m.optInt("w", 1) == 1; main.post(() -> ForceView.set(app, w, v)); return; }
         if ("palsSync".equals(t)) { Pals.applySync(app, m.optJSONObject("s")); return; }
         if ("lockFlip".equals(t)) { prefs.edit().putBoolean("lockFlip", m.optBoolean("on")).apply(); main.post(() -> LockArt.apply(app, this)); return; }
         if ("lockArt".equals(t)) {

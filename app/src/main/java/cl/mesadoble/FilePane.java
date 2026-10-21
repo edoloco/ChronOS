@@ -91,7 +91,7 @@ public class FilePane extends FrameLayout implements Link.Listener {
         this.a = a;
         this.hub = hub;
         dp = a.getResources().getDisplayMetrics().density;
-        th = KbTheme.of(a, night);
+        th = KbTheme.folder(a, night);   // cuerpo del fichero: color de la barra; hoja blanca adentro
         setBackgroundColor(th.bg);
         setClickable(true);
 

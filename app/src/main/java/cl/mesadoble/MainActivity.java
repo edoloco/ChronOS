@@ -172,6 +172,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         FrameLayout.LayoutParams fl = new FrameLayout.LayoutParams(dp(360), dp(64), Gravity.TOP | Gravity.START);
         fl.setMargins(dp(12), dp(36), dp(12), dp(12));
         root.addView(floatNotif, fl);
+        floatNotif.setElevation(dp(24));   // por encima de todo (barra, paneles, widgets): que no quede tapada
         // banda tipo noticiero arriba del extendido (cuando el principal está en otra app)
         floatTicker = new TickerView(this, true);
         floatTicker.setTap(pkg -> showNotifList());
@@ -992,10 +993,114 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private LinearLayout notifBox;
 
     /** Ventana con las notificaciones pendientes: tocar abre, deslizar a un lado borra. */
-    private void showNotifList() {
+    /**
+     * Lista de notificaciones en las dos pantallas: empieza en el principal (una hoja pegada a la unión) y sigue en
+     * el extendido; lo de atrás se pone borroso en los dos. Sin el otro teléfono, una sola lista.
+     *   nlOpen · nlN {n}: cuántas caben en el principal · nlClose
+     */
+    private void showNotifList() { showNotifList(true); }
+
+    private int nlSplit = -1;   // cuántas van en el principal (-1 = aún no se sabe)
+
+    private void showNotifList(boolean tellOther) {
         if (tickerItems == null || tickerItems.length() == 0) return;
+        if (notifDlg != null) return;
+        boolean both = hub.connected() && !solo;
+        if (!both) { showNotifSheet(); return; }
+        if (tellOther) hub.send("nlOpen");
+        nlSplit = -1;
+        boolean top = side == 1;   // el principal va primero (arriba)
+        boolean n = CardTheme.sheetNight(night);
+        android.app.Dialog d = new android.app.Dialog(this, android.R.style.Theme_Translucent_NoTitleBar_Fullscreen);
+        FrameLayout wrap = new FrameLayout(this);
+        wrap.setOnClickListener(v -> d.dismiss());   // tocar afuera cierra
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setClickable(true);
+        card.setPadding(dp(16), dp(top ? 16 : 8), dp(16), dp(top ? 8 : 14));
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(Ui.surface(n));
+        float r = dp(26);
+        // la hoja sigue de una pantalla a la otra: sin esquinas del lado de la unión
+        g.setCornerRadii(top ? new float[]{r, r, r, r, 0, 0, 0, 0} : new float[]{0, 0, 0, 0, r, r, r, r});
+        card.setBackground(g);
+        card.setElevation(dp(16));
+        if (top) {
+            TextView t = new TextView(this);
+            t.setText("Notificaciones");
+            t.setTextSize(19);
+            t.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
+            t.setTextColor(Ui.fg(n));
+            card.addView(t);
+            TextView h = new TextView(this);
+            h.setText("Toca para abrir · desliza a un lado para borrar · sigue en la pantalla de abajo");
+            h.setTextSize(12);
+            h.setTextColor(Ui.muted(n));
+            h.setPadding(0, dp(2), 0, dp(8));
+            card.addView(h);
+        }
         notifBox = new LinearLayout(this);
         notifBox.setOrientation(LinearLayout.VERTICAL);
+        if (top) card.addView(notifBox, new LinearLayout.LayoutParams(-1, 0, 1));   // lo que quepa; el resto, abajo
+        else {
+            android.widget.ScrollView sc = new android.widget.ScrollView(this);
+            sc.addView(notifBox);
+            card.addView(sc, new LinearLayout.LayoutParams(-1, 0, 1));
+            LinearLayout btns = new LinearLayout(this);
+            btns.setGravity(Gravity.END);
+            btns.setPadding(0, dp(8), 0, 0);
+            TextView del = new TextView(this), close = new TextView(this);
+            del.setText("Borrar todas");
+            close.setText("Cerrar");
+            for (TextView tv : new TextView[]{del, close}) {
+                tv.setTextSize(15);
+                tv.setPadding(dp(16), dp(10), dp(16), dp(10));
+                tv.setTextColor(Ui.accent(n));
+                btns.addView(tv);
+            }
+            del.setOnClickListener(v -> {
+                for (int i = 0; tickerItems != null && i < tickerItems.length(); i++) notifAction("notifDel", tickerItems.optJSONObject(i));
+                d.dismiss();
+            });
+            close.setOnClickListener(v -> d.dismiss());
+            card.addView(btns);
+        }
+        FrameLayout.LayoutParams cl = new FrameLayout.LayoutParams(Math.min(getResources().getDisplayMetrics().widthPixels - dp(32), dp(620)),
+                -1, (top ? Gravity.BOTTOM : Gravity.TOP) | Gravity.CENTER_HORIZONTAL);
+        cl.topMargin = top ? dp(36) : 0;
+        cl.bottomMargin = top ? 0 : dp(30);
+        wrap.addView(card, cl);
+        d.setContentView(wrap);
+        android.view.Window w = d.getWindow();
+        if (w != null) {
+            w.addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+            w.setDimAmount(0.4f);
+            if (android.os.Build.VERSION.SDK_INT >= 31) {   // lo de atrás, borroso
+                try {
+                    w.addFlags(0x00000004);
+                    android.view.WindowManager.LayoutParams lp = w.getAttributes();
+                    android.view.WindowManager.LayoutParams.class.getMethod("setBlurBehindRadius", int.class).invoke(lp, dp(40));
+                    w.setAttributes(lp);
+                } catch (Exception ignored) { }
+            }
+        }
+        notifDlg = d;
+        d.setOnDismissListener(x -> {
+            notifDlg = null; notifBox = null;
+            if (!nlClosing && hub.connected()) hub.send("nlClose");
+            nlClosing = false;
+        });
+        d.show();
+        fillNotifList();
+    }
+
+    private boolean nlClosing;
+
+    /** Una sola lista (sin el otro teléfono). */
+    private void showNotifSheet() {
+        notifBox = new LinearLayout(this);
+        notifBox.setOrientation(LinearLayout.VERTICAL);
+        nlSplit = -2;
         fillNotifList();
         android.widget.ScrollView sc = new android.widget.ScrollView(this);
         sc.addView(notifBox);
@@ -1017,17 +1122,37 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         notifBox.removeAllViews();
         boolean n = CardTheme.sheetNight(night);
         if (tickerItems == null || tickerItems.length() == 0) {
-            TextView e = new TextView(this);
-            e.setText("No quedan notificaciones");
-            e.setTextColor(Ui.muted(n));
-            e.setPadding(dp(8), dp(16), dp(8), dp(16));
-            notifBox.addView(e);
+            if (side == 1 || nlSplit == -2) {
+                TextView e = new TextView(this);
+                e.setText("No quedan notificaciones");
+                e.setTextColor(Ui.muted(n));
+                e.setPadding(dp(8), dp(16), dp(8), dp(16));
+                notifBox.addView(e);
+            }
             return;
         }
-        for (int i = 0; i < tickerItems.length(); i++) {
+        boolean split = nlSplit != -2 && notifDlg != null && !(notifDlg instanceof android.app.AlertDialog) && hub.connected() && !solo;
+        int from = 0, to = tickerItems.length();
+        if (split && side != 1) { if (nlSplit < 0) return; from = nlSplit; }   // el extendido sigue donde terminó el principal
+        for (int i = from; i < to; i++) {
             org.json.JSONObject o = tickerItems.optJSONObject(i);
             if (o == null) continue;
-            notifBox.addView(notifRow(o, n));
+            View row = notifRow(o, n);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+            lp.bottomMargin = dp(6);
+            notifBox.addView(row, lp);
+        }
+        if (split && side == 1) {
+            // el principal se queda con las que caben enteras y le dice al extendido desde cuál seguir
+            final LinearLayout box = notifBox;
+            box.post(() -> {
+                if (box != notifBox) return;
+                int h = box.getHeight(), k = 0;
+                for (int i = 0; i < box.getChildCount(); i++) { View v = box.getChildAt(i); if (v.getBottom() <= h) k = i + 1; }
+                for (int i = box.getChildCount() - 1; i >= k; i--) box.removeViewAt(i);
+                nlSplit = k;
+                hub.send("nlN", "n", k);
+            });
         }
     }
 
@@ -1171,7 +1296,10 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(-2, -2,
                 (top ? Gravity.TOP : Gravity.BOTTOM) | (sb.kind == ChronoBar.NAV ? Gravity.END : Gravity.START));
         int m = sb.visualHeight() + dp(6);
-        lp.setMargins(dp(12), top ? m : 0, dp(12), top ? 0 : m);
+        // no se pone encima de la píldora de navegación (a la derecha del extendido)
+        int right = sb.kind == ChronoBar.NAV && sidePill != null && sidePill.getVisibility() == View.VISIBLE
+                ? Math.max(sidePill.getWidth(), dp(46)) + dp(22) : dp(12);
+        lp.setMargins(dp(12), top ? m : 0, right, top ? 0 : m);
         startPanel.setLayoutParams(lp);
         startPanel.setPivotX(sb.kind == ChronoBar.NAV ? dp(260) : 0);
         startPanel.setPivotY(top ? 0 : dp(240));
@@ -1231,6 +1359,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             paper(barTicker);   // hoja que asoma bajo la barra del reloj
             cbar.setTicker(barTicker);
             if (tickerItems != null) applyTicker();
+            cbar.setQuick(new QuickToggles(this, hub()));   // accesos rápidos: linterna, bluetooth, captura…
         }
         int at = rootView.indexOfChild(startOverlay);
         // la barra va por encima de la burbuja de notificación (la burbuja "sale" de la barra)
@@ -1552,17 +1681,16 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     private void settingsMenu() {
         boolean auto = hub.autoKeyboard(), principal = side == 1;
-        boolean h = prefs.getBoolean("orientH", true);
         Ui.Sheet sh = new Ui.Sheet(this).title("Ajustes");
-        boolean introOn = prefs.getBoolean("introOn", true);
-        sh.option(Ui.PALETTE, -1, "Intro al iniciar: " + (introOn ? "sí" : "no"), "Fondo naranja, logo y sonido al abrir ChronOS", introOn, () -> {
-            prefs.edit().putBoolean("introOn", !introOn).apply();
-            Toast.makeText(this, !introOn ? "La intro se verá al iniciar" : "Intro desactivada", Toast.LENGTH_SHORT).show();
-        });
-        sh.option(Ui.PALETTE, "Ver la intro ahora", "En los dos teléfonos, con la pregunta de cuál es el principal", () -> {
-            if (hub.connected() && !solo) hub.send("introPlay");
-            playIntroAgain();
-        });
+        sh.option(Ui.HOME, "Pantalla de inicio", (principal ? "Principal: " + homeLabel(homeDefault(this)) + " · Extendido: " + (otherHomeKnown ? homeLabel(otherHome) : "…")
+                : "Principal: " + (otherHomeKnown ? homeLabel(otherHome) : "…") + " · Extendido: " + homeLabel(homeDefault(this))), this::launcherMenu);
+        sh.option(layoutIcon(), deskSide(), "Este teléfono es el " + (principal ? "principal" : "extendido"),
+                principal ? "Aquí corren las apps" : "Pantalla extra y teclado", false, this::chooseSide);
+        int fvp = ForceView.mode(this, true), fve = ForceView.mode(this, false);
+        sh.option(Ui.LAYOUT_STACK, -1, "Forzar vista",
+                "Principal: " + ForceView.NAMES[fvp].toLowerCase() + " · Extendido: " + ForceView.NAMES[fve].toLowerCase(), fvp != 0 || fve != 0, this::forceViewMenu);
+        sh.option(Ui.PALETTE, "Apariencia", "Colores de fondo y menú, pantalla de bloqueo", this::appearanceMenu);
+        sh.option(Ui.PALETTE, "Intro", "Al iniciar: " + (prefs.getBoolean("introOn", true) ? "sí" : "no") + " · verla ahora", this::introMenu);
         boolean gpOn = GamePalActivity.enabled(this);
         sh.option(Ui.AUTO, -1, "Game Pal: " + (gpOn ? "sí" : "no"), "Control en pantalla en el extendido al jugar Brawl Stars", gpOn, () -> {
             prefs.edit().putBoolean("gamePal", !gpOn).apply();
@@ -1578,27 +1706,6 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                         Toast.makeText(this, !cl ? "Pantalla de bloqueo limpia" : "Se vuelven a ver las notificaciones al bloquear", Toast.LENGTH_SHORT).show();
                     });
         }
-        int fv = ForceView.mode(this);
-        sh.option(Ui.LAYOUT_STACK, -1, "Forzar vista: " + ForceView.NAMES[fv].toLowerCase(),
-                "Gira las apps del principal, incluso las hechas solo para vertical", fv != 0, this::forceViewMenu);
-        boolean laOn = LockArt.enabled(this);
-        sh.option(Ui.PALETTE, -1, "Pantalla de bloqueo naranja: " + (laOn ? "sí" : "no"),
-                "Fondo naranja en los dos, con el mensaje para desbloquear en el sentido de las pantallas", laOn, () -> {
-                    setLockArt(!laOn, LockArt.method(this));
-                    Toast.makeText(this, !laOn ? "Listo: apaga y enciende la pantalla para verla" : "Se volvió al fondo de bloqueo normal", Toast.LENGTH_LONG).show();
-                });
-        if (laOn && !solo) sh.option(Ui.PALETTE, "Voltear el mensaje de bloqueo", "Si el texto quedó de cabeza", () -> {
-            prefs.edit().putBoolean("lockFlip", !prefs.getBoolean("lockFlip", false)).apply();
-            LockArt.apply(this, hub);
-            if (hub.connected()) hub.send("lockFlip", "on", prefs.getBoolean("lockFlip", false));
-            Toast.makeText(this, "Volteado: apaga y enciende la pantalla para verlo", Toast.LENGTH_LONG).show();
-        });
-        if (laOn) sh.option(Ui.LOCK, "Mi bloqueo es con: " + LockArt.METHODS[LockArt.method(this)],
-                "Toca para cambiar (PIN, patrón o contraseña). La huella se detecta sola", () -> {
-                    int nm = (LockArt.method(this) + 1) % LockArt.METHODS.length;
-                    setLockArt(true, nm);
-                    Toast.makeText(this, "El mensaje dirá: " + LockArt.message(this), Toast.LENGTH_LONG).show();
-                });
         boolean lidOn = LidWatch.enabled(this);
         sh.option(Ui.LOCK, -1, "Bloquear al cerrar la tapa: " + (lidOn ? "sí" : "no"),
                 "Al cerrar la carcasa se bloquean los dos; al abrir se encienden", lidOn, () -> {
@@ -1616,23 +1723,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                         Toast.makeText(this, !spl ? "Las apps se abrirán arriba, con ChronOS abajo" : "Las apps se abrirán a pantalla completa", Toast.LENGTH_SHORT).show();
                     });
         }
-        if (principal) {
-            sh.option(h ? Ui.LAYOUT_STACK : Ui.LAYOUT_SIDE_V, deskSide(), h ? "Orientación: horizontal" : "Orientación: vertical",
-                    h ? "Principal arriba, extendido abajo" : "Principal a la izquierda, extendido a la derecha", false, this::chooseOrientation);
-            sh.option(locked() ? Ui.LOCK : Ui.UNLOCK, -1, locked() ? "Vista bloqueada" : "Vista libre",
-                    locked() ? "No gira aunque muevas los teléfonos" : "Cambia sola entre horizontal y vertical al girar", false,
-                    () -> setView(h, !locked(), false));
-        } else {
-            sh.option(layoutIcon(), deskSide(), "Orientación: la del principal", layoutName(), false, null);
-        }
-        boolean fp = prefs.getBoolean("flipP", false), fe = prefs.getBoolean("flipE", false);
-        sh.option(Ui.LAYOUT_STACK, 0, "Principal: " + (fp ? "al revés" : "normal"), "Gira la pantalla del principal 180° (si lo pones al revés)", fp,
-                () -> setFlip(!fp, fe, false));
-        sh.option(Ui.LAYOUT_STACK, 1, "Extendido: " + (fe ? "al revés" : "normal"), "Gira la pantalla del extendido 180° (si lo pones al revés)", fe,
-                () -> setFlip(fp, !fe, false));
-        sh.option(layoutIcon(), deskSide(), "Este teléfono es el " + (principal ? "principal" : "extendido"),
-                        principal ? "Aquí corren las apps" : "Pantalla extra y teclado", false, this::chooseSide)
-                .option(Ui.AUTO, -1, "Teclado automático: " + (auto ? "sí" : "no"),
+        sh.option(Ui.AUTO, -1, "Teclado automático: " + (auto ? "sí" : "no"),
                         "El teclado aparece solo en el extendido al escribir", false, () -> {
                             prefs.edit().putBoolean("autoKb", !auto).apply();
                             Toast.makeText(this, !auto ? "El teclado se abrirá solo en el extendido" : "Teclado automático desactivado", Toast.LENGTH_SHORT).show();
@@ -1645,7 +1736,6 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                             Toast.makeText(this, on ? "Pantalla unida activada" : "Pantalla unida desactivada", Toast.LENGTH_SHORT).show();
                             if (on) main.postDelayed(() -> checkSetup(false), 300);
                         })
-                .option(Ui.PALETTE, "Personalizar", "Color de fondo, tarjetas y menús, fondo de juegos", this::personalize)
                 .option(Ui.NOTE, -1, "Notificaciones en la barra: " + (principal ? (NotifService.enabled(this) ? "sí" : "no") : "del principal"),
                         "Probar, activar o reparar las notificaciones del principal", principal && NotifService.enabled(this), this::guideNotifs)
                 .option(Ui.RECEIVE, -1, "Llamadas: " + (principal ? (CallHub.ready(this) ? "listo" : "falta permiso") : "contestar aquí"),
@@ -1655,8 +1745,6 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                             if (principal) requestPermissions(CallHub.PERMS, 61);
                             else Toast.makeText(this, "Actívalo en el principal: Ajustes → Llamadas", Toast.LENGTH_LONG).show();
                         })
-                .option(Ui.HOME, "Pantalla de inicio", (principal ? "Principal: " + homeLabel(homeDefault(this)) + " · Extendido: " + (otherHomeKnown ? homeLabel(otherHome) : "…")
-                        : "Principal: " + (otherHomeKnown ? homeLabel(otherHome) : "…") + " · Extendido: " + homeLabel(homeDefault(this))), this::launcherMenu)
                 .option(Ui.GEAR, "Revisar configuración", principal ? "Permisos del principal" : "Permisos del extendido", () -> checkSetup(true))
                 .option(Ui.WIFI, "Conexión", statusText, this::showConnection)
                 .option(Ui.NOTE, "Acerca de la app", Updater.updateAvailable(this)
@@ -1664,6 +1752,49 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .badgeIf(Updater.updateAvailable(this), "1")
                 .button("Cerrar", false, null)
                 .show();
+    }
+
+    /** Ajustes → Intro: activarla al iniciar o verla ahora. */
+    private void introMenu() {
+        boolean introOn = prefs.getBoolean("introOn", true);
+        new Ui.Sheet(this).title("Intro")
+                .option(Ui.PALETTE, -1, "Intro al iniciar: " + (introOn ? "sí" : "no"), "Fondo naranja, logo y sonido al abrir ChronOS", introOn, () -> {
+                    prefs.edit().putBoolean("introOn", !introOn).apply();
+                    Toast.makeText(this, !introOn ? "La intro se verá al iniciar" : "Intro desactivada", Toast.LENGTH_SHORT).show();
+                    introMenu();
+                })
+                .option(Ui.PALETTE, "Ver la intro ahora", "En los dos teléfonos, con la pregunta de cuál es el principal", () -> {
+                    if (hub.connected() && !solo) hub.send("introPlay");
+                    playIntroAgain();
+                })
+                .button("Volver", false, this::settingsMenu).show();
+    }
+
+    /** Ajustes → Apariencia: colores y pantalla de bloqueo. */
+    private void appearanceMenu() {
+        Ui.Sheet sh = new Ui.Sheet(this).title("Apariencia");
+        sh.option(Ui.PALETTE, "Colores de fondo y menú", "Color de fondo, tarjetas y menús, fondo de juegos", this::personalize);
+        boolean laOn = LockArt.enabled(this);
+        sh.option(Ui.PALETTE, -1, "Pantalla de bloqueo naranja: " + (laOn ? "sí" : "no"),
+                "Fondo naranja en los dos, con el mensaje para desbloquear en el sentido de las pantallas", laOn, () -> {
+                    setLockArt(!laOn, LockArt.method(this));
+                    Toast.makeText(this, !laOn ? "Listo: apaga y enciende la pantalla para verla" : "Se volvió al fondo de bloqueo normal", Toast.LENGTH_LONG).show();
+                    appearanceMenu();
+                });
+        if (laOn && !solo) sh.option(Ui.PALETTE, "Voltear el mensaje de bloqueo", "Si el texto quedó de cabeza", () -> {
+            prefs.edit().putBoolean("lockFlip", !prefs.getBoolean("lockFlip", false)).apply();
+            LockArt.apply(this, hub);
+            if (hub.connected()) hub.send("lockFlip", "on", prefs.getBoolean("lockFlip", false));
+            Toast.makeText(this, "Volteado: apaga y enciende la pantalla para verlo", Toast.LENGTH_LONG).show();
+        });
+        if (laOn) sh.option(Ui.LOCK, "Mi bloqueo es con: " + LockArt.METHODS[LockArt.method(this)],
+                "Toca para cambiar (PIN, patrón o contraseña). La huella se detecta sola", () -> {
+                    int nm = (LockArt.method(this) + 1) % LockArt.METHODS.length;
+                    setLockArt(true, nm);
+                    Toast.makeText(this, "El mensaje dirá: " + LockArt.message(this), Toast.LENGTH_LONG).show();
+                    appearanceMenu();
+                });
+        sh.button("Volver", false, this::settingsMenu).show();
     }
 
     private final Runnable updatePoll = new Runnable() {
@@ -1980,19 +2111,29 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     /** Forzar vista: horizontal, horizontal invertido, vertical o vertical invertido, en los dos teléfonos. */
+    /** Forzar vista: primero a cuál teléfono (principal o extendido), después la vista. */
     private void forceViewMenu() {
-        int cur = ForceView.mode(this);
-        Ui.Sheet sh = new Ui.Sheet(this).title("Forzar vista");
+        int fp = ForceView.mode(this, true), fe = ForceView.mode(this, false);
+        new Ui.Sheet(this).title("Forzar vista").message("¿En cuál teléfono?")
+                .option(Ui.LAYOUT_STACK, 0, "Principal: " + ForceView.NAMES[fp].toLowerCase(), "Donde se abren las apps", fp != 0, () -> forceViewMenu(true))
+                .option(Ui.LAYOUT_STACK, 1, "Extendido: " + ForceView.NAMES[fe].toLowerCase(), "La pantalla de abajo (ChronOS, teclado, herramientas)", fe != 0, () -> forceViewMenu(false))
+                .button("Cerrar", false, null).show();
+    }
+
+    private void forceViewMenu(boolean forP) {
+        int cur = ForceView.mode(this, forP);
+        String who = forP ? "principal" : "extendido";
+        Ui.Sheet sh = new Ui.Sheet(this).title("Forzar vista: " + who);
         int[] icons = {Ui.CROSS, Ui.LAYOUT_STACK, Ui.LAYOUT_STACK, Ui.LAYOUT_SIDE_H, Ui.LAYOUT_SIDE_H, Ui.AUTO};
         String[] subs = {"Cada app decide (como siempre)", "Acostado, como se usa ChronOS", "Acostado, girado al otro lado",
-                "De pie", "De pie, cabeza abajo", "Gira según cómo tengas el principal (los 4 lados), aunque la app sea solo vertical"};
+                "De pie", "De pie, cabeza abajo", "Gira según cómo tengas el " + who + " (los 4 lados), aunque la app sea solo vertical"};
         for (int i = 0; i < ForceView.NAMES.length; i++) {
             final int v = i;
             sh.option(icons[i], -1, ForceView.NAMES[i], subs[i], cur == i, () -> {
-                boolean here = side == 1;   // se aplica solo en el principal (allá se abren las apps)
+                boolean here = (side == 1) == forP;   // ¿se aplica en este teléfono?
                 boolean ok = !here || ForceView.possible(this);
-                ForceView.set(this, v);
-                if (hub.connected() && !solo) hub.send("forceView", "v", v);
+                ForceView.set(this, forP, v);
+                if (hub.connected() && !solo) hub.send("forceView", "v", v, "w", forP ? 1 : 0);
                 else if (!here && !solo) prefs.edit().putBoolean("forceViewPending", true).apply();   // se manda al conectarse
                 if (v != 0 && !ok) {
                     new Ui.Sheet(this).title("Falta un permiso en este teléfono")
@@ -2002,8 +2143,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                                 catch (Exception e) { Toast.makeText(this, "No se pudo abrir el ajuste", Toast.LENGTH_SHORT).show(); }
                             })
                             .button("Después", false, null).show();
-                } else Toast.makeText(this, v == 0 ? "Las apps del principal vuelven a decidir su vista"
-                        : "Apps del principal en " + ForceView.NAMES[v].toLowerCase() + (here || hub.connected() ? "" : " (se aplica al conectarse)"), Toast.LENGTH_SHORT).show();
+                } else Toast.makeText(this, v == 0 ? "El " + who + " vuelve a dejar que cada app decida su vista"
+                        : "El " + who + " en " + ForceView.NAMES[v].toLowerCase() + (here || hub.connected() ? "" : " (se aplica al conectarse)"), Toast.LENGTH_SHORT).show();
             });
         }
         sh.button("Cerrar", false, null).show();
@@ -3782,6 +3923,15 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 break;
             case "notif":   // burbuja: en el principal (si ChronOS está a la vista) o en el extendido (si el principal está en otra app)
                 main.post(() -> { if (floatNotif != null) floatNotif.show(m); });
+                break;
+            case "nlOpen":
+                main.post(() -> showNotifList(false));
+                break;
+            case "nlN":
+                main.post(() -> { nlSplit = m.optInt("n"); fillNotifList(); });
+                break;
+            case "nlClose":
+                main.post(() -> { if (notifDlg != null) { nlClosing = true; notifDlg.dismiss(); } });
                 break;
             case "ticker":
                 main.post(() -> { tickerItems = m.optJSONArray("items"); tickerHere = m.optBoolean("here"); applyTicker(); fillNotifList(); });

@@ -8,11 +8,11 @@ import android.view.View;
 import android.view.WindowManager;
 
 /**
- * Forzar vista (solo en el PRINCIPAL, que es donde se abren las apps): una ventanita invisible (0 × 0) encima de
- * todo que le pide a Android una orientación. Como está sobre cualquier app, todas giran así, incluso las hechas
- * solo para vertical. El extendido guarda el mismo ajuste (para mostrarlo en Ajustes) pero no lo aplica.
+ * Forzar vista: una ventanita invisible (0 × 0) encima de todo que le pide a Android una orientación. Como está
+ * sobre cualquier app, todas giran así, incluso las hechas solo para vertical. Hay un ajuste para el principal
+ * ("forceView") y otro para el extendido ("forceViewE"); los dos teléfonos guardan ambos y cada uno aplica el suyo.
  * Necesita la accesibilidad de ChronOS (versión completa) o el permiso "Mostrar sobre otras apps".
- *   forceView {v}: el otro teléfono aplica la misma (los dos van unidos, giran juntos)
+ *   forceView {v, w}: w = 1 principal, 0 extendido (sin w: principal, como las versiones anteriores)
  */
 final class ForceView {
 
@@ -29,10 +29,16 @@ final class ForceView {
     private static WindowManager wm;
     private static Context owner;
 
-    static int mode(Context c) { return c.getSharedPreferences("mesa", Context.MODE_PRIVATE).getInt("forceView", 0); }
+    private static String key(boolean forPrincipal) { return forPrincipal ? "forceView" : "forceViewE"; }
 
-    static void set(Context c, int m) {
-        c.getSharedPreferences("mesa", Context.MODE_PRIVATE).edit().putInt("forceView", m).apply();
+    /** Ajuste del principal (forPrincipal) o del extendido. */
+    static int mode(Context c, boolean forPrincipal) { return c.getSharedPreferences("mesa", Context.MODE_PRIVATE).getInt(key(forPrincipal), 0); }
+
+    /** Ajuste de ESTE teléfono. */
+    static int mode(Context c) { return mode(c, principal(c)); }
+
+    static void set(Context c, boolean forPrincipal, int m) {
+        c.getSharedPreferences("mesa", Context.MODE_PRIVATE).edit().putInt(key(forPrincipal), m).apply();
         apply(c);
     }
 
@@ -44,7 +50,7 @@ final class ForceView {
     /** Pone, cambia o quita la ventana según el ajuste. true si quedó aplicado. */
     static synchronized boolean apply(Context c) {
         int m = mode(c);
-        if (m <= 0 || m >= ORIENT.length || !principal(c)) { remove(); return true; }
+        if (m <= 0 || m >= ORIENT.length) { remove(); return true; }
         // con la accesibilidad, su propia capa (no pide permiso); si no, "Mostrar sobre otras apps"
         Context ctx = MesaAccess.instance != null ? MesaAccess.instance : c.getApplicationContext();
         int type = MesaAccess.instance != null ? WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
