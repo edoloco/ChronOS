@@ -376,9 +376,27 @@ public class ChronoBar extends FrameLayout {
         c.restore();
         c.save();
         c.clipPath(shape);
+        paintBody(c, this, W, H, night, fill);
+        // brillo desde el borde de la pantalla
+        if (!open) {
+            gloss.setShader(new LinearGradient(0, y(0), 0, y(tab()), 0x40FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
+            c.drawRect(0, 0, W, H, gloss);
+        }
+        c.restore();
+        int st = CardTheme.stroke();
+        stroke.setColor(st != 0 ? st : (CardTheme.dark(CardTheme.barFill(night) | 0xFF000000) ? 0x33FFFFFF : 0x22000000));
+        c.drawPath(shape, stroke);
+
+        if (kind == CLOCK) drawClock(c);
+        else drawLogo(c);
+    }
+
+    /** Relleno de la barra (color, cristal o Aero). También lo usa el gestor de archivos: es el cuerpo de la carpeta. */
+    static void paintBody(Canvas c, View self, float W, float H, boolean night, Paint fill) {
         if (CardTheme.isIntense() && Glass.blur != null && Glass.desk.get() != null) {
             View d = Glass.desk.get();
-            getLocationInWindow(me);
+            int[] me = new int[2], other = new int[2];
+            self.getLocationInWindow(me);
             d.getLocationInWindow(other);
             c.save();
             c.translate(other[0] - me[0], other[1] - me[1]);
@@ -398,18 +416,6 @@ public class ChronoBar extends FrameLayout {
             fill.setColor(CardTheme.isGlass() ? f : (f | 0xFF000000));
             c.drawRect(0, 0, W, H, fill);
         }
-        // brillo desde el borde de la pantalla
-        if (!open) {
-            gloss.setShader(new LinearGradient(0, y(0), 0, y(tab()), 0x40FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
-            c.drawRect(0, 0, W, H, gloss);
-        }
-        c.restore();
-        int st = CardTheme.stroke();
-        stroke.setColor(st != 0 ? st : (CardTheme.dark(CardTheme.barFill(night) | 0xFF000000) ? 0x33FFFFFF : 0x22000000));
-        c.drawPath(shape, stroke);
-
-        if (kind == CLOCK) drawClock(c);
-        else drawLogo(c);
     }
 
     private boolean lightText() {

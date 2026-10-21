@@ -12,7 +12,10 @@ final class KbTheme {
     final int bg, key, keyDark, fg, muted, accent, stroke, surface, chip, warn;
     final boolean dark;   // ¿fondo oscuro?
 
-    private KbTheme(int bg, int key, int stroke) {
+    private KbTheme(int bg, int key, int stroke) { this(bg, key, stroke, false); }
+
+    /** accentFromKey: el acento se elige según la hoja (key) y no según el fondo. */
+    private KbTheme(int bg, int key, int stroke, boolean accentFromKey) {
         this.bg = bg;
         this.key = key;
         this.stroke = stroke;
@@ -21,19 +24,19 @@ final class KbTheme {
         fg = darkKey ? 0xFFF2F5F8 : 0xFF1D2733;
         keyDark = darkKey ? CardTheme.shade(key, 0.10f) : CardTheme.shade(key, -0.13f);
         muted = blend(fg, key, 0.45f);
-        accent = dark ? 0xFF5CC3CF : 0xFF1F7F8C;
+        accent = (accentFromKey ? darkKey : dark) ? 0xFF5CC3CF : 0xFF1F7F8C;
         warn = dark ? 0xFFF0A26B : 0xFFB4541A;
         surface = blend(bg, key, 0.5f);
         chip = key;
     }
 
     /**
-     * Fichero abierto (gestor de archivos de la action bar): el cuerpo es del mismo color que la barra y lo de
-     * adentro va en una hoja blanca.
+     * Fichero abierto (gestor de archivos de la action bar): el cuerpo es la barra misma (lo pinta FilePane igual
+     * que ChronoBar: color, cristal o Aero) y lo de adentro va en una hoja gris oscuro.
      */
     static KbTheme folder(Context c, boolean night) {
         int bar = CardTheme.barFill(night) | 0xFF000000;
-        return new KbTheme(bar, 0xFFFFFFFF, 0x22000000);
+        return new KbTheme(bar, 0xFF1C1F24, 0x33FFFFFF, true);
     }
 
     static KbTheme of(Context c, boolean night) {

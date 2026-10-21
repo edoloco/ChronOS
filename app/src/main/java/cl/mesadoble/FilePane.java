@@ -85,14 +85,17 @@ public class FilePane extends FrameLayout implements Link.Listener {
     private boolean open;
 
     private int dp(float v) { return Math.round(v * dp); }
+    private boolean night;
+    private final android.graphics.Paint bodyFill = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
 
     public FilePane(Activity a, Hub hub, boolean night) {
         super(a);
         this.a = a;
         this.hub = hub;
         dp = a.getResources().getDisplayMetrics().density;
-        th = KbTheme.folder(a, night);   // cuerpo del fichero: color de la barra; hoja blanca adentro
-        setBackgroundColor(th.bg);
+        th = KbTheme.folder(a, night);   // cuerpo del fichero: como la barra; hoja gris oscuro adentro
+        this.night = night;
+        setWillNotDraw(false);   // el cuerpo se pinta como la action bar (ver dispatchDraw)
         setClickable(true);
 
         LinearLayout col = new LinearLayout(a);
@@ -277,6 +280,7 @@ public class FilePane extends FrameLayout implements Link.Listener {
     private void flyBack() { fly(homeX, homeY, 220, null); }
 
     @Override protected void dispatchDraw(Canvas c) {
+        ChronoBar.paintBody(c, this, getWidth(), getHeight(), night, bodyFill);   // cuerpo de la carpeta: como la action bar
         super.dispatchDraw(c);
         if (!dragging) return;
         int W = getWidth(), H = getHeight();
@@ -313,7 +317,7 @@ public class FilePane extends FrameLayout implements Link.Listener {
         c.restore();
     }
 
-    private int ChronoBarInk() { return CardTheme.dark(th.bg) ? 0xFFF2F5F8 : 0xFF1D2733; }
+    private int ChronoBarInk() { return ChronoBar.ink(night); }
 
     private TextView chip(String t, View.OnClickListener l) {
         TextView b = new TextView(a);

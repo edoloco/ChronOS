@@ -1394,6 +1394,13 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         int pTop, pBottom;
         int vh = cbar.visualHeight();
         int body = bh - Math.round(cbar.strip());   // con la carpeta abierta, el gestor llega hasta la franja
+        if (folder && top) {
+            // la pestaña del logo queda pegada al techo de la pantalla (sin espacio arriba: ese espacio es el de
+            // entre los teléfonos, fuera de la pantalla)
+            int lift = bh - Math.round(cbar.tab());
+            y = -lift;
+            body -= lift;
+        }
         if (folder) { if (top) { pTop = body; pBottom = 0; } else { pTop = 0; pBottom = body; } }
         else if (top) { pTop = vh; pBottom = 0; } else { pTop = 0; pBottom = vh; }
         if (solo && nbar != null) {
