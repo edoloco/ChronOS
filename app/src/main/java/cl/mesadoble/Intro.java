@@ -42,7 +42,10 @@ final class Intro extends FrameLayout {
     private final float dp;
     private final Typeface font;
     private LinearLayout question;
-    private TextView label, name, hint;
+    private TextView label, name, hint, qTitle;
+    private final TextView[] btn = new TextView[2];
+    private final GradientDrawable[] btnBg = new GradientDrawable[2];
+    private LinearLayout.LayoutParams btnLp;
     private ImageView logo;
     private boolean asking, done;
     private Runnable onDone;
@@ -99,7 +102,7 @@ final class Intro extends FrameLayout {
 
     // ---------------- pregunta ----------------
 
-    private TextView bigButton(String t, View.OnClickListener l) {
+    private TextView bigButton(String t, int idx, View.OnClickListener l) {
         TextView b = new TextView(a);
         b.setText(t);
         b.setTypeface(font);
@@ -112,6 +115,8 @@ final class Intro extends FrameLayout {
         b.setBackground(g);
         b.setElevation(dp(6));
         b.setOnClickListener(l);
+        btn[idx] = b;
+        btnBg[idx] = g;
         return b;
     }
 
@@ -120,7 +125,7 @@ final class Intro extends FrameLayout {
         question = new LinearLayout(a);
         question.setOrientation(LinearLayout.VERTICAL);
         question.setGravity(Gravity.CENTER);
-        TextView q = new TextView(a);
+        TextView q = qTitle = new TextView(a);
         q.setText("¿Qué teléfono es este?");
         q.setTypeface(font);
         q.setTextSize(32);
@@ -132,8 +137,9 @@ final class Intro extends FrameLayout {
         row.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(dp(190), dp(68));
         bl.setMargins(dp(12), dp(26), dp(12), 0);
-        row.addView(bigButton("Principal", v -> answer(1)), bl);
-        row.addView(bigButton("Extendido", v -> answer(0)), new LinearLayout.LayoutParams(bl));
+        btnLp = bl;
+        row.addView(bigButton("Principal", 0, v -> answer(1)), bl);
+        row.addView(bigButton("Extendido", 1, v -> answer(0)), new LinearLayout.LayoutParams(bl));
         question.addView(row);
         hint = new TextView(a);
         hint.setTypeface(font);
@@ -146,7 +152,38 @@ final class Intro extends FrameLayout {
         question.addView(hint);
         question.setAlpha(0f);
         addView(question, new LayoutParams(-1, -2, Gravity.CENTER));
+        fitQuestion();
         question.animate().alpha(1f).setDuration(500).start();
+    }
+
+    /**
+     * Achica la pregunta y los botones blancos cuando la pantalla es baja (teléfono en horizontal),
+     * para que no se corten arriba ni abajo. En vertical queda igual que antes.
+     */
+    private void fitQuestion() {
+        if (question == null || btnLp == null) return;
+        float hDp = (getHeight() > 0 ? getHeight() : a.getResources().getDisplayMetrics().heightPixels) / dp;
+        int tier = hDp < 300 ? 2 : hDp < 420 ? 1 : 0;   // 0 normal, 1 compacto, 2 muy compacto
+        int w = tier == 0 ? 190 : tier == 1 ? 160 : 140, bh = tier == 0 ? 68 : tier == 1 ? 50 : 42;
+        int top = tier == 0 ? 26 : tier == 1 ? 14 : 8, side = tier == 0 ? 12 : 8;
+        qTitle.setTextSize(tier == 0 ? 32 : tier == 1 ? 24 : 20);
+        for (int i = 0; i < 2; i++) {
+            LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) btn[i].getLayoutParams();
+            lp.width = dp(w);
+            lp.height = dp(bh);
+            lp.setMargins(dp(side), dp(top), dp(side), 0);
+            btn[i].setLayoutParams(lp);
+            btn[i].setTextSize(tier == 0 ? 24 : tier == 1 ? 18 : 16);
+            btnBg[i].setCornerRadius(dp(bh / 2f));
+        }
+        hint.setTextSize(tier == 0 ? 15 : 13);
+        hint.setPadding(dp(24), dp(tier == 0 ? 22 : 10), dp(24), 0);
+        hint.setVisibility(tier == 2 ? View.GONE : View.VISIBLE);   // en muy poca altura sobra el texto de ayuda
+    }
+
+    @Override protected void onSizeChanged(int w, int h, int ow, int oh) {
+        super.onSizeChanged(w, h, ow, oh);
+        fitQuestion();   // al girar el teléfono
     }
 
     private void answer(int side) {
