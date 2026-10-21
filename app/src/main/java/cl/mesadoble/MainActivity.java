@@ -288,6 +288,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     @Override protected void onPause() {
         hub.foreground = false;
+        // la lista de dos pantallas se cierra aquí sin cerrarla allá: el extendido la sigue mostrando solo
+        if (side == 1 && notifDlg != null && nlSplit != -2) { nlClosing = true; notifDlg.dismiss(); }
         hub.notifsChanged();
         resumed = false;
         main.removeCallbacks(pollRecents);
@@ -1005,7 +1007,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private void showNotifList(boolean tellOther) {
         if (tickerItems == null || tickerItems.length() == 0) return;
         if (notifDlg != null) return;
-        boolean both = hub.connected() && !solo;
+        // en las dos pantallas solo si el principal está disponible (mostrando ChronOS); si no, solo en el extendido
+        boolean principalFree = side == 1 ? hub.foreground : tickerHere;
+        boolean both = hub.connected() && !solo && principalFree;
         if (!both) { showNotifSheet(); return; }
         if (tellOther) hub.send("nlOpen");
         nlSplit = -1;
@@ -1094,8 +1098,10 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             }
         }
         notifDlg = d;
+        final LinearLayout myBox = notifBox;
         d.setOnDismissListener(x -> {
-            notifDlg = null; notifBox = null;
+            if (notifDlg == d) notifDlg = null;
+            if (notifBox == myBox) notifBox = null;
             if (!nlClosing && hub.connected()) hub.send("nlClose");
             nlClosing = false;
         });
@@ -1123,7 +1129,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 })
                 .button("Cerrar", true, null)
                 .show();
-        notifDlg.setOnDismissListener(d -> { notifDlg = null; notifBox = null; });
+        final android.app.Dialog sd = notifDlg;
+        final LinearLayout sbx = notifBox;
+        notifDlg.setOnDismissListener(d -> { if (notifDlg == sd) notifDlg = null; if (notifBox == sbx) notifBox = null; });
     }
 
     private void fillNotifList() {
@@ -4047,7 +4055,12 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 main.post(() -> { if (notifDlg != null) { nlClosing = true; notifDlg.dismiss(); } });
                 break;
             case "ticker":
-                main.post(() -> { tickerItems = m.optJSONArray("items"); tickerHere = m.optBoolean("here"); applyTicker(); fillNotifList(); });
+                main.post(() -> {
+                    tickerItems = m.optJSONArray("items"); tickerHere = m.optBoolean("here"); applyTicker();
+                    // el principal se fue a otra app con la lista abierta en las dos: queda solo en el extendido
+                    if (side != 1 && !tickerHere && notifDlg != null && nlSplit != -2) { nlClosing = true; notifDlg.dismiss(); notifDlg = null; notifBox = null; showNotifList(false); }
+                    else fillNotifList();
+                });
                 break;
             case "notifTestR":
                 main.post(() -> notifResult(m));
