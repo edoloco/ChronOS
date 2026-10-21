@@ -1383,12 +1383,19 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (H == 0) { rootView.post(() -> layoutChrono(false)); return; }
         if (solo && nbar != null && pane2 != null) { layoutSolo(animate, H); return; }
         boolean top = barAtTop();
+        // la barra es una CARPETA: no se da vuelta al abrirse. Su pestaña y sus hojas quedan siempre hacia el mismo
+        // lado (reloj colgando hacia abajo en el principal, logo hacia arriba en el extendido); al abrirse, la
+        // carpeta baja (o sube) hasta la unión de los teléfonos y el gestor de archivos es su cuerpo, del mismo color
+        boolean edge = solo || !stacked() ? top : side == 1;
+        boolean folder = fileMode && edge != top;
         int bh = cbar.barHeight();
         float y = top ? 0 : H - bh;
         // el gestor ocupa lo que la barra deja libre
         int pTop, pBottom;
         int vh = cbar.visualHeight();
-        if (top) { pTop = vh; pBottom = 0; } else { pTop = 0; pBottom = vh; }
+        int body = bh - Math.round(cbar.strip());   // con la carpeta abierta, el gestor llega hasta la franja
+        if (folder) { if (top) { pTop = body; pBottom = 0; } else { pTop = 0; pBottom = body; } }
+        else if (top) { pTop = vh; pBottom = 0; } else { pTop = 0; pBottom = vh; }
         if (solo && nbar != null) {
             nbar.setEdgeTop(false);
             nbar.setTranslationY(H - nbar.barHeight());
@@ -1424,8 +1431,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         floatNotif.setFromTop(top);
         // el gestor entra junto con la barra: en el principal desde arriba, en el extendido desde abajo
         float out = stacked() ? (side == 1 ? -H : H) : H;
+        cbar.setOpen(folder);
         if (!animate) {
-            cbar.setEdgeTop(top);
+            cbar.setEdgeTop(edge);
             cbar.setTranslationY(y);
             pane.setVisibility(fileMode ? View.VISIBLE : View.GONE);
             pane.setTranslationY(0);
@@ -1433,7 +1441,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             return;
         }
         android.view.animation.Interpolator in = new android.view.animation.DecelerateInterpolator(1.4f);
-        cbar.setEdgeTop(top);
+        cbar.setEdgeTop(edge);
         cbar.animate().translationY(y).setDuration(380).setInterpolator(in).start();
         if (fileMode) {
             pane.setVisibility(View.VISIBLE);

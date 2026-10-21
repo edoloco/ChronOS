@@ -115,6 +115,15 @@ public class KeyboardView extends View {
         build();
     }
 
+    /** Botón de emojis de la barra de arriba (junto a "Teclado"): abre o cierra los emojis (pasa al teclado Android). */
+    public void toggleEmoji() {
+        if (!android) setAndroid(true);
+        page = page == 3 ? 0 : 3;
+        build();
+    }
+
+    public boolean emojiShown() { return android && page == 3; }
+
     private static Key page(String l, String a, float u) { return new Key(ACT, l, null, null, 0, a, u); }
 
     private void build() {
@@ -176,8 +185,7 @@ public class KeyboardView extends View {
             rows.add(new Key[]{page("?123", "page:1", 1.5f), l("¿"), l("¡"), l("["), l("]"), l("<"), l(">"), l("´"), del});
         }
         rows.add(new Key[]{page(page == 0 ? "?123" : "ABC", page == 0 ? "page:1" : "page:0", 1.3f), page("PC", "layout:pc", 1f),
-                page(page == 3 ? "ABC" : "☺", page == 3 ? "page:0" : "page:3", 1f),   // emojis, al lado del cambio de teclado
-                l(","), c(" ", null, null, 4.5f), l("."), sendKey()});   // sin "saltar línea": el punto en su lugar y el espacio más ancho
+                l(","), c(" ", null, null, 5.5f), l("."), sendKey()});   // sin "saltar línea": el punto en su lugar y el espacio más ancho
     }
 
     public void setSink(Sink s) { sink = s; }

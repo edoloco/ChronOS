@@ -50,7 +50,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     private CameraControlView cameraView;
     private EditText field;
     private LinearLayout content, suggestBar;
-    private TextView status, modeBtn, editBtn, resetBtn, sendBtn, outBtn, pairBtn;
+    private TextView status, emojiBtn, modeBtn, editBtn, resetBtn, sendBtn, outBtn, pairBtn;
     private BtPad bt;
     private String btStatus = "";
     private boolean btOk;
@@ -120,10 +120,13 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         editBtn = chip("Editar", v -> toggleEdit());
         resetBtn = chip("Restablecer", v -> { gamepad.resetLayout(); prefs.edit().remove("padLayout").apply(); });
         modeBtn = chip(NAMES[mode], v -> pickMode());
+        emojiBtn = chip("☺", v -> keyboard.toggleEmoji());   // emojis, al lado del botón que cambia el teclado
+        emojiBtn.setTextSize(17);
+        emojiBtn.setPadding(dp(10), 0, dp(10), 0);
         sendBtn = chip("Enviar ➤", v -> { hub.send("kb", "a", "act", "x", "send"); });
         outBtn = chip("", v -> toggleOutput());
         pairBtn = chip("Vincular", v -> pairBluetooth());
-        top.addView(sendBtn); top.addView(pairBtn); top.addView(outBtn); top.addView(resetBtn); top.addView(editBtn); top.addView(modeBtn);
+        top.addView(sendBtn); top.addView(pairBtn); top.addView(outBtn); top.addView(resetBtn); top.addView(editBtn); top.addView(emojiBtn); top.addView(modeBtn);
         // cerrar: un círculo con una X
         TextView x = new TextView(this);
         x.setText("✕");
@@ -390,6 +393,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         sendBtn.setVisibility(mode == DICT ? View.VISIBLE : View.GONE);
         resetBtn.setVisibility(mode == GAME && gamepad.isEditing() ? View.VISIBLE : View.GONE);
         modeBtn.setText(NAMES[mode]);
+        emojiBtn.setVisibility(mode == KB || mode == KB_PAD ? View.VISIBLE : View.GONE);
         if (mode != GAME && gamepad.isEditing()) gamepad.setEditing(false);
         if (mode != DICT) {
             if (imm != null) imm.hideSoftInputFromWindow(field.getWindowToken(), 0);

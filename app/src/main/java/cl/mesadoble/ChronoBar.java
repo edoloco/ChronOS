@@ -76,6 +76,11 @@ public class ChronoBar extends FrameLayout {
     public boolean edgeTop() { return edgeTop; }
     public void setEdgeTop(boolean t) { if (edgeTop != t) { edgeTop = t; requestLayout(); invalidate(); placePlayer(); } }
     public void setNight(boolean n) { night = n; invalidate(); }
+    /** Carpeta abierta: la franja sigue en el gestor de archivos (mismo color), así que su borde exterior no se dibuja. */
+    private boolean open;
+    public void setOpen(boolean o) { if (open != o) { open = o; invalidate(); } }
+    /** Borde exterior de la franja: con la carpeta abierta queda fuera de la vista (sin línea ni brillo). */
+    private float y0() { return open ? (edgeTop ? -3 * dp : getHeight() + 3 * dp) : y(0); }
 
     // ---------------- medidas ----------------
 
@@ -289,8 +294,8 @@ public class ChronoBar extends FrameLayout {
         shape.reset();
         if (kind == CLOCK) {
             // pestaña a la izquierda (reloj), diagonal, franja hacia la derecha
-            shape.moveTo(0, y(0));
-            shape.lineTo(W, y(0));
+            shape.moveTo(0, y0());
+            shape.lineTo(W, y0());
             shape.lineTo(W, y(S));
             shape.lineTo(TW + D, y(S));
             shape.lineTo(TW, y(T));
@@ -298,8 +303,8 @@ public class ChronoBar extends FrameLayout {
         } else if (pp > 0.001f && false) {
             // con música: la parte alta crece desde el logo hacia la izquierda, con su diagonal
             float L = tallLeft();
-            shape.moveTo(0, y(0));
-            shape.lineTo(W, y(0));
+            shape.moveTo(0, y0());
+            shape.lineTo(W, y0());
             shape.lineTo(W, y(T - rr));
             shape.quadTo(W, y(T), W - rr, y(T));
             shape.lineTo(L, y(T));
@@ -307,8 +312,8 @@ public class ChronoBar extends FrameLayout {
             recentsEdge(S, D);
         } else {
             // franja; diagonal y pestaña a la derecha (logo)
-            shape.moveTo(0, y(0));
-            shape.lineTo(W, y(0));
+            shape.moveTo(0, y0());
+            shape.lineTo(W, y0());
             shape.lineTo(W, y(T - rr));
             shape.quadTo(W, y(T), W - rr, y(T));
             shape.lineTo(W - TW, y(T));
@@ -394,8 +399,10 @@ public class ChronoBar extends FrameLayout {
             c.drawRect(0, 0, W, H, fill);
         }
         // brillo desde el borde de la pantalla
-        gloss.setShader(new LinearGradient(0, y(0), 0, y(tab()), 0x40FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
-        c.drawRect(0, 0, W, H, gloss);
+        if (!open) {
+            gloss.setShader(new LinearGradient(0, y(0), 0, y(tab()), 0x40FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
+            c.drawRect(0, 0, W, H, gloss);
+        }
         c.restore();
         int st = CardTheme.stroke();
         stroke.setColor(st != 0 ? st : (CardTheme.dark(CardTheme.barFill(night) | 0xFF000000) ? 0x33FFFFFF : 0x22000000));
