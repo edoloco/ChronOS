@@ -305,6 +305,87 @@ final class Boost {
         if (s != null) try { s.close(); } catch (Exception ignored) { }
     }
 
+    // ---------------- nivel manual de cada teléfono (perillas de "Nivelar volumen") ----------------
+    // Hay teléfonos que suenan más fuerte que otros: cada uno tiene su nivel (porcentaje, 100 = sin cambio).
+    // Bajo 100 se atenúa la pista; sobre 100 se refuerza con LoudnessEnhancer (hasta +6 dB aprox. con 200).
+    //   preferencias "gainP" y "gainE"; mensaje boostGain {p, e} (el principal manda, el extendido guarda)
+
+    static final int GAIN_MAX = 200;
+    private static volatile int myGain = 100;
+    private static final java.util.WeakHashMap<AudioTrack, android.media.audiofx.LoudnessEnhancer> tracks = new java.util.WeakHashMap<>();
+
+    static int gain(Context c, boolean forPrincipal) {
+        return c.getSharedPreferences("mesa", Context.MODE_PRIVATE).getInt(forPrincipal ? "gainP" : "gainE", 100);
+    }
+
+    /** Lee el nivel de ESTE teléfono (según su papel) y lo aplica a lo que esté sonando. */
+    static void loadGain(Context c) {
+        boolean principal = c.getSharedPreferences("mesa", Context.MODE_PRIVATE).getInt("side", -1) == 1;
+        myGain = gain(c, principal);
+        applyAll();
+    }
+
+    /** Guarda los dos niveles (en cualquiera de los teléfonos) y aplica el propio. */
+    static void setGains(Context c, int p, int e) {
+        c.getSharedPreferences("mesa", Context.MODE_PRIVATE).edit().putInt("gainP", p).putInt("gainE", e).apply();
+        loadGain(c);
+    }
+
+    private static synchronized void applyAll() {
+        java.util.Iterator<java.util.Map.Entry<AudioTrack, android.media.audiofx.LoudnessEnhancer>> it = tracks.entrySet().iterator();
+        while (it.hasNext()) {
+            java.util.Map.Entry<AudioTrack, android.media.audiofx.LoudnessEnhancer> en = it.next();
+            AudioTrack t = en.getKey();
+            if (t == null || t.getState() == AudioTrack.STATE_UNINITIALIZED) {
+                if (en.getValue() != null) try { en.getValue().release(); } catch (Exception ignored) { }
+                it.remove();
+                continue;
+            }
+            en.setValue(applyTo(t, en.getValue()));
+        }
+    }
+
+    private static android.media.audiofx.LoudnessEnhancer applyTo(AudioTrack t, android.media.audiofx.LoudnessEnhancer le) {
+        int g = myGain;
+        try { t.setVolume(Math.min(1f, g / 100f)); } catch (Exception ignored) { }
+        try {
+            if (g > 100) {
+                if (le == null) le = new android.media.audiofx.LoudnessEnhancer(t.getAudioSessionId());
+                le.setTargetGain((int) Math.round(2000 * Math.log10(g / 100.0)));   // milibeles
+                le.setEnabled(true);
+            } else if (le != null) le.setEnabled(false);
+        } catch (Exception ignored) { }
+        return le;
+    }
+
+    /** Toda pista de Boost pasa por aquí: queda con el nivel de este teléfono. */
+    private static synchronized AudioTrack levelled(AudioTrack t) {
+        tracks.put(t, applyTo(t, null));
+        return t;
+    }
+
+    /** Tono de prueba (1 s) en ESTE teléfono, con su nivel: para comparar de oído. */
+    static void tone() {
+        new Thread(() -> {
+            int sr = 44100, n = sr;
+            AudioTrack t = null;
+            try {
+                t = track(sr);
+                short[] pcm = new short[n];
+                for (int i = 0; i < n; i++) {
+                    double env = Math.min(1, Math.min(i, n - i) / (sr * 0.03));
+                    pcm[i] = (short) (Math.sin(2 * Math.PI * 660 * i / sr) * 9000 * env);
+                }
+                byte[] b = new byte[n * 2];
+                ByteBuffer.wrap(b).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().put(pcm);
+                t.play();
+                t.write(b, 0, b.length);
+                Thread.sleep(1100);
+            } catch (Exception ignored) { }
+            if (t != null) try { t.stop(); t.release(); } catch (Exception ignored) { }
+        }, "boost-tono").start();
+    }
+
     /** Pista con el búfer más chico posible (para el sonido capturado en vivo). */
     static AudioTrack liveTrack(int sr) {
         int min = AudioTrack.getMinBufferSize(sr, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
@@ -314,17 +395,17 @@ final class Boost {
                 .setBufferSizeInBytes(Math.max(min, sr / 25 * 2))
                 .setTransferMode(AudioTrack.MODE_STREAM);
         try { AudioTrack.Builder.class.getMethod("setPerformanceMode", int.class).invoke(b, 1 /* PERFORMANCE_MODE_LOW_LATENCY */); } catch (Exception ignored) { }
-        return b.build();
+        return levelled(b.build());
     }
 
     static AudioTrack track(int sr) {
         int min = AudioTrack.getMinBufferSize(sr, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
-        return new AudioTrack.Builder()
+        return levelled(new AudioTrack.Builder()
                 .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
                 .setAudioFormat(new AudioFormat.Builder().setSampleRate(sr).setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
                 .setBufferSizeInBytes(Math.max(min * 2, sr / 5 * 2))
                 .setTransferMode(AudioTrack.MODE_STREAM)
-                .build();
+                .build());
     }
 
     /** Escribe el silencio inicial y devuelve cuántos cuadros lleva la pista. */

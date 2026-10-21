@@ -143,6 +143,7 @@ public class Hub implements Link.Listener {
         side = s;
         prefs.edit().putInt("side", s).apply();
         ForceView.apply(app);   // cada teléfono aplica la vista forzada de su papel
+        Boost.loadGain(app);    // y su nivel de volumen de Boost
         if (changed || !started) { started = true; link.start(s == 0); }
     }
 
@@ -259,6 +260,7 @@ public class Hub implements Link.Listener {
             videoAppWas = false;
             main.postDelayed(musicPoll, 1500);
             if (isPrincipal()) main.postDelayed(this::resendTicker, 1500);
+            if (isPrincipal()) send("boostGain", "p", Boost.gain(app, true), "e", Boost.gain(app, false));
             sendImeState();
             sendBattery();
             if (prefs.getBoolean("forceViewPending", false)) {   // vista forzada elegida sin conexión
@@ -392,6 +394,9 @@ public class Hub implements Link.Listener {
             main.post(() -> { if ("close".equals(ls)) ScreenSync.lockNow(app, this); else ScreenSync.wakeNow(app); });
             return;
         }
+        // nivel manual de Boost: el otro teléfono guarda los dos niveles y aplica el suyo; tono de prueba
+        if ("boostGain".equals(t)) { Boost.setGains(app, m.optInt("p", 100), m.optInt("e", 100)); return; }
+        if ("boostTone".equals(t)) { Boost.tone(); return; }
         if ("forceView".equals(t)) { int v = m.optInt("v"); boolean w = m.optInt("w", 1) == 1; main.post(() -> ForceView.set(app, w, v)); return; }
         if ("palsSync".equals(t)) { Pals.applySync(app, m.optJSONObject("s")); return; }
         if ("lockFlip".equals(t)) { prefs.edit().putBoolean("lockFlip", m.optBoolean("on")).apply(); main.post(() -> LockArt.apply(app, this)); return; }

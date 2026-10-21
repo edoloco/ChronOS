@@ -1798,7 +1798,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     // ---------------- ajustes y apps ----------------
 
     private void settingsMenu() {
-        boolean auto = hub.autoKeyboard(), principal = side == 1;
+        boolean principal = side == 1;
         Ui.Sheet sh = new Ui.Sheet(this).title("Ajustes");
         sh.option(Ui.HOME, "Pantalla de inicio", (principal ? "Principal: " + homeLabel(homeDefault(this)) + " · Extendido: " + (otherHomeKnown ? homeLabel(otherHome) : "…")
                 : "Principal: " + (otherHomeKnown ? homeLabel(otherHome) : "…") + " · Extendido: " + homeLabel(homeDefault(this))), this::launcherMenu);
@@ -1809,12 +1809,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 "Principal: " + ForceView.NAMES[fvp].toLowerCase() + " · Extendido: " + ForceView.NAMES[fve].toLowerCase(), fvp != 0 || fve != 0, this::forceViewMenu);
         sh.option(Ui.PALETTE, "Apariencia", "Colores de fondo y menú, pantalla de bloqueo", this::appearanceMenu);
         sh.option(Ui.PALETTE, "Intro", "Al iniciar: " + (prefs.getBoolean("introOn", true) ? "sí" : "no") + " · verla ahora", this::introMenu);
-        boolean gpOn = GamePalActivity.enabled(this);
-        sh.option(Ui.AUTO, -1, "Game Pal: " + (gpOn ? "sí" : "no"), "Control en pantalla en el extendido al jugar Brawl Stars", gpOn, () -> {
-            prefs.edit().putBoolean("gamePal", !gpOn).apply();
-            hub.send("gpPref", "on", !gpOn);
-            Toast.makeText(this, !gpOn ? "Game Pal activado" : "Game Pal desactivado", Toast.LENGTH_SHORT).show();
-        });
+        sh.option(Ui.GEAR, "Configuración y pruebas", "Volumen de los dos, Game Pal, tapa, sensores, teclado, pantalla unida, notificaciones, llamadas, permisos",
+                this::configMenu);
         if (SystemSetup.canSecure(this)) {
             boolean cl = prefs.getBoolean("cleanLock", true);
             sh.option(Ui.LOCK, -1, "Bloqueo sin notificaciones: " + (cl ? "sí" : "no"),
@@ -1824,15 +1820,6 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                         Toast.makeText(this, !cl ? "Pantalla de bloqueo limpia" : "Se vuelven a ver las notificaciones al bloquear", Toast.LENGTH_SHORT).show();
                     });
         }
-        boolean lidOn = LidWatch.enabled(this);
-        sh.option(Ui.LOCK, -1, "Bloquear al cerrar la tapa: " + (lidOn ? "sí" : "no"),
-                "Al cerrar la carcasa se bloquean los dos; al abrir se encienden", lidOn, () -> {
-                    LidWatch.setEnabled(this, hub, !lidOn);
-                    hub.send("lidPref", "on", !lidOn);
-                    Toast.makeText(this, !lidOn ? "Se bloquearán al cerrar la tapa" : "Bloqueo con la tapa desactivado", Toast.LENGTH_SHORT).show();
-                });
-        sh.option(Ui.LOCK, "Prueba de sensores", "Proximidad, luz e imán de los dos teléfonos: para detectar la tapa cerrada",
-                () -> startActivity(SensorTestActivity.intent(this)));
         if (solo) {
             boolean spl = prefs.getBoolean("soloSplit", true);
             sh.option(Ui.LAYOUT_STACK, -1, "Apps: " + (spl ? "arriba, con ChronOS abajo" : "pantalla completa"),
@@ -1841,10 +1828,41 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                         Toast.makeText(this, !spl ? "Las apps se abrirán arriba, con ChronOS abajo" : "Las apps se abrirán a pantalla completa", Toast.LENGTH_SHORT).show();
                     });
         }
+        sh.option(Ui.WIFI, "Conexión", statusText, this::showConnection)
+                .option(Ui.NOTE, "Acerca de la app", Updater.updateAvailable(this)
+                        ? "Hay una versión nueva: " + Updater.latestKnown(this) : "Versión " + Updater.clean(Updater.installedVersion(this)), this::about)
+                .badgeIf(Updater.updateAvailable(this), "1")
+                .button("Cerrar", false, null)
+                .show();
+    }
+
+    /** Ajustes → Configuración y pruebas. */
+    private void configMenu() {
+        boolean auto = hub.autoKeyboard(), principal = side == 1;
+        Ui.Sheet sh = new Ui.Sheet(this).title("Configuración y pruebas");
+        sh.option(Ui.AUTO, -1, "Nivelar volumen (Boost)", "Perillas para que los dos teléfonos suenen igual de fuerte", Boost.enabled(this), this::boostMixer);
+        boolean gpOn = GamePalActivity.enabled(this);
+        sh.option(Ui.AUTO, -1, "Game Pal: " + (gpOn ? "sí" : "no"), "Control en pantalla en el extendido al jugar Brawl Stars", gpOn, () -> {
+            prefs.edit().putBoolean("gamePal", !gpOn).apply();
+            hub.send("gpPref", "on", !gpOn);
+            Toast.makeText(this, !gpOn ? "Game Pal activado" : "Game Pal desactivado", Toast.LENGTH_SHORT).show();
+            configMenu();
+        });
+        boolean lidOn = LidWatch.enabled(this);
+        sh.option(Ui.LOCK, -1, "Bloquear al cerrar la tapa: " + (lidOn ? "sí" : "no"),
+                "Al cerrar la carcasa se bloquean los dos; al abrir se encienden", lidOn, () -> {
+                    LidWatch.setEnabled(this, hub, !lidOn);
+                    hub.send("lidPref", "on", !lidOn);
+                    Toast.makeText(this, !lidOn ? "Se bloquearán al cerrar la tapa" : "Bloqueo con la tapa desactivado", Toast.LENGTH_SHORT).show();
+                    configMenu();
+                });
+        sh.option(Ui.LOCK, "Prueba de sensores", "Proximidad, luz e imán de los dos teléfonos: para detectar la tapa cerrada",
+                () -> startActivity(SensorTestActivity.intent(this)));
         sh.option(Ui.AUTO, -1, "Teclado automático: " + (auto ? "sí" : "no"),
-                        "El teclado aparece solo en el extendido al escribir", false, () -> {
+                        "El teclado aparece solo en el extendido al escribir", auto, () -> {
                             prefs.edit().putBoolean("autoKb", !auto).apply();
                             Toast.makeText(this, !auto ? "El teclado se abrirá solo en el extendido" : "Teclado automático desactivado", Toast.LENGTH_SHORT).show();
+                            configMenu();
                         })
                 .option(principal ? Ui.LOCK : Ui.UNLOCK, -1, "Pantalla unida: " + (ScreenSync.enabled(this) ? "sí" : "no"),
                         "El extendido se enciende, desbloquea y bloquea junto con el principal", ScreenSync.enabled(this), () -> {
@@ -1861,14 +1879,64 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                                   : "Las llamadas del principal se contestan o cuelgan desde este teléfono", principal && CallHub.ready(this),
                         () -> {
                             if (principal) requestPermissions(CallHub.PERMS, 61);
-                            else Toast.makeText(this, "Actívalo en el principal: Ajustes → Llamadas", Toast.LENGTH_LONG).show();
+                            else Toast.makeText(this, "Actívalo en el principal: Ajustes → Configuración y pruebas → Llamadas", Toast.LENGTH_LONG).show();
                         })
                 .option(Ui.GEAR, "Revisar configuración", principal ? "Permisos del principal" : "Permisos del extendido", () -> checkSetup(true))
-                .option(Ui.WIFI, "Conexión", statusText, this::showConnection)
-                .option(Ui.NOTE, "Acerca de la app", Updater.updateAvailable(this)
-                        ? "Hay una versión nueva: " + Updater.latestKnown(this) : "Versión " + Updater.clean(Updater.installedVersion(this)), this::about)
-                .badgeIf(Updater.updateAvailable(this), "1")
-                .button("Cerrar", false, null)
+                .button("Volver", false, this::settingsMenu)
+                .show();
+    }
+
+    /**
+     * Nivelar volumen: un entorno en el PRINCIPAL con dos perillas (principal y extendido) para dejar los dos
+     * teléfonos sonando igual de fuerte en Boost. Bajo 100 % se baja; sobre 100 % se refuerza. Queda guardado.
+     */
+    private void boostMixer() {
+        if (side != 1 && hub.connected() && !solo) {   // el entorno va en el principal
+            hub.send("boostMixOpen");
+            Toast.makeText(this, "Se abrió en el principal", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        boolean n = CardTheme.sheetNight(night);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout knobs = new LinearLayout(this);
+        knobs.setGravity(Gravity.CENTER);
+        Knob kp = new Knob(this, 0, Boost.GAIN_MAX, Boost.gain(this, true)).label("Principal");
+        Knob ke = new Knob(this, 0, Boost.GAIN_MAX, Boost.gain(this, false)).label("Extendido");
+        int face = n ? 0xFF2A3744 : 0xFFFFFFFF;
+        for (Knob k : new Knob[]{kp, ke}) {
+            k.colors(Ui.fg(n), (Ui.fg(n) & 0x00FFFFFF) | 0x26000000, face);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1);
+            lp.setMargins(dp(6), dp(4), dp(6), dp(4));
+            knobs.addView(k, lp);
+        }
+        Knob.Change ch = (v, done) -> {
+            Boost.setGains(this, kp.value(), ke.value());
+            if (done && hub.connected()) hub.send("boostGain", "p", kp.value(), "e", ke.value());
+        };
+        kp.setChange(ch);
+        ke.setChange(ch);
+        box.addView(knobs);
+        TextView tip = new TextView(this);
+        tip.setText("Gira cada perilla (o arrástrala hacia arriba o abajo). Doble toque: vuelve a 100 %. "
+                + "Baja la del teléfono que suena más fuerte, o sube la del más suave, y prueba hasta que suenen igual.");
+        tip.setTextSize(12.5f);
+        tip.setTextColor(Ui.muted(n));
+        tip.setPadding(dp(6), dp(6), dp(6), dp(4));
+        box.addView(tip);
+        boolean on = Boost.enabled(this);
+        new Ui.Sheet(this).title("Nivelar volumen (Boost)")
+                .option(Ui.AUTO, -1, "Boost: " + (on ? "sí" : "no"), "Los dos teléfonos como parlantes estéreo (música y video)", on, () -> {
+                    Boost.setEnabled(this, hub, !on);
+                    Toast.makeText(this, !on ? "Boost activado" : "Boost desactivado", Toast.LENGTH_SHORT).show();
+                    boostMixer();
+                })
+                .view(box)
+                .option(Ui.RECEIVE, "Probar el principal", "Un tono corto en este teléfono", Boost::tone)
+                .option(Ui.SEND, "Probar el extendido", "El mismo tono en el teléfono de abajo", () -> {
+                    if (hub.connected()) hub.send("boostTone"); else Toast.makeText(this, "El extendido no está conectado", Toast.LENGTH_SHORT).show();
+                })
+                .button("Listo", true, null)
                 .show();
     }
 
@@ -4041,6 +4109,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 break;
             case "notif":   // burbuja: en el principal (si ChronOS está a la vista) o en el extendido (si el principal está en otra app)
                 main.post(() -> { if (floatNotif != null) floatNotif.show(m); });
+                break;
+            case "boostMixOpen":   // el extendido pidió abrir las perillas de volumen aquí
+                main.post(this::boostMixer);
                 break;
             case "nlOpen":
                 main.post(() -> showNotifList(false));
