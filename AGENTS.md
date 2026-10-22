@@ -28,6 +28,12 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
    instalan solos. Trabaja en tu rama y abre un *pull request*; el dueño lo aprueba con "Merge".
 5. **Nada de "lanzar/traspasar ventanas" entre pantallas** con una flecha: se probó, trabó el tacto y se quitó
    a pedido. No volver a proponerlo.
+8. **Las dos pantallas son UNA sola.** Lo que se reparte entre los dos teléfonos (lista de notificaciones, gestor
+   de archivos) se comporta como un solo elemento: se mueve junto, sin bordes en la unión. La franja blanca de los
+   dibujos del dueño es el espacio físico **entre** los teléfonos (fuera de las pantallas).
+9. **"Principal disponible"** = el principal muestra ChronOS (`hub.foreground`; en el extendido llega como
+   `here` en el mensaje `ticker`). Burbuja, banda y lista de notificaciones van en el principal (o en los dos) si
+   está disponible; si el principal está en otra app, **solo en el extendido**.
 6. Recursos nuevos: se buscan con `getIdentifier(...)` (el chequeo local usa un `R` mínimo).
 7. Textos para el usuario en español de Chile, cortos y claros. Comentarios del código también en español.
 
@@ -63,11 +69,44 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
 - PALS (apps web acomodadas a horizontal): `Pals` (recetas, catálogo de redes sociales y de Google, íconos) +
   `PalActivity` (WebView con panel en árbol). Google no deja iniciar sesión dentro de un WebView: los PALS de
   Google pueden abrirse en una pestaña de Chrome.
-- Archivos: `FilesActivity`, `FilePane`, `FileServer`. Fotos/música/video: `MediaHub`, `PhotoActivity`, `PlayerActivity`, `VideoActivity`.
-- Sonido repartido: `Boost`, `CaptureService`. Llamadas: `CallHub`, `CallActivity`, `Phone`.
+- Archivos: `FilesActivity`, `FilePane`, `FileServer`. El gestor (`FilePane`) es el **cuerpo de la carpeta**
+  que se abre desde la action bar; lo normal es que las dos ventanas muestren el disco del principal. En el gestor
+  del principal está **"Disco extendido"** (`viewDisk = "e"`): ve, abre y borra archivos del extendido por la
+  conexión (`fsList`, `fsCat`, `fsThumb`, `fsOp`; las fotos se ven grandes con `fsThumb` hasta 1600 px).
+  **Túnel**: copiar/mover entre discos distintos (`fmPush`) lo hace el teléfono dueño de los archivos, que los
+  manda uno por uno al `FileServer` del otro (puerto 47821, con clave; encabezados `put: top/dir/file`).
+  Copias dentro del mismo disco: `fmJob` en el principal. Avance en las dos pantallas: `fmAnim`. Fotos/música/video: `MediaHub`, `PhotoActivity`, `PlayerActivity`, `VideoActivity`.
+- Sonido repartido: `Boost`, `CaptureService`. Nivel manual por teléfono ("Nivelar volumen", entorno con
+  perillas `Knob` que se abre en el principal): prefs `gainP`/`gainE`, mensaje `boostGain {p,e}`, tono de prueba
+  `boostTone`. Bajo 100 % se atenúa la pista; sobre 100 % se refuerza con `LoudnessEnhancer`. Toda pista de Boost
+  pasa por `Boost.track()`/`liveTrack()` (ahí se aplica el nivel). Llamadas: `CallHub`, `CallActivity`, `Phone`.
 - Pantallas unidas y tapa: `ScreenSync`, `LidWatch` (imán), `LockArt` (fondo de bloqueo), `SensorTestActivity`.
-- Barra y notificaciones: `ChronoBar`, `TickerView`, `NotifService`, `NotifCard`, `RecentsBar`.
+- Barra y notificaciones: `ChronoBar`, `TickerView`, `NotifService`, `NotifCard`, `RecentsBar`, `TaskbarView`, `QuickToggles`.
+  - Las action bars son **CARPETAS (folders)**: CLOCK (principal, arriba, pestaña del reloj colgando) y NAV
+    (extendido, abajo, pestaña del logo hacia arriba). Las notificaciones (banda) y el reproductor son **hojas**
+    que asoman por detrás del fichero. Al abrir el gestor, la carpeta **no se da vuelta**: mantiene su forma, se
+    desliza hasta la unión y el gestor es su cuerpo (mismo relleno: `ChronoBar.paintBody`; hoja interior gris
+    oscuro). La del extendido queda pegada al techo de la pantalla. Abrir: arrastrar hacia el centro; cerrar: el
+    gesto contrario (`ChronoBar.setOpen`, `MainActivity.layoutChrono`).
+  - `QuickToggles`: accesos rápidos en la franja de la barra del reloj (linterna, bluetooth, captura, QR, etc.,
+    con lápiz para elegirlos; pref `qtSet`). Lo que Android no deja cambiar abre su ajuste o el panel del sistema.
+  - `TaskbarView`: apps abiertas del principal; mantener presionado marca para cerrar; botones rojo "Cerrar N" y
+    azul "Cerrar todo" (menos ChronOS). No debe bloquear el arrastre de la barra.
+  - Burbuja (`NotifCard`): blanca, 4 s. Lista de notificaciones en las dos pantallas: **una sola lista** con un
+    solo desplazamiento compartido en dp (`nlS`, mensajes `nlVp`, `nlS`, `nlOpen`, `nlClose`; filas de alto fijo).
+- Forzar vista (`ForceView`): un ajuste para el principal (`forceView`) y otro para el extendido (`forceViewE`);
+  cada teléfono aplica el de su papel. Mensaje `forceView {v, w}` (w = 1 principal, 0 extendido).
+- Ajustes: Pantalla de inicio, Este teléfono es el…, Forzar vista, Apariencia (colores y bloqueo), Intro,
+  **Configuración y pruebas** (Nivelar volumen, Game Pal, tapa, sensores, teclado automático, pantalla unida,
+  notificaciones, llamadas, revisar configuración), Conexión, Acerca de.
 - Instalado en el sistema (J7 Prime): `SystemSetup` + carpeta `sistema/` (zip para TWRP).
+
+## Cómo publica cada instancia
+
+Cada IA/persona que trabaja en el proyecto sube sus cambios a GitHub por su cuenta (rama + *pull request*, o
+directo si el dueño lo pidió). Antes de subir: `git fetch` y `rebase` sobre `main`, porque otra instancia puede
+haber publicado mientras tanto. El dueño también aplica parches desde Termux en el teléfono (`git apply` +
+`gh pr create --fill` + `gh pr merge --merge`).
 
 ## Compilar y publicar
 
