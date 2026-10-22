@@ -525,6 +525,7 @@ public class Hub implements Link.Listener {
                     "Activar widget", "Toca para permitir el widget en el principal");
             return;
         }
+        if ("fmPush".equals(t)) { FileServer.get(app).pushJob(m, this); return; }   // túnel: este teléfono manda sus archivos al otro
         if ("fmJob".equals(t)) { if (isPrincipal()) FileServer.get(app).runJob(m, this); return; }
         if ("fmOpenFile".equals(t)) { if (isPrincipal()) FileServer.openHere(app, this, m.optString("path")); return; }
         if ("fmCancel".equals(t)) { FileServer.get(app).cancelJob(); return; }

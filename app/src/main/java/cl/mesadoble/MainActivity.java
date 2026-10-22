@@ -1496,7 +1496,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         // el gestor ocupa lo que la barra deja libre
         int pTop, pBottom;
         int vh = cbar.visualHeight();
-        int body = bh - Math.round(cbar.strip());   // con la carpeta abierta, el gestor llega hasta la franja
+        int body = bh;   // con la carpeta abierta, el gestor termina donde empieza la barra (nada queda tapado por la franja)
         if (folder && top) {
             // la pestaña del logo queda pegada al techo de la pantalla (sin espacio arriba: ese espacio es el de
             // entre los teléfonos, fuera de la pantalla)

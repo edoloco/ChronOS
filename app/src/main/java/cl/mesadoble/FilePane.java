@@ -59,7 +59,14 @@ public class FilePane extends FrameLayout implements Link.Listener {
     private final Hub hub;
     private final float dp;
     private final KbTheme th;
-    private boolean remote() { return !hub.isPrincipal(); }
+    /** Disco extendido: el gestor del extendido muestra SUS propios archivos (en vez de los del principal). */
+    private boolean localDisk;
+    private boolean remote() { return !hub.isPrincipal() && !localDisk; }
+    /** De qué teléfono son los archivos que se ven aquí: "p" principal, "e" extendido. */
+    private String disk() { return hub.isPrincipal() || !localDisk ? "p" : "e"; }
+    /** Ventana: "p" la del principal, "e" la del extendido (para el avance de las copias). */
+    private String pane() { return hub.isPrincipal() ? "p" : "e"; }
+    private String otherDisk = "p";
     private final Handler main = new Handler(Looper.getMainLooper());
     private final ExecutorService work = Executors.newSingleThreadExecutor(), thumbs = Executors.newFixedThreadPool(2);
     private final Map<Integer, Wait> waits = new ConcurrentHashMap<>();
@@ -164,7 +171,8 @@ public class FilePane extends FrameLayout implements Link.Listener {
         addView(col, new LayoutParams(-1, -1));
         transferView = new TransferView(a, night);
         transferView.setListener(() -> {
-            if (remote()) hub.send("fmCancel"); else FileServer.get(a).cancelJob();
+            FileServer.get(a).cancelJob();   // la copia puede ir en cualquiera de los dos (túnel)
+            if (hub.connected()) hub.send("fmCancel");
             transferView.update("Cancelando…", -1, "");
         });
         addView(transferView, new LayoutParams(-1, -1));
@@ -375,9 +383,9 @@ public class FilePane extends FrameLayout implements Link.Listener {
             case "apps": return "Aplicaciones";
             case "dir": {
                 String root = FileServer.root().getAbsolutePath();
-                return path.equals(root) ? "Almacenamiento" : new File(path).getName();
+                return path.equals(root) ? (localDisk ? "Disco extendido" : "Almacenamiento") : new File(path).getName();
             }
-            default: return "Archivos del teléfono principal";
+            default: return localDisk ? "Disco extendido" : "Archivos del teléfono principal";
         }
     }
 
@@ -385,10 +393,10 @@ public class FilePane extends FrameLayout implements Link.Listener {
         final String m = mode, p = path;
         title.setText(catTitle());
         String root = FileServer.root().getAbsolutePath();
-        crumb.setText("dir".equals(m) ? "/ RAÍZ" + (p.startsWith(root) ? p.substring(root.length()) : p).replace("/", " / ").replace(" /  / ", " / ")
+        crumb.setText("dir".equals(m) ? (localDisk ? "/ DISCO EXTENDIDO" : "/ RAÍZ") + (p.startsWith(root) ? p.substring(root.length()) : p).replace("/", " / ").replace(" /  / ", " / ")
                 : "home".equals(m) ? "Inicio" : "/ " + catTitle().toUpperCase(Locale.ROOT));
         if (peer != null) { peer.otherPath = "dir".equals(m) ? p : ""; peer.refreshActions(); }
-        else if (hub.connected()) hub.send("fpPath", "path", "dir".equals(m) ? p : "");
+        else if (hub.connected()) hub.send("fpPath", "path", "dir".equals(m) ? p : "", "disk", disk());
         if (remote()) showStatus(hub.connected() ? "Leyendo el teléfono principal…" : "El principal no está conectado");
         homeScroll.setVisibility("home".equals(m) ? VISIBLE : GONE);
         list.setVisibility("home".equals(m) ? GONE : VISIBLE);
@@ -465,12 +473,18 @@ public class FilePane extends FrameLayout implements Link.Listener {
         // siempre se ve de qué teléfono son los archivos: del principal
         TextView who = new TextView(a);
         String model = res == null ? "" : res.optString("model");
-        who.setText("📱  Teléfono principal" + (model.isEmpty() ? "" : "  ·  " + model) + (remote() ? "  (visto desde el extendido)" : ""));
+        who.setText(localDisk ? "📱  Teléfono extendido (este)" + (model.isEmpty() ? "" : "  ·  " + model)
+                : "📱  Teléfono principal" + (model.isEmpty() ? "" : "  ·  " + model) + (remote() ? "  (visto desde el extendido)" : ""));
         who.setTextSize(12.5f);
         who.setTextColor(th.muted);
         who.setPadding(dp(8), dp(6), dp(8), dp(2));
         home.addView(who);
         List<View> tiles = new ArrayList<>();
+        // el túnel entre los dos teléfonos: solo en el extendido, para pasar de un disco al otro
+        if (!hub.isPrincipal() && peer == null) {
+            if (!localDisk) tiles.add(tile("HDD", 0xFF37474F, "Disco extendido", "Este teléfono", true, v -> openLocalDisk()));
+            else tiles.add(tile("HDD", 0xFFF57C1F, "Disco principal", "Volver al principal", true, v -> { localDisk = false; goHome(); }));
+        }
         JSONArray st = res == null ? null : res.optJSONArray("storages");
         for (int i = 0; st != null && i < st.length(); i++) {
             JSONObject o = st.optJSONObject(i);
@@ -502,6 +516,41 @@ public class FilePane extends FrameLayout implements Link.Listener {
         if (err != null) showStatus(err);
     }
 
+    /** Abre el disco del extendido (pide el permiso de archivos si falta). */
+    private void openLocalDisk() {
+        if (!FileServer.hasAccess(a)) {
+            toast("Permite a ChronOS ver los archivos de este teléfono y vuelve a tocar");
+            try { a.startActivity(FileServer.accessIntent(a)); } catch (Exception ignored) { }
+            return;
+        }
+        localDisk = true;
+        thumbCache.clear();
+        openDir(FileServer.root().getAbsolutePath());
+    }
+
+    /** Ícono de disco duro (dibujado: no hay emoji de disco duro). */
+    private static final class HddIcon extends android.graphics.drawable.Drawable {
+        private final android.graphics.Paint p = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        @Override public void draw(Canvas c) {
+            android.graphics.Rect b = getBounds();
+            float w = b.width(), h = b.height(), x0 = b.left + w * 0.2f, x1 = b.right - w * 0.2f, y0 = b.top + h * 0.3f, y1 = b.bottom - h * 0.3f;
+            float r = h * 0.07f;
+            p.setStyle(android.graphics.Paint.Style.FILL);
+            p.setColor(0xFFECEFF1);
+            c.drawRoundRect(x0, y0, x1, y1, r, r, p);
+            p.setColor(0xFF90A4AE);
+            c.drawRect(x0, y1 - (y1 - y0) * 0.38f, x1, y1 - (y1 - y0) * 0.36f, p);
+            p.setColor(0xFF4CAF50);
+            c.drawCircle(x1 - (y1 - y0) * 0.22f, y1 - (y1 - y0) * 0.18f, (y1 - y0) * 0.07f, p);
+            p.setColor(0xFF78909C);
+            for (int i = 0; i < 4; i++) c.drawRect(x0 + (y1 - y0) * (0.18f + i * 0.16f), y1 - (y1 - y0) * 0.26f,
+                    x0 + (y1 - y0) * (0.26f + i * 0.16f), y1 - (y1 - y0) * 0.1f, p);
+        }
+        @Override public void setAlpha(int al) { p.setAlpha(al); }
+        @Override public void setColorFilter(android.graphics.ColorFilter cf) { p.setColorFilter(cf); }
+        @Override public int getOpacity() { return android.graphics.PixelFormat.TRANSLUCENT; }
+    }
+
     private static String count(JSONObject res, String k) {
         if (res == null || !res.has(k)) return "";
         int n = res.optInt(k);
@@ -514,7 +563,9 @@ public class FilePane extends FrameLayout implements Link.Listener {
         t.setGravity(Gravity.CENTER_HORIZONTAL);
         t.setPadding(dp(4), dp(12), dp(4), dp(10));
         TextView ic = new TextView(a);
-        ic.setText(icon);
+        boolean hdd = "HDD".equals(icon);
+        ic.setText(hdd ? "" : icon);
+        if (hdd) ic.setForeground(new HddIcon());
         ic.setTextSize(26);
         ic.setGravity(Gravity.CENTER);
         GradientDrawable g = new GradientDrawable();
@@ -714,12 +765,18 @@ public class FilePane extends FrameLayout implements Link.Listener {
         JSONArray arr = new JSONArray();
         for (String p : sel) arr.put(p);
         String what = sel.size() == 1 ? new File(sel.iterator().next()).getName() : sel.size() + " elementos";
+        boolean tunnel = peer == null && !disk().equals(otherDisk);   // de un teléfono al otro
         JSONObject job = new JSONObject();
         try {
-            job.put("t", "fmJob"); job.put("items", arr); job.put("to", otherPath); job.put("move", move); job.put("src", remote() ? "e" : "p");
-            job.put("title", (move ? "Moviendo " : "Copiando ") + what + " a " + new File(otherPath).getName());
+            job.put("t", tunnel ? "fmPush" : "fmJob"); job.put("items", arr); job.put("to", otherPath); job.put("move", move); job.put("src", pane());
+            job.put("title", (move ? "Moviendo " : "Copiando ") + what + " a " + new File(otherPath).getName()
+                    + (tunnel ? ("e".equals(otherDisk) ? " (extendido)" : " (principal)") : ""));
         } catch (JSONException ignored) { }
-        if (remote()) hub.send(job); else FileServer.get(a).runJob(job, hub);
+        if (tunnel) {
+            if (!hub.connected()) { toast("El otro teléfono no está conectado"); return; }
+            // lo manda el teléfono dueño de los archivos
+            if (remote()) hub.send(job); else FileServer.get(a).pushJob(job, hub);
+        } else if (remote()) hub.send(job); else FileServer.get(a).runJob(job, hub);
         sel.clear();
         refresh();
     }
@@ -753,7 +810,7 @@ public class FilePane extends FrameLayout implements Link.Listener {
     private void delete() {
         List<String> items = new ArrayList<>(sel);
         new Ui.Sheet(a).title("Eliminar " + (items.size() == 1 ? "\"" + new File(items.get(0)).getName() + "\"" : items.size() + " elementos"))
-                .message("Se borran del teléfono principal. No se puede deshacer.")
+                .message("Se borran del teléfono " + ("e".equals(disk()) ? "extendido" : "principal") + ". No se puede deshacer.")
                 .button("Cancelar", false, null)
                 .button("Eliminar", true, () -> background(() -> { for (String p : items) op("delete", "path", p); }))
                 .show();
@@ -821,11 +878,11 @@ public class FilePane extends FrameLayout implements Link.Listener {
             Wait w = waits.get(m.optInt("req"));
             if (w != null) { w.r = m; w.l.countDown(); }
         } else if ("fpPath".equals(t) && peer == null) {
-            main.post(() -> { otherPath = m.optString("path"); refreshActions(); });
+            main.post(() -> { otherPath = m.optString("path"); otherDisk = m.optString("disk", "p"); refreshActions(); });
         } else if ("fmAnim".equals(t)) {
             main.post(() -> {
                 String s = m.optString("s");
-                boolean mine = (remote() ? "e" : "p").equals(m.optString("src"));
+                boolean mine = pane().equals(m.optString("src"));
                 if ("begin".equals(s)) transferView.begin(mine, m.optString("title"), dirX(), dirY(), true);
                 else if ("prog".equals(s)) transferView.update(m.optString("name"), (float) m.optDouble("p", -1), m.optString("d"));
                 else if ("end".equals(s)) {

@@ -455,6 +455,129 @@ public class FileServer {
         });
     }
 
+    // ---------------- túnel entre los dos teléfonos ----------------
+    // El teléfono dueño de los archivos los manda, uno por uno, por el canal de contenido del otro (puerto 47821,
+    // con su clave). Encabezados:  {k, put:"top", to, name, dir} → {ok, name}  (nombre libre en el destino)
+    //                              {k, put:"file", to, rel, size, m} + bytes → {ok}
+    //                              {k, put:"dir", to, rel} → {ok}
+
+    /** Copia (o mueve) lo elegido de ESTE teléfono a una carpeta del otro. */
+    void pushJob(JSONObject m, Hub hub) {
+        if (jobRunning) return;
+        jobRunning = true;
+        jobCancel = false;
+        work.execute(() -> {
+            String src = m.optString("src");
+            JSONArray items = m.optJSONArray("items");
+            boolean move = m.optBoolean("move");
+            String to = m.optString("to");
+            int total = items != null ? items.length() : 0;
+            emit(hub, "begin", src, m.optString("title"), "", -1, "", null);
+            String err = null;
+            int done = 0;
+            try {
+                String ip = hub.peerIp();
+                if (ip == null || remoteToken == null) throw new IOException("El otro teléfono no está conectado");
+                if (!hasAccess(app)) { askAccess(); throw new IOException("Falta el permiso de archivos en este teléfono"); }
+                for (int i = 0; i < total && !jobCancel; i++) {
+                    File f = new File(items.optString(i));
+                    final int idx = i;
+                    try {
+                        JSONObject h = new JSONObject();
+                        h.put("put", "top"); h.put("to", to); h.put("name", f.getName()); h.put("dir", f.isDirectory());
+                        JSONObject r = ask(ip, h, null, 0);
+                        String top = r.optString("name", f.getName());
+                        final long[] last = {0};
+                        pushTree(ip, f, to, top, (name, d, size) -> {
+                            long now = System.currentTimeMillis();
+                            if (now - last[0] < 150 && d < size) return;
+                            last[0] = now;
+                            float p = size > 0 ? d / (float) size : -1;
+                            emit(hub, "prog", src, null, name, p, (p >= 0 ? Math.round(p * 100) + "% · " : "") + (idx + 1) + " de " + total, null);
+                        });
+                        if (move && !jobCancel) delete(f);
+                        done++;
+                    } catch (IOException | JSONException e) { if (!jobCancel) err = f.getName() + ": " + e.getMessage(); }
+                }
+            } catch (IOException e) { err = e.getMessage(); }
+            String msg = jobCancel ? "Cancelado" : err != null ? err
+                    : (move ? "Movido" : "Copiado") + " al otro teléfono" + (done == 1 ? "" : ": " + done + " elementos");
+            emit(hub, "end", src, null, "", 1, "", msg);
+            jobRunning = false;
+        });
+    }
+
+    private void pushTree(String ip, File f, String to, String rel, Step st) throws IOException, JSONException {
+        if (jobCancel) throw new IOException("Cancelado");
+        JSONObject h = new JSONObject();
+        h.put("to", to); h.put("rel", rel);
+        if (f.isDirectory()) {
+            h.put("put", "dir");
+            ask(ip, h, null, 0);
+            File[] cs = f.listFiles();
+            if (cs != null) for (File c : cs) pushTree(ip, c, to, rel + "/" + c.getName(), st);
+        } else {
+            h.put("put", "file"); h.put("size", f.length()); h.put("m", f.lastModified());
+            ask(ip, h, f, f.length());
+            if (st != null) st.on(f.getName(), f.length(), f.length());
+        }
+    }
+
+    /** Una conexión: encabezado, contenido (si hay) y respuesta. */
+    private JSONObject ask(String ip, JSONObject h, File body, long size) throws IOException, JSONException {
+        h.put("k", remoteToken);
+        try (Socket sock = new Socket()) {
+            sock.connect(new InetSocketAddress(ip, remotePort), 4000);
+            sock.setSoTimeout(60000);
+            OutputStream out = new BufferedOutputStream(sock.getOutputStream());
+            InputStream in = new BufferedInputStream(sock.getInputStream());
+            writeLine(out, h);
+            if (body != null) try (InputStream fin = new FileInputStream(body)) {
+                pipe(fin, out, size, n -> !jobCancel);
+            }
+            JSONObject r = new JSONObject(readLine(in));
+            if (!r.optBoolean("ok")) throw new IOException("err".equals(r.optString("err")) ? "No se pudo" : r.optString("err", "No se pudo"));
+            return r;
+        }
+    }
+
+    /** Ruta segura dentro de la carpeta destino (sin "..", sin salir de ella). */
+    private static File inside(String to, String rel) throws IOException {
+        File base = resolve(to).getCanonicalFile(), f = new File(base, rel).getCanonicalFile();
+        if (!f.getPath().startsWith(base.getPath() + "/") && !f.equals(base)) throw new IOException("Ruta inválida");
+        return f;
+    }
+
+    /** Lado que recibe: crea carpetas y guarda los archivos que manda el otro teléfono. */
+    private void receive(JSONObject h, InputStream in, OutputStream out) throws IOException, JSONException {
+        JSONObject r = new JSONObject();
+        String kind = h.optString("put");
+        if ("top".equals(kind)) {
+            File dst = resolve(h.optString("to"));
+            if (!dst.isDirectory()) throw new IOException("La carpeta de destino no existe");
+            String nm = new File(h.optString("name")).getName();
+            if (nm.isEmpty() || nm.equals("..")) throw new IOException("Nombre inválido");
+            File u = unique(dst, nm);
+            if (h.optBoolean("dir") && !u.mkdirs()) throw new IOException("No pude crear " + u.getName());
+            r.put("name", u.getName());
+        } else if ("dir".equals(kind)) {
+            File d = inside(h.optString("to"), h.optString("rel"));
+            if (!d.isDirectory() && !d.mkdirs()) throw new IOException("No pude crear " + d.getName());
+        } else if ("file".equals(kind)) {
+            File f = inside(h.optString("to"), h.optString("rel"));
+            File parent = f.getParentFile();
+            if (parent != null && !parent.isDirectory()) //noinspection ResultOfMethodCallIgnored
+                parent.mkdirs();
+            try (OutputStream fo = new FileOutputStream(f)) { pipe(in, fo, h.optLong("size"), null); }
+            catch (IOException e) { //noinspection ResultOfMethodCallIgnored
+                f.delete(); throw e; }
+            if (h.optLong("m") > 0) //noinspection ResultOfMethodCallIgnored
+                f.setLastModified(h.optLong("m"));
+        } else throw new IOException("no disponible");
+        r.put("ok", true);
+        writeLine(out, r);
+    }
+
     /** Avance para las dos pantallas: la de este teléfono (oyentes locales) y la del otro. */
     private static void emit(Hub hub, String s, String src, String title, String name, float p, String d, String msg) {
         JSONObject o = new JSONObject();
@@ -513,7 +636,11 @@ public class FileServer {
             }
             if (h.has("apk")) { AppShare.serve(app, h, out); return; }   // instalar en ambos: APK de una app del principal
             if (!hasAccess(app)) { askAccess(); r.put("ok", false); r.put("err", "permiso"); writeLine(out, r); return; }
-            // el gestor de archivos solo administra el principal: no se copian archivos entre teléfonos
+            if (h.has("put")) {   // túnel: el otro teléfono manda archivos aquí
+                try { receive(h, in, out); }
+                catch (IOException e) { r.put("ok", false); r.put("err", e.getMessage() == null ? "No se pudo" : e.getMessage()); writeLine(out, r); }
+                return;
+            }
             r.put("ok", false); r.put("err", "no disponible"); writeLine(out, r);
         } catch (Exception ignored) { }
     }
