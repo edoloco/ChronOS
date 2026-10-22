@@ -250,71 +250,40 @@ public class MesaAccess extends AccessibilityService {
         } catch (Exception ignored) { }
     }
 
-    // ---- gamepad: cada control toca el principal en el mismo lugar relativo
-    private GestureDescription.StrokeDescription joyStroke;
-    private String joyOwner = "";
-    private float joyX, joyY, joyTX, joyTY;
-    private final Runnable joyHold = new Runnable() {
-        @Override public void run() {
-            if (joyStroke == null) return;
-            continueJoy(joyTX, joyTY, true);
-            h.postDelayed(this, 45);
-        }
-    };
+    // ---- gamepad: cada control toca el principal en el mismo lugar relativo, con los dedos virtuales de Game Pal
+    // (se puede mover y disparar al mismo tiempo, y el dedo queda apoyado mientras se aprieta el botón)
+    private final java.util.Map<String, Integer> padFinger = new java.util.HashMap<>();
+    private final java.util.Map<String, float[]> padLast = new java.util.HashMap<>();
 
-    private void continueJoy(float tx, float ty, boolean willContinue) {
-        if (joyStroke == null) return;
-        Path p = new Path();
-        p.moveTo(joyX, joyY);
-        p.lineTo(tx, ty);
-        try {
-            joyStroke = joyStroke.continueStroke(p, 0, 60, willContinue);
-            dispatchGesture(new GestureDescription.Builder().addStroke(joyStroke).build(), null, null);
-            float[] end = endOf(p, tx, ty);   // el siguiente tramo debe empezar justo donde Android dejó el dedo
-            joyX = end[0]; joyY = end[1];
-        } catch (Exception e) { joyStroke = null; }
-        if (!willContinue) joyStroke = null;
-    }
-
-    static float[] endOf(Path p, float tx, float ty) {
-        android.graphics.PathMeasure pm = new android.graphics.PathMeasure(p, false);
-        float[] e = new float[2];
-        if (pm.getLength() > 0 && pm.getPosTan(pm.getLength() * 1.0f, e, null)) return e;
-        return new float[]{tx, ty};
+    /** Un dedo virtual fijo por control (los números de Game Pal son más bajos: no se pisan). */
+    private int padId(String id) {
+        Integer f = padFinger.get(id);
+        if (f == null) { f = 1000 + padFinger.size(); padFinger.put(id, f); }
+        return f;
     }
 
     private void pad(JSONObject m) {
         Point sc = screen();
         float x = (float) m.optDouble("x", 0.5) * sc.x, y = (float) m.optDouble("y", 0.5) * sc.y;
-        String a = m.optString("a");
-        if ("btn".equals(a)) {
-            if (m.optBoolean("down")) tap(x, y, 50);
+        String id = m.optString("id");
+        int f = padId(id);
+        if ("btn".equals(m.optString("a"))) {
+            GamePalTouch.touch(this, f, m.optBoolean("down") ? 0 : 2, x, y);
             return;
         }
-        // joystick
+        // joystick: empieza en el centro y se mueve hasta el borde; al soltar levanta donde estaba (así el ataque apunta)
         int phase = m.optInt("ph");
         float r = (float) m.optDouble("r", 0.2) * Math.min(sc.x, sc.y);
-        float tx = x + (float) m.optDouble("nx") * r, ty = y + (float) m.optDouble("ny") * r;
-        String id = m.optString("id");
-        if (phase != 0 && !id.equals(joyOwner)) return;   // Android ejecuta un gesto a la vez: manda el último joystick tocado
-        if (phase == 0) {
-            joyOwner = id;
-            h.removeCallbacks(joyHold);
-            Path p = new Path();
-            p.moveTo(x, y);
-            p.lineTo(tx, ty);
-            joyStroke = new GestureDescription.StrokeDescription(p, 0, 60, true);
-            try { dispatchGesture(new GestureDescription.Builder().addStroke(joyStroke).build(), null, null); }
-            catch (Exception e) { joyStroke = null; return; }
-            float[] end = endOf(p, tx, ty);
-            joyX = end[0]; joyY = end[1]; joyTX = tx; joyTY = ty;
-            h.postDelayed(joyHold, 45);
-        } else if (phase == 1) {
-            joyTX = tx; joyTY = ty;
-        } else {
-            h.removeCallbacks(joyHold);
-            continueJoy(x, y, false);
+        float nx = (float) m.optDouble("nx", 0), ny = (float) m.optDouble("ny", 0);
+        if (phase == 2) {
+            float[] l = padLast.remove(id);
+            if (l != null) { nx = l[0]; ny = l[1]; }
+            GamePalTouch.touch(this, f, 2, x + nx * r, y + ny * r);
+            return;
         }
+        if (phase == 0) GamePalTouch.touch(this, f, 0, x, y);
+        if (phase == 1 || nx != 0 || ny != 0) GamePalTouch.touch(this, f, 1, x + nx * r, y + ny * r);
+        padLast.put(id, new float[]{nx, ny});
     }
 
     // ---------------- cambio de teclado ----------------
