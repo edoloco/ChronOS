@@ -59,11 +59,16 @@ public class FilePane extends FrameLayout implements Link.Listener {
     private final Hub hub;
     private final float dp;
     private final KbTheme th;
-    /** Disco extendido: el gestor del extendido muestra SUS propios archivos (en vez de los del principal). */
-    private boolean localDisk;
-    private boolean remote() { return !hub.isPrincipal() && !localDisk; }
-    /** De qué teléfono son los archivos que se ven aquí: "p" principal, "e" extendido. */
-    private String disk() { return hub.isPrincipal() || !localDisk ? "p" : "e"; }
+    /**
+     * De qué teléfono son los archivos que se ven aquí: "p" principal (lo normal en las dos ventanas) o "e" el
+     * extendido ("Disco extendido", desde el gestor del principal: por ejemplo, para buscar una captura del extendido).
+     */
+    private String viewDisk = "p";
+    private boolean extDisk() { return "e".equals(viewDisk); }
+    private String disk() { return viewDisk; }
+    /** Los archivos están en el otro teléfono: se piden por la conexión. */
+    private boolean remote() { return !viewDisk.equals(pane()); }
+    private String diskName() { return extDisk() ? "extendido" : "principal"; }
     /** Ventana: "p" la del principal, "e" la del extendido (para el avance de las copias). */
     private String pane() { return hub.isPrincipal() ? "p" : "e"; }
     private String otherDisk = "p";
@@ -383,9 +388,9 @@ public class FilePane extends FrameLayout implements Link.Listener {
             case "apps": return "Aplicaciones";
             case "dir": {
                 String root = FileServer.root().getAbsolutePath();
-                return path.equals(root) ? (localDisk ? "Disco extendido" : "Almacenamiento") : new File(path).getName();
+                return path.equals(root) ? (extDisk() ? "Disco extendido" : "Almacenamiento") : new File(path).getName();
             }
-            default: return localDisk ? "Disco extendido" : "Archivos del teléfono principal";
+            default: return extDisk() ? "Disco extendido" : "Archivos del teléfono principal";
         }
     }
 
@@ -393,11 +398,11 @@ public class FilePane extends FrameLayout implements Link.Listener {
         final String m = mode, p = path;
         title.setText(catTitle());
         String root = FileServer.root().getAbsolutePath();
-        crumb.setText("dir".equals(m) ? (localDisk ? "/ DISCO EXTENDIDO" : "/ RAÍZ") + (p.startsWith(root) ? p.substring(root.length()) : p).replace("/", " / ").replace(" /  / ", " / ")
+        crumb.setText("dir".equals(m) ? (extDisk() ? "/ DISCO EXTENDIDO" : "/ RAÍZ") + (p.startsWith(root) ? p.substring(root.length()) : p).replace("/", " / ").replace(" /  / ", " / ")
                 : "home".equals(m) ? "Inicio" : "/ " + catTitle().toUpperCase(Locale.ROOT));
         if (peer != null) { peer.otherPath = "dir".equals(m) ? p : ""; peer.refreshActions(); }
         else if (hub.connected()) hub.send("fpPath", "path", "dir".equals(m) ? p : "", "disk", disk());
-        if (remote()) showStatus(hub.connected() ? "Leyendo el teléfono principal…" : "El principal no está conectado");
+        if (remote()) showStatus(hub.connected() ? "Leyendo el teléfono " + diskName() + "…" : "El " + diskName() + " no está conectado");
         homeScroll.setVisibility("home".equals(m) ? VISIBLE : GONE);
         list.setVisibility("home".equals(m) ? GONE : VISIBLE);
         work.execute(() -> {
@@ -473,17 +478,18 @@ public class FilePane extends FrameLayout implements Link.Listener {
         // siempre se ve de qué teléfono son los archivos: del principal
         TextView who = new TextView(a);
         String model = res == null ? "" : res.optString("model");
-        who.setText(localDisk ? "📱  Teléfono extendido (este)" + (model.isEmpty() ? "" : "  ·  " + model)
-                : "📱  Teléfono principal" + (model.isEmpty() ? "" : "  ·  " + model) + (remote() ? "  (visto desde el extendido)" : ""));
+        who.setText("📱  Teléfono " + diskName() + (model.isEmpty() ? "" : "  ·  " + model)
+                + (remote() ? "  (visto desde el " + (hub.isPrincipal() ? "principal" : "extendido") + ")" : ""));
         who.setTextSize(12.5f);
         who.setTextColor(th.muted);
         who.setPadding(dp(8), dp(6), dp(8), dp(2));
         home.addView(who);
         List<View> tiles = new ArrayList<>();
-        // el túnel entre los dos teléfonos: solo en el extendido, para pasar de un disco al otro
-        if (!hub.isPrincipal() && peer == null) {
-            if (!localDisk) tiles.add(tile("HDD", 0xFF37474F, "Disco extendido", "Este teléfono", true, v -> openLocalDisk()));
-            else tiles.add(tile("HDD", 0xFFF57C1F, "Disco principal", "Volver al principal", true, v -> { localDisk = false; goHome(); }));
+        // el túnel entre los dos teléfonos: en el gestor del principal, para ver los archivos del extendido
+        if (hub.isPrincipal() && peer == null) {
+            if (!extDisk()) tiles.add(tile("HDD", 0xFF37474F, "Disco extendido", hub.connected() ? "Archivos del extendido" : "Sin conexión",
+                    hub.connected(), v -> openExtDisk()));
+            else tiles.add(tile("HDD", 0xFFF57C1F, "Disco principal", "Volver a este teléfono", true, v -> { viewDisk = "p"; thumbCache.clear(); goHome(); }));
         }
         JSONArray st = res == null ? null : res.optJSONArray("storages");
         for (int i = 0; st != null && i < st.length(); i++) {
@@ -516,16 +522,12 @@ public class FilePane extends FrameLayout implements Link.Listener {
         if (err != null) showStatus(err);
     }
 
-    /** Abre el disco del extendido (pide el permiso de archivos si falta). */
-    private void openLocalDisk() {
-        if (!FileServer.hasAccess(a)) {
-            toast("Permite a ChronOS ver los archivos de este teléfono y vuelve a tocar");
-            try { a.startActivity(FileServer.accessIntent(a)); } catch (Exception ignored) { }
-            return;
-        }
-        localDisk = true;
+    /** Abre el disco del extendido (desde el principal). */
+    private void openExtDisk() {
+        if (!hub.connected()) { toast("El extendido no está conectado"); return; }
+        viewDisk = "e";
         thumbCache.clear();
-        openDir(FileServer.root().getAbsolutePath());
+        goHome();
     }
 
     /** Ícono de disco duro (dibujado: no hay emoji de disco duro). */
@@ -710,10 +712,16 @@ public class FilePane extends FrameLayout implements Link.Listener {
         if (!sel.isEmpty()) { toggle(e); return; }
         if (e.dir) { openDir(e.path); return; }
         if (!e.pkg.isEmpty()) {   // apps: se abren en el principal
+            if (extDisk()) { toast("Es una app del extendido: ábrela allá"); return; }
             if (remote()) hub.send("launch", "pkg", e.pkg, "label", e.name); else hub.launchHere(e.pkg, e.name);
             return;
         }
         String kind = MediaHub.kindOf(e.name);
+        if (extDisk() && remote() && "image".equals(kind)) { previewRemote(e); return; }   // fotos del extendido: se ven aquí
+        if (extDisk() && remote()) {   // lo demás del extendido se abre allá
+            if (hub.connected()) { hub.send("fmOpenFile", "path", e.path); toast("Abriendo " + e.name + " en el extendido"); }
+            return;
+        }
         if (kind != null) {   // fotos, música y videos: en el principal; la música queda en la barra
             ArrayList<String> paths = new ArrayList<>();
             int idx = 0;
@@ -724,6 +732,32 @@ public class FilePane extends FrameLayout implements Link.Listener {
         }
         if (!remote()) FileServer.openHere(a, hub, e.path);
         else if (hub.connected()) { hub.send("fmOpenFile", "path", e.path); toast("Abriendo " + e.name + " en el principal"); }
+    }
+
+    /** Ver una foto del extendido en el principal (se pide en tamaño grande). */
+    private void previewRemote(Entry e) {
+        toast("Abriendo " + e.name + "…");
+        work.execute(() -> {
+            Bitmap b = null;
+            try {
+                JSONObject r = request("fsThumb", "path", e.path, "size", 1600);
+                byte[] d = android.util.Base64.decode(r.optString("img"), android.util.Base64.DEFAULT);
+                if (d.length > 0) b = BitmapFactory.decodeByteArray(d, 0, d.length);
+            } catch (Exception ignored) { }
+            final Bitmap fb = b;
+            main.post(() -> {
+                if (fb == null) { toast("No se pudo abrir la foto"); return; }
+                android.app.Dialog dlg = new android.app.Dialog(a, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+                ImageView iv = new ImageView(a);
+                iv.setImageBitmap(fb);
+                iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                iv.setBackgroundColor(0xFF000000);
+                iv.setOnClickListener(v -> dlg.dismiss());
+                dlg.setContentView(iv);
+                dlg.show();
+                toast(e.name + " · toca para cerrar · para guardarla aquí, cópiala con Copiar ⇄");
+            });
+        });
     }
 
     private void toggle(Entry e) {
@@ -761,7 +795,7 @@ public class FilePane extends FrameLayout implements Link.Listener {
     /** Copiar o mover a la carpeta abierta en la otra pantalla (todo dentro del principal). */
     private void transfer(boolean move) {
         if (otherPath.isEmpty()) { toast("Abre una carpeta en la otra pantalla"); return; }
-        if (!hub.connected() && remote()) { toast("El principal no está conectado"); return; }
+        if (!hub.connected() && remote()) { toast("El otro teléfono no está conectado"); return; }
         JSONArray arr = new JSONArray();
         for (String p : sel) arr.put(p);
         String what = sel.size() == 1 ? new File(sel.iterator().next()).getName() : sel.size() + " elementos";
@@ -850,7 +884,7 @@ public class FilePane extends FrameLayout implements Link.Listener {
     // ---------------- pedidos al principal ----------------
 
     private JSONObject request(String t, Object... kv) throws IOException {
-        if (!hub.connected()) throw new IOException("El principal no está conectado");
+        if (!hub.connected()) throw new IOException("El " + diskName() + " no está conectado");
         int id = seq.incrementAndGet() + 100000;
         JSONObject m = new JSONObject();
         try {
@@ -861,10 +895,10 @@ public class FilePane extends FrameLayout implements Link.Listener {
         waits.put(id, w);
         hub.send(m);
         try {
-            if (!w.l.await(25, TimeUnit.SECONDS)) throw new IOException("El principal no responde");
+            if (!w.l.await(25, TimeUnit.SECONDS)) throw new IOException("El " + diskName() + " no responde");
         } catch (InterruptedException e) { throw new IOException("Cancelado"); }
         finally { waits.remove(id); }
-        if ("permiso".equals(w.r.optString("err"))) throw new IOException("Falta el permiso de archivos en el principal: toca el aviso que apareció allá");
+        if ("permiso".equals(w.r.optString("err"))) throw new IOException("Falta el permiso de archivos en el " + diskName() + ": toca el aviso que apareció allá");
         return w.r;
     }
 

@@ -161,6 +161,10 @@ public class FileServer {
                 }
             }
             if (src == null) return null;
+            if (size > 320) {   // vista grande: la foto entera (sin recortar al cuadrado)
+                float k = Math.min(1f, size / (float) Math.max(src.getWidth(), src.getHeight()));
+                return k >= 1f ? src : android.graphics.Bitmap.createScaledBitmap(src, Math.round(src.getWidth() * k), Math.round(src.getHeight() * k), true);
+            }
             return android.media.ThumbnailUtils.extractThumbnail(src, size, size);
         } catch (Exception e) { return null; }
     }
@@ -351,15 +355,15 @@ public class FileServer {
                 } else if ("fsOp".equals(t)) {
                     op(m, r);
                 } else if ("fsThumb".equals(t)) {
-                    android.graphics.Bitmap b = thumb(resolve(m.optString("path")), Math.max(64, Math.min(320, m.optInt("size", 160))));
+                    android.graphics.Bitmap b = thumb(resolve(m.optString("path")), Math.max(64, Math.min(1600, m.optInt("size", 160))));   // grande: ver la foto desde el otro
                     if (b != null) {
                         ByteArrayOutputStream bos = new ByteArrayOutputStream();
-                        b.compress(android.graphics.Bitmap.CompressFormat.JPEG, 72, bos);
+                        b.compress(android.graphics.Bitmap.CompressFormat.JPEG, m.optInt("size", 160) > 320 ? 85 : 72, bos);
                         r.put("img", android.util.Base64.encodeToString(bos.toByteArray(), android.util.Base64.NO_WRAP));
                     }
                 }
             } catch (Exception e) {   // nunca dejar al otro teléfono esperando
-                try { r.put("err", e.getMessage() == null ? "No pude leer en el principal" : e.getMessage()); } catch (JSONException ignored) { }
+                try { r.put("err", e.getMessage() == null ? "No pude leer en el otro teléfono" : e.getMessage()); } catch (JSONException ignored) { }
             }
             try { r.put("t", t + "R"); } catch (JSONException ignored) { }
             hub.send(r);
