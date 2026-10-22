@@ -58,6 +58,8 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
 - DUAL-Draw (dibujo en dos pantallas): `DualDrawActivity` (interfaz) + `DrawDoc` (motor: capas, pinceles,
   selección, transformar). Los dos teléfonos aplican **las mismas órdenes en el mismo orden** (`dw {op…}`).
 - Game Pal (control de Brawl Stars en el extendido): `GamePalActivity` + `GamePalTouch` (dedos virtuales en el principal).
+  El gamepad de `KeyboardActivity` (`GamepadView`) usa esos mismos dedos (`pad` → `MesaAccess.pad` → `GamePalTouch.touch`); al editar
+  pide una captura del principal (`gpShot`/`gpImg`) para ubicar los controles, y tiene botones − / + de tamaño.
 - PALS (apps web acomodadas a horizontal): `Pals` (recetas, catálogo de redes sociales y de Google, íconos) +
   `PalActivity` (WebView con panel en árbol). Google no deja iniciar sesión dentro de un WebView: los PALS de
   Google pueden abrirse en una pestaña de Chrome.

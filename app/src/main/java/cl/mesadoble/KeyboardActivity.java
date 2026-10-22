@@ -204,6 +204,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
                         "r", (double) r, "nx", (double) nx, "ny", (double) ny);
             }
             @Override public void layoutChanged(String json) { prefs.edit().putString("padLayout", json).apply(); }
+            @Override public void shot() { requestShot(); }
         });
 
         mediaView = new MediaControlView(this, Hub.get(this));
@@ -345,6 +346,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     }
 
     @Override protected void onPause() {
+        gamepad.releaseAll();   // no dejar dedos apoyados en el principal si se sale del control
         resumed = false;
         hub.keyboardVisible = false;
         showingMedia = false;
@@ -477,8 +479,16 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         sh.button("Cerrar", false, null).show();
     }
 
+    /** Pide al principal una captura de su pantalla (el juego), para ubicar los botones del gamepad encima. */
+    private void requestShot() {
+        if (!hub.connected()) { gamepad.setNote("Sin conexión con el principal: ubica los botones a ojo", 4000); return; }
+        gamepad.setNote("Pidiendo la captura al principal…", 0);
+        hub.send("gpShot");
+    }
+
     private void toggleEdit() {
         gamepad.setEditing(!gamepad.isEditing());
+        if (gamepad.isEditing()) requestShot();
         editBtn.setText(gamepad.isEditing() ? "Listo" : "Editar");
         resetBtn.setVisibility(gamepad.isEditing() ? View.VISIBLE : View.GONE);
         if (!gamepad.isEditing()) prefs.edit().putString("padLayout", gamepad.toJson()).apply();
@@ -552,8 +562,10 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
                         + "(barra delgada en vez del teclado). Si no, en el principal aparece un aviso para elegirlo con un toque.\n\n"
                         + "Touchpad y gamepad: con la versión completa (accesibilidad activa en el principal) mueven un puntero y "
                         + "tocan la pantalla. Con la versión liviana el touchpad mueve el cursor del texto.\n\n"
-                        + "Gamepad: cada botón toca el principal en el mismo lugar donde lo pones aquí. Usa \"Editar\" para "
-                        + "moverlos (arrastrar) y cambiar su tamaño (pellizcar con dos dedos).\n\n"
+                        + "Gamepad: cada botón toca el principal en el mismo lugar donde lo pones aquí, con varios dedos a la vez "
+                        + "(mover y disparar juntos). Usa \"Editar\": arrastra para mover, \"−\" y \"+\" (o pellizca) para el tamaño, "
+                        + "y \"Captura del juego\" para ver la pantalla del principal de fondo y poner cada botón justo encima del real. "
+                        + "Abre el juego en el principal antes de capturar. La captura necesita Android 11 o más nuevo en el principal.\n\n"
                         + "Enviar: usa el botón de enviar del campo. En WhatsApp actívalo en Ajustes → Chats → \"Enter para enviar\" "
                         + "para que funcione siempre.")
                 .button("Entendido", true, null)
@@ -605,6 +617,14 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         String t = m.optString("t");
         if ("navAck".equals(t) && !m.optBoolean("ok"))
             android.widget.Toast.makeText(this, "Recientes necesita la versión completa en el principal", android.widget.Toast.LENGTH_SHORT).show();
+        if ("gpImg".equals(t)) h.post(() -> {
+            if (m.has("err")) { gamepad.setNote(m.optString("err"), 6000); return; }
+            try {
+                byte[] d = android.util.Base64.decode(m.optString("img"), android.util.Base64.DEFAULT);
+                android.graphics.Bitmap bmp = android.graphics.BitmapFactory.decodeByteArray(d, 0, d.length);
+                if (bmp != null) gamepad.setBackdrop(bmp);
+            } catch (Exception ignored) { }
+        });
         if ("kbState".equals(t) || "kbAck".equals(t)) updateStatus();
         if ("spellR".equals(t) && m.optInt("id") == spellId) {
             phoneFor = m.optString("w");

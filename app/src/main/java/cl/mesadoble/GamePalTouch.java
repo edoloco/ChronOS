@@ -46,8 +46,13 @@ final class GamePalTouch {
 
     static void onMessage(MesaAccess s, JSONObject m) {
         Point sc = screen(s);
-        int id = m.optInt("f"), ph = m.optInt("ph");
-        float x = clamp((float) m.optDouble("x", 0.5) * sc.x, sc.x), y = clamp((float) m.optDouble("y", 0.5) * sc.y, sc.y);
+        touch(s, m.optInt("f"), m.optInt("ph"), (float) m.optDouble("x", 0.5) * sc.x, (float) m.optDouble("y", 0.5) * sc.y);
+    }
+
+    /** Un dedo virtual, en píxeles de la pantalla del principal (ph: 0 apoyar, 1 mover, 2 levantar). También lo usa el gamepad. */
+    static void touch(MesaAccess s, int id, int ph, float px, float py) {
+        Point sc = screen(s);
+        float x = clamp(px, sc.x), y = clamp(py, sc.y);
         F f = fingers.get(id);
         if (ph == 0) {
             if (f != null) { f.ending = true; fingers.remove(id); fingers.put(--stale, f); }   // quedó colgado: se suelta
