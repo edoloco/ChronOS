@@ -78,6 +78,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private LinearLayout sidePill;        // extendido: Atrás, Inicio, Recientes… en una píldora vertical a la derecha
     private org.json.JSONArray tickerItems;
     private boolean tickerHere;
+    private boolean principalSeen;   // extendido: ya llegó el aviso de qué muestra el principal (ChronOS u otra app)
     private BarPlayer barPlayer;
     private RecentsBar recentsBar;
     private LinearLayout navRow, startPanel;
@@ -1373,6 +1374,16 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             if (navTicker != null) navTicker.set(tickerHere ? null : tickerItems);
             if (floatTicker != null) floatTicker.set(null);
         }
+        applyPrincipalClock();
+    }
+
+    /**
+     * Extendido: mientras el principal muestra otra app (su barra con el reloj no se ve), la hora aparece junto al
+     * logo, de derecha a izquierda; cuando el principal vuelve a ChronOS se esconde, de izquierda a derecha.
+     */
+    private void applyPrincipalClock() {
+        if (cbar == null || cbar.kind != ChronoBar.NAV) return;
+        cbar.showTime(side != 1 && !solo && linkState == Link.CONNECTED && principalSeen && !tickerHere);
     }
 
     /** "Acerca de" en el menú inicio (con el punto rojo si hay una versión nueva). */
@@ -1470,6 +1481,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         cbar.setElevation(dp(20));
         startOverlay.setElevation(dp(30));
         rootView.addView(cbar, at, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
+        applyPrincipalClock();
     }
 
     /** Dónde va la barra: reloj arriba y navegación abajo; con el gestor abierto (en horizontal), las dos junto a la unión. */
@@ -4063,6 +4075,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     @Override public void onState(int state, String info) {
         linkState = state;
         linkInfo = state == Link.CONNECTED ? null : info;
+        if (state != Link.CONNECTED) principalSeen = false;   // sin conexión no se sabe qué muestra el principal
+        main.post(this::applyPrincipalClock);
         main.removeCallbacks(offlineTick);
         main.post(offlineTick);
         if (state == Link.WAITING && info == null) waitingSince = System.currentTimeMillis();
@@ -4127,7 +4141,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 break;
             case "ticker":
                 main.post(() -> {
-                    tickerItems = m.optJSONArray("items"); tickerHere = m.optBoolean("here"); applyTicker();
+                    tickerItems = m.optJSONArray("items"); tickerHere = m.optBoolean("here"); principalSeen = true; applyTicker();
                     // el principal se fue a otra app con la lista abierta en las dos: queda solo en el extendido
                     if (side != 1 && !tickerHere && notifDlg != null && nlSplit != -2) { nlClosing = true; notifDlg.dismiss(); notifDlg = null; notifBox = null; showNotifList(false); }
                     else fillNotifList();

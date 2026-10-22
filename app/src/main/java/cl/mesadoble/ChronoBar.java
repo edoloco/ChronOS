@@ -95,7 +95,44 @@ public class ChronoBar extends FrameLayout {
     private android.animation.ValueAnimator ppAnim;
     float tab() { return kind == NAV ? strip() + (PV + 6) * dp : 74 * dp; }
     float diag() { return 46 * dp; }
-    float tabW() { return kind == CLOCK ? Math.min(getWidth() * 0.6f, Math.max(200 * dp, clockNeeded())) : 112 * dp; }
+    float tabW() { return kind == CLOCK ? Math.min(getWidth() * 0.6f, Math.max(200 * dp, clockNeeded())) : logoW() + timeW() * tp; }
+    /** Ancho de la zona del logo (extendido). */
+    float logoW() { return 112 * dp; }
+
+    // ---- hora junto al logo (extendido): sale hacia la izquierda cuando el principal muestra otra app
+    private float tp;   // 0 = escondida, 1 = visible
+    private android.animation.ValueAnimator tpAnim;
+    private boolean timeOn;
+    private final Paint navTimeP = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+    private float timeSize() { return Math.min(tab() - 18 * dp, 52 * dp) * 0.5f; }
+
+    /** Ancho que ocupa la hora (siempre el de "00:00", para que la pestaña no cambie de tamaño cada minuto). */
+    private float tsCache = -1, twCache;
+    private float timeW() {
+        if (kind != NAV) return 0;
+        float ts = timeSize();
+        if (ts != tsCache) {   // se mide una sola vez: tabW() se pide muchas veces por cuadro
+            navTimeP.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+            navTimeP.setTextSize(ts);
+            twCache = navTimeP.measureText("00:00") + 22 * dp;
+            tsCache = ts;
+        }
+        return twCache;
+    }
+
+    /** Muestra u oculta la hora: aparece de derecha a izquierda junto al logo y se va de izquierda a derecha. */
+    public void showTime(boolean on) {
+        if (kind != NAV || timeOn == on) return;
+        timeOn = on;
+        if (tpAnim != null) tpAnim.cancel();
+        tpAnim = android.animation.ValueAnimator.ofFloat(tp, on ? 1f : 0f);
+        tpAnim.setDuration(on ? 420 : 340);
+        tpAnim.setInterpolator(on ? new android.view.animation.DecelerateInterpolator(1.5f) : new android.view.animation.AccelerateDecelerateInterpolator());
+        tpAnim.addUpdateListener(a -> { tp = (float) a.getAnimatedValue(); requestLayout(); invalidate(); });
+        tpAnim.start();
+    }
+    public boolean timeShown() { return timeOn; }
 
     /** Ancho que necesita la caja del reloj para que la hora y la fecha queden adentro (también junto al corte diagonal). */
     private float clockNeeded() {
@@ -465,9 +502,10 @@ public class ChronoBar extends FrameLayout {
     }
 
     private void drawLogo(Canvas c) {
-        float T = tab(), TW = tabW(), W = getWidth();
+        float T = tab(), TW = logoW(), W = getWidth();
         float s = Math.min(T - 18 * dp, 52 * dp);
         float cx = W - TW / 2 + 4 * dp, cy = edgeTop ? T / 2 + 2 * dp : getHeight() - T / 2 - 2 * dp;
+        if (tp > 0.01f) drawTime(c, W, cy);
         logoBox.setColor(lightText() ? 0x26FFFFFF : 0x99FFFFFF);
         c.drawRoundRect(cx - s * 0.9f, cy - s / 2 - 3 * dp, cx + s * 0.9f, cy + s / 2 + 3 * dp, 14 * dp, 14 * dp, logoBox);
         if (logoDrawable != null) {
@@ -483,8 +521,28 @@ public class ChronoBar extends FrameLayout {
         }
     }
 
+    /** La hora, a la izquierda del logo. Se recorta al borde de la pestaña (que va creciendo) y se desliza desde el logo. */
+    private void drawTime(Canvas c, float W, float cy) {
+        boolean is24 = android.text.format.DateFormat.is24HourFormat(getContext());
+        String time = new SimpleDateFormat(is24 ? "HH:mm" : "h:mm", Locale.getDefault()).format(new Date());
+        float tw = timeW(), zoneRight = W - logoW() + 6 * dp;
+        navTimeP.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        navTimeP.setTextSize(timeSize());
+        navTimeP.setTextAlign(Paint.Align.CENTER);
+        int ink = lightText() ? 0xFFF5F8FA : 0xFF1D2733;
+        navTimeP.setColor((ink & 0x00FFFFFF) | (Math.round(Math.min(1f, tp * 1.3f) * 255) << 24));
+        if (CardTheme.isAero()) Aero.glowText(navTimeP, dp); else navTimeP.clearShadowLayer();
+        float x = zoneRight - tw / 2f + (1 - tp) * tw;   // llega desde la derecha (desde el logo)
+        c.save();
+        c.clipRect(W - tabW(), 0, W, getHeight());
+        c.drawText(time, x, cy + navTimeP.getTextSize() * 0.36f, navTimeP);
+        c.restore();
+        // el minuto siguiente
+        postInvalidateDelayed(60_000 - System.currentTimeMillis() % 60_000 + 50);
+    }
+
     boolean onLogo(float x, float y) {
-        float T = tab(), TW = tabW();
+        float T = tab(), TW = logoW();
         return kind == NAV && x > getWidth() - TW && (edgeTop ? y < T : y > getHeight() - T);
     }
 
