@@ -279,6 +279,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         showingMedia = mode == MEDIA;
         showingCamera = mode == CAMERA;
         showingVert = mode == VERT;
+        if (mode == VERT) ForceView.remove();
         hub.add(this);
         hub.send("kbAsk");
     }
@@ -363,6 +364,8 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         hub.keyboardVisible = false;
         showingMedia = false;
         showingCamera = false;
+        showingVert = false;
+        if (mode == VERT) ForceView.apply(this);   // vuelve la vista forzada del extendido, si había
         h.removeCallbacks(autoClose);
         hub.remove(this);
         super.onPause();
@@ -394,7 +397,19 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
 
     /** Arma la pantalla según el modo y la orientación. */
     @SuppressWarnings("deprecation")
+    /** El teclado vertical va siempre de pie (aunque la mesa esté acostada o haya una vista forzada). */
+    private void applyVertOrientation() {
+        if (mode == VERT) {
+            setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+            ForceView.remove();
+        } else {
+            MainActivity.applyOrientation(this);
+            ForceView.apply(this);
+        }
+    }
+
     private void arrange() {
+        applyVertOrientation();
         for (View v : new View[]{keyboard, suggestBar, touchpad, gamepad, field, mediaView, cameraView}) detach(v);
         content.removeAllViews();
         boolean land = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
