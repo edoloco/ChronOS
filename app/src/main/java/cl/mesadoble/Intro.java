@@ -135,6 +135,12 @@ final class Intro extends FrameLayout {
         question.addView(q);
         LinearLayout row = new LinearLayout(a);
         row.setGravity(Gravity.CENTER);
+        // que nada corte los botones ni su sombra (se veían cortados abajo)
+        row.setClipChildren(false);
+        row.setClipToPadding(false);
+        row.setPadding(0, 0, 0, dp(10));
+        question.setClipChildren(false);
+        question.setClipToPadding(false);
         LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(dp(190), dp(68));
         bl.setMargins(dp(12), dp(26), dp(12), 0);
         btnLp = bl;
@@ -179,6 +185,8 @@ final class Intro extends FrameLayout {
         hint.setTextSize(tier == 0 ? 15 : 13);
         hint.setPadding(dp(24), dp(tier == 0 ? 22 : 10), dp(24), 0);
         hint.setVisibility(tier == 2 ? View.GONE : View.VISIBLE);   // en muy poca altura sobra el texto de ayuda
+        // al girar, esto corre durante el acomodo: se vuelve a medir después para que la fila tome el alto nuevo
+        question.post(() -> { question.requestLayout(); ((View) btn[0].getParent()).requestLayout(); });
     }
 
     @Override protected void onSizeChanged(int w, int h, int ow, int oh) {

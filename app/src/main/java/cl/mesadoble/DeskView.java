@@ -1074,7 +1074,9 @@ public class DeskView extends View {
         float wig = wiggle(it);
         c.save();
         c.translate(left, top);
-        c.rotate(it.rot + wig, width / 2, h / 2);
+        // solo los íconos de apps giran para leerse derechos según cómo se tenga el teléfono (no widgets ni barras)
+        float appTurn = Item.APP.equals(it.kind) ? glyphRot : 0;
+        c.rotate(it.rot + wig + appTurn, width / 2, h / 2);
         if (lifted) c.scale(1.03f, 1.03f, width / 2, h / 2);
         RectF box = new RectF(0, 0, width, h);
 
@@ -1094,7 +1096,7 @@ public class DeskView extends View {
         if (intense) {
             // cristal intenso: sombra profunda y, dentro, el fondo desenfocado que queda justo detrás
             Glass.shadow(c, box, rr, dp, lifted);
-            final float W = getWidth(), H = getHeight(), cx = width / 2, cy = h / 2, rot = it.rot + wig;
+            final float W = getWidth(), H = getHeight(), cx = width / 2, cy = h / 2, rot = it.rot + wig + appTurn;
             Glass.body(c, box, rr, dp, Glass.blur == null ? null : () -> {
                 c.save();
                 if (lifted) c.scale(1 / 1.03f, 1 / 1.03f, cx, cy);

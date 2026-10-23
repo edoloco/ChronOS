@@ -38,7 +38,7 @@ public class KeyboardView extends View {
         final int type, code;
         final float units;
         final RectF r = new RectF();
-        boolean down;
+        boolean down, emoji;
         Key(int type, String label, String shift, String altgr, int code, String act, float units) {
             this.type = type; this.label = label; this.shift = shift; this.altgr = altgr;
             this.code = code; this.act = act; this.units = units;
@@ -124,6 +124,70 @@ public class KeyboardView extends View {
 
     public boolean emojiShown() { return android && page == 3; }
 
+    // ---------------- fila de números y teclas cuadradas (teclado vertical) ----------------
+    private boolean numberRow;
+    /** Fila de números arriba de las letras (como el teclado de Google con "fila de números"). */
+    public void setNumberRow(boolean on) { if (numberRow != on) { numberRow = on; build(); } }
+
+    /** Alto para que las teclas de letras queden cuadradas con este ancho. */
+    public int squareHeight(int w) {
+        float gap = 4 * dp, pad = 6 * dp;
+        float unit = (w - 2 * pad - 9 * gap) / 10f;
+        int rows = numberRow ? 5 : 4;
+        return Math.round(2 * pad + unit * (rows + 0.05f) + gap * (rows - 1));
+    }
+
+    // ---------------- emojis: todos, por categoría y por páginas (como el teclado de Google) ----------------
+    private int emoCat, emoPage;
+    private static String[][] emoCache;
+
+    /** Emojis de cada categoría que este teléfono sabe dibujar. */
+    private static synchronized String[][] emojis() {
+        if (emoCache != null) return emoCache;
+        Paint p = new Paint();
+        String[][] out = new String[EmojiData.LISTS.length][];
+        for (int i = 0; i < out.length; i++) {
+            List<String> ok = new ArrayList<>();
+            for (String e : EmojiData.LISTS[i].split(" ")) if (!e.isEmpty() && p.hasGlyph(e)) ok.add(e);
+            out[i] = ok.toArray(new String[0]);
+        }
+        return emoCache = out;
+    }
+
+    private int emoCols() {
+        int w = getWidth() > 0 ? getWidth() : getResources().getDisplayMetrics().widthPixels;
+        return Math.max(7, Math.min(12, Math.round(w / (46 * dp))));
+    }
+
+    private static Key nop() { return new Key(ACT, "", null, null, 0, "nop", 1); }
+
+    private void buildEmoji(Key del) {
+        String[] list = emojis()[emoCat];
+        int cols = emoCols(), grid = numberRow ? 4 : 3, per = cols * grid;
+        int pages = Math.max(1, (list.length + per - 1) / per);
+        emoPage = Math.max(0, Math.min(pages - 1, emoPage));
+        for (int r = 0; r < grid; r++) {
+            Key[] row = new Key[cols];
+            for (int c = 0; c < cols; c++) {
+                int i = emoPage * per + r * cols + c;
+                if (i < list.length) { Key k = l(list[i]); k.emoji = true; row[c] = k; } else row[c] = nop();
+            }
+            rows.add(row);
+        }
+        // abajo: ABC, página anterior, categorías, página siguiente y borrar
+        Key[] bottom = new Key[EmojiData.ICONS.length + 4];
+        bottom[0] = page("ABC", "page:0", 1.3f);
+        bottom[1] = page(emoPage > 0 ? "◀" : "", emoPage > 0 ? "emo:prev" : "nop", 0.9f);
+        for (int i = 0; i < EmojiData.ICONS.length; i++) {
+            Key k = page(EmojiData.ICONS[i], "emo:cat:" + i, 1f);
+            k.emoji = true;
+            bottom[i + 2] = k;
+        }
+        bottom[EmojiData.ICONS.length + 2] = page(emoPage < pages - 1 ? "▶" : "", emoPage < pages - 1 ? "emo:next" : "nop", 0.9f);
+        bottom[EmojiData.ICONS.length + 3] = del;
+        rows.add(bottom);
+    }
+
     private static Key page(String l, String a, float u) { return new Key(ACT, l, null, null, 0, a, u); }
 
     private void build() {
@@ -159,8 +223,13 @@ public class KeyboardView extends View {
     }
 
     private void buildAndroid() {
-        rowWeights = new float[]{1, 1, 1, 1.05f};
+        rowWeights = numberRow ? new float[]{1, 1, 1, 1, 1.05f} : new float[]{1, 1, 1, 1.05f};
         Key del = key("⌫", KeyEvent.KEYCODE_DEL, 1.5f);
+        if (page == 3) { buildEmoji(del); return; }
+        if (numberRow) {   // fila de números (en símbolos: más símbolos, para que todas las páginas tengan las mismas filas)
+            if (page == 1) rows.add(new Key[]{l("%"), l("^"), l("~"), l("|"), l("["), l("]"), l("<"), l(">"), l("{"), l("}")});
+            else rows.add(new Key[]{l("1"), l("2"), l("3"), l("4"), l("5"), l("6"), l("7"), l("8"), l("9"), l("0")});
+        }
         if (page == 0) {
             rows.add(new Key[]{l("q"), l("w"), l("e"), l("r"), l("t"), l("y"), l("u"), l("i"), l("o"), l("p")});
             rows.add(new Key[]{l("a"), l("s"), l("d"), l("f"), l("g"), l("h"), l("j"), l("k"), l("l"), l("ñ")});
@@ -169,16 +238,6 @@ public class KeyboardView extends View {
             rows.add(new Key[]{l("1"), l("2"), l("3"), l("4"), l("5"), l("6"), l("7"), l("8"), l("9"), l("0")});
             rows.add(new Key[]{l("@"), l("#"), l("$"), l("_"), l("&"), l("-"), l("+"), l("("), l(")"), l("/")});
             rows.add(new Key[]{page("=\\<", "page:2", 1.5f), l("*"), l("\""), l("'"), l(":"), l(";"), l("!"), l("?"), del});
-        } else if (page == 3) {   // emojis
-            String[][] em = {{"😀", "😂", "🥹", "😍", "😘", "😉", "😎", "🤔", "😅", "😭"},
-                    {"👍", "🙏", "👏", "💪", "🙌", "👋", "🤝", "❤️", "🔥", "✨"},
-                    {"🎉", "😢", "😡", "😴", "🤗", "🥳", "😇", "🤣"}};
-            for (int r = 0; r < 3; r++) {
-                Key[] row = new Key[em[r].length + (r == 2 ? 1 : 0)];
-                for (int i = 0; i < em[r].length; i++) row[i] = l(em[r][i]);
-                if (r == 2) row[em[r].length] = del;
-                rows.add(row);
-            }
         } else {
             rows.add(new Key[]{l("~"), l("`"), l("|"), l("•"), l("√"), l("π"), l("÷"), l("×"), l("¶"), l("∆")});
             rows.add(new Key[]{l("£"), l("€"), l("¥"), l("^"), l("°"), l("="), l("{"), l("}"), l("\\"), l("%")});
@@ -190,7 +249,10 @@ public class KeyboardView extends View {
 
     public void setSink(Sink s) { sink = s; }
 
-    @Override protected void onSizeChanged(int w, int h, int ow, int oh) { layoutKeys(w, h); }
+    @Override protected void onSizeChanged(int w, int h, int ow, int oh) {
+        if (android && page == 3 && w != ow) { build(); return; }   // emojis: las columnas dependen del ancho
+        layoutKeys(w, h);
+    }
 
     private void layoutKeys(int w, int h) {
         float gap = 4 * dp, pad = 6 * dp, total = 0;
@@ -216,8 +278,10 @@ public class KeyboardView extends View {
         int mods = heldMods | latchedMods;
         boolean shift = (mods & SHIFT) != 0;
         for (Key[] row : rows) for (Key k : row) {
+            if (k.type == ACT && "nop".equals(k.act)) continue;   // hueco
             boolean active = k.down || (k.type == MOD && k.code != 0 && (mods & k.code) != 0) || (android && k.type == MOD && k.code == SHIFT && caps)
                     || (k.type == MOD && k.code == 0 && caps) || (k.type == CHAR && k.label.equals(deadKey));
+            if (k.type == ACT && k.act != null && k.act.equals("emo:cat:" + emoCat) && page == 3) active = true;
             boolean special = !(k.type == CHAR);
             boolean send = k.type == ACT && "send".equals(k.act);
             boolean layout = k.type == ACT && k.act != null && k.act.startsWith("layout:");   // PC / Android: verde agua
@@ -231,6 +295,7 @@ public class KeyboardView extends View {
             if (space) label = deadKey != null ? deadKey + " …" : "espacio";
             float size = Math.min(k.r.height() * (label.length() == 1 ? 0.42f : 0.28f), 26 * dp);
             if (label.length() > 1) size = Math.min(size, k.r.width() / (label.length() * 0.6f));
+            if (k.emoji) size = Math.min(k.r.height(), k.r.width()) * 0.55f;   // un emoji es un solo dibujo
             main.setTextSize(size);
             main.setColor(layout ? 0xFFFFFFFF : active || send ? bg : space ? muted : fg);
             cv.drawText(label, k.r.centerX(), k.r.centerY() + size * 0.36f, main);
@@ -301,7 +366,7 @@ public class KeyboardView extends View {
     private void press(Key k) {
         k.down = true;
         performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
-        if (k.type == ACT && k.act != null && (k.act.startsWith("page:") || k.act.startsWith("layout:"))) return;   // al soltar
+        if (k.type == ACT && k.act != null && (k.act.startsWith("page:") || k.act.startsWith("layout:") || k.act.startsWith("emo:") || k.act.equals("nop"))) return;   // al soltar
         if (k.type == MOD) {
             if (android && k.code == SHIFT) {
                 // Android: un toque = la siguiente letra en mayúscula; dos toques seguidos = bloq mayús; otro toque lo quita
@@ -336,6 +401,14 @@ public class KeyboardView extends View {
     private void release(Key k) {
         k.down = false;
         if (k == repeating) { repeating = null; repeat.removeCallbacks(repeater); }
+        if (k.type == ACT && "nop".equals(k.act)) { invalidate(); return; }
+        if (k.type == ACT && k.act != null && k.act.startsWith("emo:")) {
+            if (k.act.startsWith("emo:cat:")) { emoCat = Integer.parseInt(k.act.substring(8)); emoPage = 0; }
+            else if (k.act.equals("emo:next")) emoPage++;
+            else if (k.act.equals("emo:prev")) emoPage--;
+            build();
+            return;
+        }
         if (k.type == ACT && k.act != null && k.act.startsWith("page:")) { page = Integer.parseInt(k.act.substring(5)); build(); return; }
         if (k.type == ACT && k.act != null && k.act.startsWith("layout:")) { setAndroid("layout:android".equals(k.act)); return; }
         if (android && k.type == CHAR) {

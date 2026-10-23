@@ -157,8 +157,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         }
         SquareButton kbNav = new SquareButton(this, SquareButton.KEYBOARD, "Teclado", false, night);
         kbNav.setCompact(true);
-        kbNav.setOnClickListener(v -> startActivity(new Intent(this, KeyboardActivity.class).putExtra("manual", true)
-                .putExtra("mode", KeyboardActivity.KB).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)));
+        kbNav.setOnClickListener(v -> startActivity(new Intent(this, KeyboardActivity.class).putExtra("manual", true)   // de pie: el vertical
+                .putExtra("mode", hub.wantVertKb() ? KeyboardActivity.VERT : KeyboardActivity.KB).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)));
         squares.add(kbNav);
         navPill.addView(kbNav);
         dock = new LinearLayout(this);
@@ -283,6 +283,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         main.postDelayed(callsTick, 800);
         main.postDelayed(camKeepAlive, 500);
         if (!hub.isPrincipal()) desk.setBgImage(GameBg.current);
+        snapped = -1;   // se vuelve a calcular (por ejemplo al volver del teclado vertical)
         if (orient.canDetectOrientation()) orient.enable();
         if (hub.isPrincipal() && hub.connected() && MesaAccess.instance != null) MesaAccess.instance.switchToMesa();
     }
@@ -1868,6 +1869,10 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                     Toast.makeText(this, !lidOn ? "Se bloquearán al cerrar la tapa" : "Bloqueo con la tapa desactivado", Toast.LENGTH_SHORT).show();
                     configMenu();
                 });
+        StringBuilder sn = new StringBuilder();
+        for (int i = 0; i < LidWatch.SENSORS.length; i++) if (LidWatch.uses(this, LidWatch.SENSORS[i])) sn.append(sn.length() > 0 ? " + " : "").append(LidWatch.SENSOR_NAMES[i]);
+        sh.option(Ui.LOCK, "Sensores de la tapa: " + (sn.length() == 0 ? "ninguno" : sn),
+                "Qué sensor o sensores deciden que la tapa se cerró", this::lidSensorsMenu);
         sh.option(Ui.LOCK, "Prueba de sensores", "Proximidad, luz e imán de los dos teléfonos: para detectar la tapa cerrada",
                 () -> startActivity(SensorTestActivity.intent(this)));
         sh.option(Ui.AUTO, -1, "Teclado automático: " + (auto ? "sí" : "no"),
@@ -1877,7 +1882,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                             configMenu();
                         })
                 .option(Ui.KB_TOUCHPAD, -1, "Teclado vertical automático: " + (prefs.getBoolean("vertKbAuto", true) ? "sí" : "no"),
-                        "Con el principal de pie en Instagram, YouTube o TikTok: arriba deslizas, abajo escribes", prefs.getBoolean("vertKbAuto", true), () -> {
+                        "Con el principal de pie, al escribir: arriba deslizas, abajo escribes", prefs.getBoolean("vertKbAuto", true), () -> {
                             boolean on = !prefs.getBoolean("vertKbAuto", true);
                             prefs.edit().putBoolean("vertKbAuto", on).apply();
                             hub.send("vertKbPref", "on", on);
@@ -1904,6 +1909,36 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .option(Ui.GEAR, "Revisar configuración", principal ? "Permisos del principal" : "Permisos del extendido", () -> checkSetup(true))
                 .button("Volver", false, this::settingsMenu)
                 .show();
+    }
+
+    /** Elegir qué sensores bloquean al cerrar la tapa (se guarda en los dos teléfonos). */
+    private void lidSensorsMenu() {
+        Ui.Sheet sh = new Ui.Sheet(this).title("Sensores de la tapa")
+                .message("Marca los que deben notar la tapa cerrada. Usa la Prueba de sensores para ver cuál responde mejor en tu carcasa.");
+        String[] subs = {"El imán del otro teléfono sobre la brújula (el que mejor funciona en la carcasa)",
+                "Algo tapa el sensor de proximidad (junto a la cámara de adelante)", "La pantalla queda a oscuras"};
+        for (int i = 0; i < LidWatch.SENSORS.length; i++) {
+            final String k = LidWatch.SENSORS[i];
+            boolean on = LidWatch.uses(this, k);
+            sh.option(on ? Ui.CHECK : Ui.PLUS, -1, LidWatch.SENSOR_NAMES[i], subs[i], on, () -> {
+                StringBuilder b = new StringBuilder();
+                for (String x : LidWatch.SENSORS) {
+                    boolean keep = x.equals(k) ? !on : LidWatch.uses(this, x);
+                    if (keep) b.append(b.length() > 0 ? "," : "").append(x);
+                }
+                LidWatch.setSensors(this, hub, b.toString(), LidWatch.all(this));
+                hub.send("lidSens", "s", b.toString(), "all", LidWatch.all(this));
+                lidSensorsMenu();
+            });
+        }
+        boolean all = LidWatch.all(this);
+        sh.option(Ui.AUTO, -1, all ? "Regla: todos los marcados" : "Regla: cualquiera de los marcados",
+                all ? "Más seguro: bloquea solo si todos lo notan" : "Más sensible: basta con que uno lo note", false, () -> {
+                    LidWatch.setSensors(this, hub, LidWatch.sensors(this), !all);
+                    hub.send("lidSens", "s", LidWatch.sensors(this), "all", !all);
+                    lidSensorsMenu();
+                });
+        sh.button("Volver", false, this::configMenu).show();
     }
 
     /**

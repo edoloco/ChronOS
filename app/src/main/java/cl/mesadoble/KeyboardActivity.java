@@ -36,12 +36,11 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     static final int KB = 0, KB_PAD = 1, PAD = 2, GAME = 3, DICT = 4, MEDIA = 5, CAMERA = 6, VERT = 7;
     private static final String[] NAMES = {"Teclado", "Teclado + touchpad", "Touchpad", "Gamepad", "Dictado", "Control de video", "Cámara", "Teclado vertical"};
     /**
-     * vertical-keyboard (VERT): para redes verticales (Instagram, YouTube, TikTok…) con el principal de pie.
+     * vertical-keyboard (VERT): con el principal DE PIE (acelerómetro del principal: pPortrait) y algo que escribir.
      * Arriba, un touchpad que solo desliza (el gesto se repite en el principal: vswipe/vtap); abajo, el teclado
-     * Android. Se abre solo con el mensaje vertKb del principal y, si se abrió solo, se cierra solo al salir de la red.
+     * Android con números y teclas cuadradas. Si el principal se acuesta, pasa al teclado normal (y al revés).
      */
     static boolean showingVert;
-    private boolean vertAuto;
     /** ¿Está a la vista el control de video? (para no abrirlo de nuevo) */
     static boolean showingMedia, showingCamera;
 
@@ -88,7 +87,8 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         prefs = getSharedPreferences("mesa", MODE_PRIVATE);
         mode = Math.min(VERT, Math.max(KB, prefs.getInt("kbMode3", KB)));
         mode = startMode(getIntent(), mode);
-        vertAuto = getIntent().getBooleanExtra("vertAuto", false);
+        // el vertical guardado de antes no se abre si el principal está acostado (salvo que se pida a mano)
+        if (mode == VERT && getIntent().getIntExtra("mode", -1) != VERT && !Hub.get(this).wantVertKb()) mode = KB;
         dict = Dict.get(this);
         dict.attach(this);
 
@@ -257,7 +257,6 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         super.onNewIntent(i);
         setIntent(i);
         auto = i.getBooleanExtra("auto", false);
-        if (i.getBooleanExtra("vertAuto", false)) vertAuto = true;
         int m = startMode(i, mode);
         if (m != mode) { mode = m; arrange(); }
     }
@@ -266,7 +265,10 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     private static int startMode(Intent i, int current) {
         int m = i.getIntExtra("mode", -1);
         if (m >= KB && m <= VERT) return m;
-        if (i.getBooleanExtra("auto", false) && current >= MEDIA && current != VERT) return KB;   // el vertical ya tiene teclado
+        if (i.getBooleanExtra("auto", false)) {   // se abrió para escribir: el teclado según cómo esté el principal
+            if (i.getBooleanExtra("vert", false)) return VERT;
+            if (current == VERT || current >= MEDIA) return KB;
+        }
         return current;
     }
 
@@ -410,6 +412,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
 
     private void arrange() {
         applyVertOrientation();
+        keyboard.setNumberRow(mode == VERT);   // vertical: fila de números y teclas cuadradas
         for (View v : new View[]{keyboard, suggestBar, touchpad, gamepad, field, mediaView, cameraView}) detach(v);
         content.removeAllViews();
         boolean land = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
@@ -458,13 +461,16 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
                 break;
             case VERT: {   // mitad de arriba: touchpad para deslizar; mitad de abajo: teclado Android
                 if (!keyboard.isAndroid()) keyboard.setAndroid(true);
+                // teclas cuadradas con fila de números: el teclado mide lo justo y el touchpad toma el resto
+                android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+                int kbH = keyboard.squareHeight(Math.min(dm.widthPixels, dm.heightPixels));
                 LinearLayout kbCol = new LinearLayout(this);
                 kbCol.setOrientation(LinearLayout.VERTICAL);
                 kbCol.addView(suggestBar, new LinearLayout.LayoutParams(-1, dp(42)));
-                kbCol.addView(keyboard, new LinearLayout.LayoutParams(-1, 0, 1));
+                kbCol.addView(keyboard, new LinearLayout.LayoutParams(-1, kbH));
                 content.setOrientation(LinearLayout.VERTICAL);
                 content.addView(touchpad, new LinearLayout.LayoutParams(-1, 0, 1f));
-                content.addView(kbCol, new LinearLayout.LayoutParams(-1, 0, 1f));
+                content.addView(kbCol, new LinearLayout.LayoutParams(-1, -2));
                 break;
             }
             case GAME:
@@ -512,7 +518,6 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
             final int m = i;
             sh.option(icons[i], -1, NAMES[i], subs[i], mode == i, () -> {
                 mode = m;
-                vertAuto = false;   // elegido a mano: ya no se cierra solo
                 prefs.edit().putInt("kbMode3", m).apply();
                 arrange();
             });
@@ -667,8 +672,12 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
             } catch (Exception ignored) { }
         });
         if ("kbState".equals(t) || "kbAck".equals(t)) updateStatus();
-        // se salió de la red vertical (o el principal quedó acostado): si el teclado vertical se abrió solo, se cierra
-        if ("vertKb".equals(t) && !m.optBoolean("on") && vertAuto && mode == VERT) h.post(() -> { vertAuto = false; close(); });
+        // el principal se puso de pie o se acostó: el teclado lo sigue (vertical ↔ normal)
+        if ("pPortrait".equals(t)) h.post(() -> {
+            boolean up = hub.wantVertKb();
+            if (mode == VERT && !up) { mode = KB; arrange(); }
+            else if (up && (mode == KB || mode == KB_PAD)) { mode = VERT; arrange(); }
+        });
         if ("spellR".equals(t) && m.optInt("id") == spellId) {
             phoneFor = m.optString("w");
             phoneSugg = new java.util.ArrayList<>();

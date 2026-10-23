@@ -255,8 +255,9 @@ public class Hub implements Link.Listener {
         if (st == Link.CONNECTED) {
             // revisión periódica del principal (video, juegos, notificaciones): arranca al conectarse
             main.removeCallbacks(musicPoll);
-            vertKbOn = false;
             musicActive = false;
+            main.post(() -> watchPhys(isPrincipal()));
+            if (isPrincipal() && physKnown) send("pPortrait", "on", physPortrait);
             videoActive = false;
             videoAppWas = false;
             main.postDelayed(musicPoll, 1500);
@@ -294,6 +295,7 @@ public class Hub implements Link.Listener {
         } else {
             remoteImeReady = false;
             main.post(senStop);
+            main.post(() -> watchPhys(false));
             // Game Pal: sin conexión no llegará el "soltar": los dedos virtuales del principal se levantan ya
             if (isPrincipal() && MesaAccess.instance != null) GamePalTouch.releaseAll(MesaAccess.instance);
             // sin el extendido no hay teclado: si la conexión no vuelve pronto, devolver el teclado normal
@@ -406,6 +408,7 @@ public class Hub implements Link.Listener {
             main.post(() -> LockArt.apply(app, this));
             return;
         }
+        if ("lidSens".equals(t)) { String ls = m.optString("s"); boolean la = m.optBoolean("all", true); main.post(() -> LidWatch.setSensors(app, this, ls, la)); return; }
         if ("lidPref".equals(t)) { boolean on = m.optBoolean("on", true); main.post(() -> LidWatch.setEnabled(app, this, on)); return; }
         // prueba de sensores (para detectar la tapa cerrada): el otro teléfono pide los valores de este
         if ("senOn".equals(t)) {
@@ -526,14 +529,7 @@ public class Hub implements Link.Listener {
                     "Activar widget", "Toca para permitir el widget en el principal");
             return;
         }
-        if ("vertKb".equals(t)) {   // extendido: el principal entró (o salió) de una red vertical estando de pie
-            if (!isPrincipal() && m.optBoolean("on") && prefs.getBoolean("vertKbAuto", true))
-                main.post(() -> startOwn(new Intent(app, KeyboardActivity.class).putExtra("mode", KeyboardActivity.VERT).putExtra("vertAuto", true)
-                        .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
-                        () -> KeyboardActivity.showingVert, 97, "Teclado vertical", "Toca para deslizar y escribir en " + m.optString("pkg")));
-            for (Link.Listener l : listeners) l.onMessage(m);
-            return;
-        }
+        if ("pPortrait".equals(t)) { principalPortrait = m.optBoolean("on"); for (Link.Listener l : listeners) l.onMessage(m); return; }
         if ("vertKbPref".equals(t)) { prefs.edit().putBoolean("vertKbAuto", m.optBoolean("on")).apply(); return; }
         if ("fmPush".equals(t)) { FileServer.get(app).pushJob(m, this); return; }   // túnel: este teléfono manda sus archivos al otro
         if ("fmJob".equals(t)) { if (isPrincipal()) FileServer.get(app).runJob(m, this); return; }
@@ -594,6 +590,7 @@ public class Hub implements Link.Listener {
         if (keyboardVisible) return;
         Intent i = new Intent(app, KeyboardActivity.class)
                 .putExtra("auto", true)
+                .putExtra("vert", wantVertKb())   // principal de pie: teclado vertical
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         if (foreground || Settings.canDrawOverlays(app)) {
             try { app.startActivity(i); return; } catch (Exception ignored) { }
@@ -832,12 +829,7 @@ public class Hub implements Link.Listener {
             RecentApps.worker.execute(() -> GameBg.poll(app, Hub.this));   // ¿empezó un juego? → fondo en el extendido
             RecentApps.worker.execute(Hub.this::pollNotifs);                // apps con notificaciones nuevas → punto rojo
             RecentApps.worker.execute(() -> {                                 // ¿hay una app de video al frente? (YouTube, Netflix…)
-                if (!RecentApps.hasAccess(app)) return;
-                String front = RecentApps.active(app);
-                videoApp = isVideoApp(app, front);
-                // teclado vertical: el principal de pie y con una red "vertical" (Instagram, YouTube, TikTok…) al frente
-                boolean vert = portrait() && isVerticalApp(front);
-                if (vert != vertKbOn) { vertKbOn = vert; send("vertKb", "on", vert, "pkg", front == null ? "" : front); }
+                if (RecentApps.hasAccess(app)) videoApp = isVideoApp(app, RecentApps.active(app));
             });
             // audífonos o Bluetooth conectados/desconectados: la música y el video cambian de modo (Boost no aplica)
             boolean hp = Boost.headphones(app);
@@ -880,28 +872,37 @@ public class Hub implements Link.Listener {
                 : "Toca en el principal el aviso \"Boost: toca aquí\" y acepta la captura de sonido");
     }
 
-    private volatile boolean videoApp, vertKbOn;
+    private volatile boolean videoApp;
 
-    // redes "verticales": en ellas el teclado vertical (touchpad para deslizar + teclado) sale solo en el extendido
-    private static final String[] VERTICAL_APPS = {"com.instagram.android", "com.instagram.barcelona", "com.google.android.youtube",
-            "app.revanced.android.youtube", "com.zhiliaoapp.musically", "com.ss.android.ugc.trill", "com.ss.android.ugc.aweme",
-            "com.facebook.katana", "com.facebook.lite", "com.snapchat.android", "com.twitter.android", "video.like",
-            "com.kwai.video", "com.pinterest", "com.reddit.frontpage", "com.tumblr"};
+    // ---------------- ¿el principal está de pie? (cómo se TIENE el teléfono, no cómo se ve la app) ----------------
+    // El teclado vertical sale solo si el principal está de pie y hay que escribir. Se mide con el acelerómetro del
+    // principal (una app hecha solo para vertical no cuenta si el teléfono está acostado).
+    //   pPortrait {on}: el principal avisa al extendido
+    private android.view.OrientationEventListener phys;
+    private boolean physPortrait, physKnown;
+    private volatile boolean principalPortrait;
 
-    static boolean isVerticalApp(String pkg) {
-        if (pkg == null || pkg.isEmpty()) return false;
-        for (String v : VERTICAL_APPS) if (pkg.equals(v)) return true;
-        return false;
+    /** En el extendido: ¿el principal está de pie? */
+    public boolean principalPortrait() { return principalPortrait; }
+    /** ¿Usar el teclado vertical ahora? (principal de pie y el ajuste activo) */
+    public boolean wantVertKb() { return principalPortrait && prefs.getBoolean("vertKbAuto", true); }
+
+    private void watchPhys(boolean on) {
+        if (!on) { if (phys != null) phys.disable(); return; }
+        if (phys == null) phys = new android.view.OrientationEventListener(app) {
+            @Override public void onOrientationChanged(int o) {
+                if (o < 0) return;   // acostado sobre la mesa: se mantiene lo último
+                boolean p = o < 35 || o > 325 || (o > 145 && o < 215), l = (o > 55 && o < 125) || (o > 235 && o < 305);
+                if (!p && !l) return;   // en diagonal: se espera
+                if (physKnown && p == physPortrait) return;
+                physKnown = true;
+                physPortrait = p;
+                if (isPrincipal() && connected()) send("pPortrait", "on", p);
+            }
+        };
+        if (phys.canDetectOrientation()) phys.enable();
     }
 
-    /** ¿El principal está de pie (vertical)? */
-    private boolean portrait() {
-        try {
-            android.graphics.Point p = new android.graphics.Point();
-            ((android.view.WindowManager) app.getSystemService(Context.WINDOW_SERVICE)).getDefaultDisplay().getRealSize(p);
-            return p.y > p.x;
-        } catch (Exception e) { return false; }
-    }
     private boolean lastHeadphones;
     private boolean videoAppWas;
 
