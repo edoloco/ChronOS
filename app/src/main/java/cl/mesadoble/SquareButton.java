@@ -148,7 +148,8 @@ public class SquareButton extends View {
         if (CardTheme.isGlass() && !CardTheme.isAero() && !primary) c.drawRoundRect(new RectF(dp / 2, dp / 2, w - dp / 2, h - dp / 2), r, r, border);
         c.save();
         c.rotate(rot, w / 2, h / 2);
-        float cx = w / 2, cy = compact ? h / 2 : h * 0.42f, u = (compact ? 5 : 7) * dp;   // u: unidad del ícono
+        boolean twoLines = !compact && text != null && text.indexOf('\n') >= 0;   // nombre en dos renglones
+        float cx = w / 2, cy = compact ? h / 2 : h * (twoLines ? 0.36f : 0.42f), u = (compact ? 5 : 7) * dp;   // u: unidad del ícono
         int ink = fgColor;
         if (kind == STATUS && !info) ink = statusLevel == 2 ? accent : statusLevel == 1 ? warn : 0xFF8798A9;
         stroke.setColor(ink);
@@ -276,9 +277,17 @@ public class SquareButton extends View {
         label.setColor(kind == STATUS && !info ? ink : fgColor);
         if (!compact) {
             float ts = 9.5f * dp;   // los nombres largos se achican para caber
+            String[] lines = text.split("\n");
             label.setTextSize(ts);
-            while (label.measureText(text) > w - 4 * dp && ts > 6.5f * dp) { ts -= 0.5f * dp; label.setTextSize(ts); }
-            c.drawText(text, cx, h - 8 * dp, label);
+            float widest = 0;
+            for (String l : lines) widest = Math.max(widest, label.measureText(l));
+            while (widest > w - 4 * dp && ts > 6.5f * dp) {
+                ts -= 0.5f * dp; label.setTextSize(ts);
+                widest = 0;
+                for (String l : lines) widest = Math.max(widest, label.measureText(l));
+            }
+            float lh = ts * 1.15f;
+            for (int i = 0; i < lines.length; i++) c.drawText(lines[i], cx, h - 8 * dp - (lines.length - 1 - i) * lh, label);
         }
         c.restore();
     }

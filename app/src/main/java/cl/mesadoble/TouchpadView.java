@@ -21,7 +21,15 @@ public class TouchpadView extends View {
         void click();
         void scroll(int steps);
         void nav(String what);   // back, home, recents
+        /** Solo desplazar (teclado vertical): el gesto del dedo en fracción del alto del touchpad y su duración. */
+        default void swipe(float frac, long ms) { }
+        /** Toque al centro de la pantalla del principal (pausar/reanudar un reel o video). */
+        default void tapCenter() { click(); }
     }
+
+    /** Teclado vertical: un dedo arriba/abajo desplaza el principal como si se deslizara con el dedo allá. */
+    private boolean scrollOnly;
+    public void setScrollOnly(boolean on) { scrollOnly = on; labels[0] = on ? "Tocar" : "Clic"; invalidate(); }
 
     private Sink sink;
     private String hint = "Touchpad";
@@ -34,7 +42,7 @@ public class TouchpadView extends View {
     private final String[] labels = {"Clic", "Atrás", "Inicio"};
     private int pressedBtn = -1;
 
-    private float lastX, lastY, startX, startY, scrollAcc, accX, accY;
+    private float lastX, lastY, startX, startY, scrollAcc, accX, accY, dragY;
     private long downTime;
     private int maxPointers, padPointer = -1;
     private boolean moved;
@@ -71,7 +79,18 @@ public class TouchpadView extends View {
         text.setTextSize(13 * dp);
         c.drawText(hint, area.centerX(), area.centerY() - 6 * dp, text);
         text.setTextSize(11 * dp);
-        c.drawText("1 dedo: mover · toque: clic · 2 dedos: desplazar", area.centerX(), area.centerY() + 14 * dp, text);
+        c.drawText(scrollOnly ? "Desliza arriba o abajo · toque: pausar" : "1 dedo: mover · toque: clic · 2 dedos: desplazar",
+                area.centerX(), area.centerY() + 14 * dp, text);
+        if (scrollOnly && dragY != 0) {   // flecha que sigue al dedo
+            float cx = area.centerX(), y0 = area.centerY(), y1 = y0 + Math.max(-area.height() * 0.45f, Math.min(area.height() * 0.45f, dragY));
+            btn.setColor(accent);
+            btn.setStrokeWidth(5 * dp);
+            btn.setStrokeCap(Paint.Cap.ROUND);
+            c.drawLine(cx, y0, cx, y1, btn);
+            float s = Math.signum(y1 - y0) * 12 * dp;
+            c.drawLine(cx, y1, cx - 10 * dp, y1 - s, btn);
+            c.drawLine(cx, y1, cx + 10 * dp, y1 - s, btn);
+        }
         for (int i = 0; i < 3; i++) {
             btn.setColor(pressedBtn == i ? accent : btnColor);
             c.drawRoundRect(buttons[i], 16 * dp, 16 * dp, btn);
@@ -123,6 +142,7 @@ public class TouchpadView extends View {
                 int n = padPointers(e);
                 maxPointers = Math.max(maxPointers, n);
                 if (sink == null) return true;
+                if (scrollOnly) { dragY = py - startY; invalidate(); return true; }   // se manda al soltar
                 if (n >= 2) {
                     scrollAcc += ddy;
                     int steps = (int) (scrollAcc / (22 * dp));
@@ -140,7 +160,7 @@ public class TouchpadView extends View {
             case MotionEvent.ACTION_UP: {
                 if (pressedBtn >= 0 && buttonAt(x, y) == pressedBtn) {
                     if (sink != null) {
-                        if (pressedBtn == 0) sink.click();
+                        if (pressedBtn == 0) { if (scrollOnly) sink.tapCenter(); else sink.click(); }
                         else sink.nav(pressedBtn == 1 ? "back" : "home");
                     }
                     pressedBtn = -1;
@@ -148,6 +168,15 @@ public class TouchpadView extends View {
                 }
                 if (e.getPointerId(i) == padPointer || a == MotionEvent.ACTION_UP) {
                     boolean tap = !moved && SystemClock.uptimeMillis() - downTime < 250;
+                    if (scrollOnly && sink != null) {
+                        if (moved) {
+                            float frac = (lastY - startY) / Math.max(1, area.height());
+                            long ms = Math.max(60, Math.min(700, SystemClock.uptimeMillis() - downTime));
+                            sink.swipe(frac, ms);
+                        } else if (tap) { sink.tapCenter(); performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY); }
+                        dragY = 0; padPointer = -1; invalidate();
+                        return true;
+                    }
                     if (tap && sink != null) {
                         if (maxPointers >= 2) sink.nav("back"); else sink.click();
                         performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);

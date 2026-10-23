@@ -134,6 +134,15 @@ public class MesaAccess extends AccessibilityService {
                 return true;
             }
             case "pad": pad(m); return true;
+            case "vswipe": {   // teclado vertical: el gesto del touchpad se repite en el centro de la pantalla
+                Point sc = screen();
+                float d = (float) m.optDouble("f") * sc.y * 1.3f;
+                d = Math.max(-sc.y * 0.8f, Math.min(sc.y * 0.8f, d));
+                float cx = sc.x / 2f, cy = sc.y / 2f;
+                swipe(cx, cy - d / 2, cx, cy + d / 2, Math.max(60, Math.min(700, m.optLong("ms", 250))));
+                return true;
+            }
+            case "vtap": { Point sc = screen(); tap(sc.x / 2f, sc.y / 2f, 40); return true; }
         }
         return false;
     }

@@ -33,8 +33,15 @@ import java.util.List;
  */
 public class KeyboardActivity extends Activity implements Link.Listener, KeyboardView.Sink {
 
-    static final int KB = 0, KB_PAD = 1, PAD = 2, GAME = 3, DICT = 4, MEDIA = 5, CAMERA = 6;
-    private static final String[] NAMES = {"Teclado", "Teclado + touchpad", "Touchpad", "Gamepad", "Dictado", "Control de video", "Cámara"};
+    static final int KB = 0, KB_PAD = 1, PAD = 2, GAME = 3, DICT = 4, MEDIA = 5, CAMERA = 6, VERT = 7;
+    private static final String[] NAMES = {"Teclado", "Teclado + touchpad", "Touchpad", "Gamepad", "Dictado", "Control de video", "Cámara", "Teclado vertical"};
+    /**
+     * vertical-keyboard (VERT): para redes verticales (Instagram, YouTube, TikTok…) con el principal de pie.
+     * Arriba, un touchpad que solo desliza (el gesto se repite en el principal: vswipe/vtap); abajo, el teclado
+     * Android. Se abre solo con el mensaje vertKb del principal y, si se abrió solo, se cierra solo al salir de la red.
+     */
+    static boolean showingVert;
+    private boolean vertAuto;
     /** ¿Está a la vista el control de video? (para no abrirlo de nuevo) */
     static boolean showingMedia, showingCamera;
 
@@ -79,8 +86,9 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         MainActivity.applyOrientation(this);   // misma orientación que la mesa
         prefs = getSharedPreferences("mesa", MODE_PRIVATE);
-        mode = Math.min(CAMERA, Math.max(KB, prefs.getInt("kbMode3", KB)));
+        mode = Math.min(VERT, Math.max(KB, prefs.getInt("kbMode3", KB)));
         mode = startMode(getIntent(), mode);
+        vertAuto = getIntent().getBooleanExtra("vertAuto", false);
         dict = Dict.get(this);
         dict.attach(this);
 
@@ -189,6 +197,8 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
             @Override public void click() { if (useBt()) bt.click(1); else hub.send("click"); }
             @Override public void scroll(int steps) { if (useBt()) bt.mouse(0, 0, steps); else hub.send("scroll", "d", steps); }
             @Override public void nav(String what) { hub.send("nav", "k", what); }
+            @Override public void swipe(float frac, long ms) { hub.send("vswipe", "f", (double) frac, "ms", ms); }
+            @Override public void tapCenter() { hub.send("vtap"); }
         });
 
         gamepad = new GamepadView(this, night);
@@ -247,6 +257,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         super.onNewIntent(i);
         setIntent(i);
         auto = i.getBooleanExtra("auto", false);
+        if (i.getBooleanExtra("vertAuto", false)) vertAuto = true;
         int m = startMode(i, mode);
         if (m != mode) { mode = m; arrange(); }
     }
@@ -254,8 +265,8 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     /** Modo pedido al abrir: el control de video (al empezar un video) o, si se abrió para escribir, un modo de teclado. */
     private static int startMode(Intent i, int current) {
         int m = i.getIntExtra("mode", -1);
-        if (m >= KB && m <= CAMERA) return m;
-        if (i.getBooleanExtra("auto", false) && current >= MEDIA) return KB;
+        if (m >= KB && m <= VERT) return m;
+        if (i.getBooleanExtra("auto", false) && current >= MEDIA && current != VERT) return KB;   // el vertical ya tiene teclado
         return current;
     }
 
@@ -264,9 +275,10 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         auto = auto || getIntent().getBooleanExtra("auto", false);
         resumed = true;
         if (!themeSig.equals(KbTheme.sig(this))) { recreate(); return; }   // cambió el tema: se vuelve a pintar
-        hub.keyboardVisible = mode < MEDIA;
+        hub.keyboardVisible = mode < MEDIA || mode == VERT;
         showingMedia = mode == MEDIA;
         showingCamera = mode == CAMERA;
+        showingVert = mode == VERT;
         hub.add(this);
         hub.send("kbAsk");
     }
@@ -395,7 +407,8 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         sendBtn.setVisibility(mode == DICT ? View.VISIBLE : View.GONE);
         resetBtn.setVisibility(mode == GAME && gamepad.isEditing() ? View.VISIBLE : View.GONE);
         modeBtn.setText(NAMES[mode]);
-        emojiBtn.setVisibility(mode == KB || mode == KB_PAD ? View.VISIBLE : View.GONE);
+        touchpad.setScrollOnly(mode == VERT);
+        emojiBtn.setVisibility(mode == KB || mode == KB_PAD || mode == VERT ? View.VISIBLE : View.GONE);
         if (mode != GAME && gamepad.isEditing()) gamepad.setEditing(false);
         if (mode != DICT) {
             if (imm != null) imm.hideSoftInputFromWindow(field.getWindowToken(), 0);
@@ -428,6 +441,17 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
                 content.setOrientation(LinearLayout.VERTICAL);
                 content.addView(touchpad, new LinearLayout.LayoutParams(-1, -1));
                 break;
+            case VERT: {   // mitad de arriba: touchpad para deslizar; mitad de abajo: teclado Android
+                if (!keyboard.isAndroid()) keyboard.setAndroid(true);
+                LinearLayout kbCol = new LinearLayout(this);
+                kbCol.setOrientation(LinearLayout.VERTICAL);
+                kbCol.addView(suggestBar, new LinearLayout.LayoutParams(-1, dp(42)));
+                kbCol.addView(keyboard, new LinearLayout.LayoutParams(-1, 0, 1));
+                content.setOrientation(LinearLayout.VERTICAL);
+                content.addView(touchpad, new LinearLayout.LayoutParams(-1, 0, 1f));
+                content.addView(kbCol, new LinearLayout.LayoutParams(-1, 0, 1f));
+                break;
+            }
             case GAME:
                 content.setOrientation(LinearLayout.VERTICAL);
                 content.addView(gamepad, new LinearLayout.LayoutParams(-1, -1));
@@ -451,14 +475,14 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
                 field.post(() -> { if (imm != null) imm.showSoftInput(field, InputMethodManager.SHOW_IMPLICIT); });
             }
         }
-        if (hub != null && resumed) { hub.keyboardVisible = mode < MEDIA; showingMedia = mode == MEDIA; showingCamera = mode == CAMERA; }
+        if (hub != null && resumed) { hub.keyboardVisible = mode < MEDIA || mode == VERT; showingMedia = mode == MEDIA; showingCamera = mode == CAMERA; showingVert = mode == VERT; }
         updateTouchpadHint();
         refreshSuggestions();
         syncBluetooth();
     }
 
     private void pickMode() {
-        int[] icons = {Ui.KEYBOARD, Ui.KB_TOUCHPAD, Ui.TOUCHPAD, Ui.GAMEPAD, Ui.MIC, Ui.SEND, Ui.IMAGE};
+        int[] icons = {Ui.KEYBOARD, Ui.KB_TOUCHPAD, Ui.TOUCHPAD, Ui.GAMEPAD, Ui.MIC, Ui.SEND, Ui.IMAGE, Ui.KB_TOUCHPAD};
         String[] subs = {
                 "Teclado completo con sugerencias",
                 "Teclado y touchpad juntos",
@@ -466,12 +490,14 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
                 "Joystick, cruceta y botones que se pueden mover",
                 "Escribir con el teclado del teléfono o dictar por voz",
                 "Play/pausa, adelantar 10 s y volumen del video del principal",
-                "Cámara del principal: ver aquí lo que ve, trasera/delantera, foto, flash y zoom"};
+                "Cámara del principal: ver aquí lo que ve, trasera/delantera, foto, flash y zoom",
+                "Para Instagram, YouTube y redes de pie: arriba deslizas, abajo escribes"};
         Ui.Sheet sh = new Ui.Sheet(this).title("¿Cómo quieres controlar el principal?");
         for (int i = 0; i < NAMES.length; i++) {
             final int m = i;
             sh.option(icons[i], -1, NAMES[i], subs[i], mode == i, () -> {
                 mode = m;
+                vertAuto = false;   // elegido a mano: ya no se cierra solo
                 prefs.edit().putInt("kbMode3", m).apply();
                 arrange();
             });
@@ -626,6 +652,8 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
             } catch (Exception ignored) { }
         });
         if ("kbState".equals(t) || "kbAck".equals(t)) updateStatus();
+        // se salió de la red vertical (o el principal quedó acostado): si el teclado vertical se abrió solo, se cierra
+        if ("vertKb".equals(t) && !m.optBoolean("on") && vertAuto && mode == VERT) h.post(() -> { vertAuto = false; close(); });
         if ("spellR".equals(t) && m.optInt("id") == spellId) {
             phoneFor = m.optString("w");
             phoneSugg = new java.util.ArrayList<>();

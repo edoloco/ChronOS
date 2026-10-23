@@ -255,6 +255,7 @@ public class Hub implements Link.Listener {
         if (st == Link.CONNECTED) {
             // revisión periódica del principal (video, juegos, notificaciones): arranca al conectarse
             main.removeCallbacks(musicPoll);
+            vertKbOn = false;
             musicActive = false;
             videoActive = false;
             videoAppWas = false;
@@ -525,6 +526,15 @@ public class Hub implements Link.Listener {
                     "Activar widget", "Toca para permitir el widget en el principal");
             return;
         }
+        if ("vertKb".equals(t)) {   // extendido: el principal entró (o salió) de una red vertical estando de pie
+            if (!isPrincipal() && m.optBoolean("on") && prefs.getBoolean("vertKbAuto", true))
+                main.post(() -> startOwn(new Intent(app, KeyboardActivity.class).putExtra("mode", KeyboardActivity.VERT).putExtra("vertAuto", true)
+                        .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT),
+                        () -> KeyboardActivity.showingVert, 97, "Teclado vertical", "Toca para deslizar y escribir en " + m.optString("pkg")));
+            for (Link.Listener l : listeners) l.onMessage(m);
+            return;
+        }
+        if ("vertKbPref".equals(t)) { prefs.edit().putBoolean("vertKbAuto", m.optBoolean("on")).apply(); return; }
         if ("fmPush".equals(t)) { FileServer.get(app).pushJob(m, this); return; }   // túnel: este teléfono manda sus archivos al otro
         if ("fmJob".equals(t)) { if (isPrincipal()) FileServer.get(app).runJob(m, this); return; }
         if ("fmOpenFile".equals(t)) { FileServer.openHere(app, this, m.optString("path")); return; }   // en el teléfono dueño del archivo
@@ -555,7 +565,8 @@ public class Hub implements Link.Listener {
             for (Link.Listener l : listeners) l.onMessage(m);
             return;
         }
-        if ("mouse".equals(t) || "click".equals(t) || "scroll".equals(t) || "nav".equals(t) || "pad".equals(t)) {
+        if ("mouse".equals(t) || "click".equals(t) || "scroll".equals(t) || "nav".equals(t) || "pad".equals(t)
+                || "vswipe".equals(t) || "vtap".equals(t)) {
             if (MesaAccess.instance != null && MesaAccess.instance.handle(m)) return;
             pointerFallback(m);
             return;
@@ -741,6 +752,9 @@ public class Hub implements Link.Listener {
             while (accX < -28) { key(KeyEvent.KEYCODE_DPAD_LEFT); accX += 28; }
             while (accY > 36) { key(KeyEvent.KEYCODE_DPAD_DOWN); accY -= 36; }
             while (accY < -36) { key(KeyEvent.KEYCODE_DPAD_UP); accY += 36; }
+        } else if ("vswipe".equals(t)) {   // sin accesibilidad: flechas (dedo hacia arriba = bajar)
+            int n = (int) Math.max(1, Math.min(6, Math.abs(m.optDouble("f")) * 8));
+            for (int i = 0; i < n; i++) key(m.optDouble("f") < 0 ? KeyEvent.KEYCODE_DPAD_DOWN : KeyEvent.KEYCODE_DPAD_UP);
         } else if ("scroll".equals(t)) {
             int d = m.optInt("d");
             for (int i = 0; i < Math.abs(d); i++) key(d > 0 ? KeyEvent.KEYCODE_DPAD_UP : KeyEvent.KEYCODE_DPAD_DOWN);
@@ -818,7 +832,12 @@ public class Hub implements Link.Listener {
             RecentApps.worker.execute(() -> GameBg.poll(app, Hub.this));   // ¿empezó un juego? → fondo en el extendido
             RecentApps.worker.execute(Hub.this::pollNotifs);                // apps con notificaciones nuevas → punto rojo
             RecentApps.worker.execute(() -> {                                 // ¿hay una app de video al frente? (YouTube, Netflix…)
-                if (RecentApps.hasAccess(app)) videoApp = isVideoApp(app, RecentApps.active(app));
+                if (!RecentApps.hasAccess(app)) return;
+                String front = RecentApps.active(app);
+                videoApp = isVideoApp(app, front);
+                // teclado vertical: el principal de pie y con una red "vertical" (Instagram, YouTube, TikTok…) al frente
+                boolean vert = portrait() && isVerticalApp(front);
+                if (vert != vertKbOn) { vertKbOn = vert; send("vertKb", "on", vert, "pkg", front == null ? "" : front); }
             });
             // audífonos o Bluetooth conectados/desconectados: la música y el video cambian de modo (Boost no aplica)
             boolean hp = Boost.headphones(app);
@@ -861,7 +880,28 @@ public class Hub implements Link.Listener {
                 : "Toca en el principal el aviso \"Boost: toca aquí\" y acepta la captura de sonido");
     }
 
-    private volatile boolean videoApp;
+    private volatile boolean videoApp, vertKbOn;
+
+    // redes "verticales": en ellas el teclado vertical (touchpad para deslizar + teclado) sale solo en el extendido
+    private static final String[] VERTICAL_APPS = {"com.instagram.android", "com.instagram.barcelona", "com.google.android.youtube",
+            "app.revanced.android.youtube", "com.zhiliaoapp.musically", "com.ss.android.ugc.trill", "com.ss.android.ugc.aweme",
+            "com.facebook.katana", "com.facebook.lite", "com.snapchat.android", "com.twitter.android", "video.like",
+            "com.kwai.video", "com.pinterest", "com.reddit.frontpage", "com.tumblr"};
+
+    static boolean isVerticalApp(String pkg) {
+        if (pkg == null || pkg.isEmpty()) return false;
+        for (String v : VERTICAL_APPS) if (pkg.equals(v)) return true;
+        return false;
+    }
+
+    /** ¿El principal está de pie (vertical)? */
+    private boolean portrait() {
+        try {
+            android.graphics.Point p = new android.graphics.Point();
+            ((android.view.WindowManager) app.getSystemService(Context.WINDOW_SERVICE)).getDefaultDisplay().getRealSize(p);
+            return p.y > p.x;
+        } catch (Exception e) { return false; }
+    }
     private boolean lastHeadphones;
     private boolean videoAppWas;
 

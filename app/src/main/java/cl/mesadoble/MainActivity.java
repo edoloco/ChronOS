@@ -910,7 +910,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     /** Menú inicio: los ajustes de Android del teléfono que se elija. */
     private SquareButton phoneSettingsBtn() {
         if (phoneSetSq == null) {
-            phoneSetSq = new SquareButton(this, SquareButton.SETTINGS, "Ajustes del teléfono", false, night);
+            phoneSetSq = new SquareButton(this, SquareButton.SETTINGS, "Ajustes\ndel teléfono", false, night);   // en dos renglones
             phoneSetSq.setOnClickListener(v -> { showStart(false); phoneSettings(); });
             squares.add(phoneSetSq);
         }
@@ -1874,6 +1874,14 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                         "El teclado aparece solo en el extendido al escribir", auto, () -> {
                             prefs.edit().putBoolean("autoKb", !auto).apply();
                             Toast.makeText(this, !auto ? "El teclado se abrirá solo en el extendido" : "Teclado automático desactivado", Toast.LENGTH_SHORT).show();
+                            configMenu();
+                        })
+                .option(Ui.KB_TOUCHPAD, -1, "Teclado vertical automático: " + (prefs.getBoolean("vertKbAuto", true) ? "sí" : "no"),
+                        "Con el principal de pie en Instagram, YouTube o TikTok: arriba deslizas, abajo escribes", prefs.getBoolean("vertKbAuto", true), () -> {
+                            boolean on = !prefs.getBoolean("vertKbAuto", true);
+                            prefs.edit().putBoolean("vertKbAuto", on).apply();
+                            hub.send("vertKbPref", "on", on);
+                            Toast.makeText(this, on ? "El teclado vertical saldrá solo" : "Teclado vertical automático desactivado", Toast.LENGTH_SHORT).show();
                             configMenu();
                         })
                 .option(principal ? Ui.LOCK : Ui.UNLOCK, -1, "Pantalla unida: " + (ScreenSync.enabled(this) ? "sí" : "no"),
