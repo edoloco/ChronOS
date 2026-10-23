@@ -81,7 +81,11 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   conexión (`fsList`, `fsCat`, `fsThumb`, `fsOp`; las fotos se ven grandes con `fsThumb` hasta 1600 px).
   **Túnel**: copiar/mover entre discos distintos (`fmPush`) lo hace el teléfono dueño de los archivos, que los
   manda uno por uno al `FileServer` del otro (puerto 47821, con clave; encabezados `put: top/dir/file`).
-  Copias dentro del mismo disco: `fmJob` en el principal. Avance en las dos pantallas: `fmAnim`. Fotos/música/video: `MediaHub`, `PhotoActivity`, `PlayerActivity`, `VideoActivity`.
+  Copias dentro del mismo disco: `fmJob` en el principal. Avance en las dos pantallas: `fmAnim`.
+  Formas de ver (idea de los dibujos de Kron'OS de 2017): íconos (`GridView`), lista y detalle (tabla; en música
+  Artista / Tema / Álbum), pref `fmView`. Carpetas con música = **álbum** (`au` en `FileServer.list`): carátula
+  (`FileServer.cover`: cover/folder.jpg o la del primer tema), encabezado con nombre, artista, año, duración y
+  botones Reproducir / Aleatorio; datos de cada tema con `fsMeta` (`FileServer.meta`). Fotos/música/video: `MediaHub`, `PhotoActivity`, `PlayerActivity`, `VideoActivity`.
 - Sonido repartido: `Boost`, `CaptureService`. Nivel manual por teléfono ("Nivelar volumen", entorno con
   perillas `Knob` que se abre en el principal): prefs `gainP`/`gainE`, mensaje `boostGain {p,e}`, tono de prueba
   `boostTone`. Bajo 100 % se atenúa la pista; sobre 100 % se refuerza con `LoudnessEnhancer`. Toda pista de Boost

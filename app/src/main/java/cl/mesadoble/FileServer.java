@@ -111,15 +111,98 @@ public class FileServer {
         File[] fs = dir.listFiles();
         if (fs == null) throw new IOException("No se puede abrir esta carpeta");
         JSONArray a = new JSONArray();
+        int dirsChecked = 0;
         for (File f : fs) {
             JSONObject o = new JSONObject();
             try {
                 o.put("n", f.getName()); o.put("d", f.isDirectory());
                 o.put("s", f.isDirectory() ? 0 : f.length()); o.put("m", f.lastModified());
+                // carpetas con música: cuántos temas tienen (para mostrarlas como álbum)
+                if (f.isDirectory() && dirsChecked++ < 200) { int au = audioCount(f); if (au > 0) o.put("au", au); }
             } catch (JSONException ignored) { }
             a.put(o);
         }
         return a;
+    }
+
+    static boolean isAudio(String name) { return FilesProvider.mime(name).startsWith("audio/"); }
+
+    /** Temas de música directamente dentro de una carpeta. */
+    static int audioCount(File d) {
+        String[] ns = d.list();
+        int n = 0;
+        if (ns != null) for (String x : ns) if (isAudio(x)) n++;
+        return n;
+    }
+
+    // ---------------- música: datos de cada tema (artista, título, álbum, número, año) ----------------
+
+    /** Datos de los temas de una carpeta: {nombre: {ar, ti, al, tr, yr}} (como mucho 400). */
+    static JSONObject meta(File dir) {
+        JSONObject out = new JSONObject();
+        File[] fs = dir.listFiles();
+        if (fs == null) return out;
+        int n = 0;
+        for (File f : fs) {
+            if (!f.isFile() || !isAudio(f.getName()) || n++ >= 400) continue;
+            android.media.MediaMetadataRetriever r = new android.media.MediaMetadataRetriever();
+            try {
+                r.setDataSource(f.getAbsolutePath());
+                JSONObject o = new JSONObject();
+                put(o, "ar", r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ARTIST));
+                put(o, "aa", r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ALBUMARTIST));
+                put(o, "ti", r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_TITLE));
+                put(o, "al", r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ALBUM));
+                put(o, "tr", r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_CD_TRACK_NUMBER));
+                put(o, "yr", r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_YEAR));
+                put(o, "du", r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION));
+                out.put(f.getName(), o);
+            } catch (Exception ignored) {
+            } finally { try { r.release(); } catch (Exception ignored) { } }
+        }
+        return out;
+    }
+
+    private static void put(JSONObject o, String k, String v) throws JSONException { if (v != null && !v.trim().isEmpty()) o.put(k, v.trim()); }
+
+    /** Carátula: una imagen de la carpeta (cover, folder…) o la que viene dentro del primer tema. */
+    static android.graphics.Bitmap cover(File f, int size) {
+        try {
+            if (f.isFile()) return art(f, size);
+            File[] fs = f.listFiles();
+            if (fs == null) return null;
+            File img = null, firstAudio = null;
+            for (File x : fs) {
+                String n = x.getName().toLowerCase(java.util.Locale.ROOT);
+                if (x.isFile() && FilesProvider.mime(n).startsWith("image/")) {
+                    if (n.startsWith("cover") || n.startsWith("folder") || n.startsWith("front") || n.startsWith("album")) { img = x; break; }
+                    if (img == null) img = x;
+                }
+                if (firstAudio == null && x.isFile() && isAudio(n)) firstAudio = x;
+            }
+            if (img != null) return thumb(img, size);
+            return firstAudio == null ? null : art(firstAudio, size);
+        } catch (Exception e) { return null; }
+    }
+
+    /** La carátula que trae el archivo de música. */
+    private static android.graphics.Bitmap art(File f, int size) {
+        android.media.MediaMetadataRetriever r = new android.media.MediaMetadataRetriever();
+        try {
+            r.setDataSource(f.getAbsolutePath());
+            byte[] b = r.getEmbeddedPicture();
+            if (b == null) return null;
+            android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
+            o.inJustDecodeBounds = true;
+            android.graphics.BitmapFactory.decodeByteArray(b, 0, b.length, o);
+            int sample = 1;
+            while (Math.min(o.outWidth, o.outHeight) / (sample * 2) >= size) sample *= 2;
+            o = new android.graphics.BitmapFactory.Options();
+            o.inSampleSize = sample;
+            android.graphics.Bitmap src = android.graphics.BitmapFactory.decodeByteArray(b, 0, b.length, o);
+            return src == null ? null : android.media.ThumbnailUtils.extractThumbnail(src, size, size);
+        } catch (Exception e) { return null; }
+        finally { try { r.release(); } catch (Exception ignored) { } }
     }
 
     /** Nombre libre en la carpeta: "foto.jpg" → "foto (2).jpg". */
@@ -139,6 +222,7 @@ public class FileServer {
     static android.graphics.Bitmap thumb(File f, int size) {
         try {
             String type = FilesProvider.mime(f.getName());
+            if (f.isDirectory() || type.startsWith("audio/")) return cover(f, Math.min(size, 640));   // álbum o tema: carátula
             android.graphics.Bitmap src;
             if (type.startsWith("video/")) {
                 src = android.media.ThumbnailUtils.createVideoThumbnail(f.getAbsolutePath(), android.provider.MediaStore.Images.Thumbnails.MINI_KIND);
@@ -354,6 +438,8 @@ public class FileServer {
                     r.put("res", category(app, m.optString("cat")));
                 } else if ("fsOp".equals(t)) {
                     op(m, r);
+                } else if ("fsMeta".equals(t)) {
+                    r.put("meta", meta(resolve(m.optString("path"))));
                 } else if ("fsThumb".equals(t)) {
                     android.graphics.Bitmap b = thumb(resolve(m.optString("path")), Math.max(64, Math.min(1600, m.optInt("size", 160))));   // grande: ver la foto desde el otro
                     if (b != null) {

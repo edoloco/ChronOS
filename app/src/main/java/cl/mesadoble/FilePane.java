@@ -52,7 +52,12 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class FilePane extends FrameLayout implements Link.Listener {
 
-    static class Entry { String name, path, pkg; boolean dir; long size, mtime; }
+    static class Entry {
+        String name, path, pkg; boolean dir; long size, mtime;
+        int audio;                                   // carpeta: cuántos temas de música tiene (álbum)
+        String artist, title, album, year; int track; long dur;   // tema de música (datos del archivo)
+        boolean isAudio() { return !dir && MediaHub.AUDIO.equals(MediaHub.kindOf(name)); }
+    }
     private static class Wait { final CountDownLatch l = new CountDownLatch(1); JSONObject r; }
 
     private final Activity a;
@@ -77,11 +82,19 @@ public class FilePane extends FrameLayout implements Link.Listener {
     private final Map<Integer, Wait> waits = new ConcurrentHashMap<>();
     private final AtomicInteger seq = new AtomicInteger();
     private final Map<String, Bitmap> thumbCache = new ConcurrentHashMap<>();
+    private final Set<String> noThumb = java.util.Collections.newSetFromMap(new ConcurrentHashMap<>());
 
     private final TextView title, crumb, status;
     private final LinearLayout actions;
     private final FrameLayout body;
     private final ListView list;
+    // ---- formas de ver una carpeta (como en los dibujos de Kron'OS): íconos, lista y detalle
+    private final android.widget.GridView grid;
+    private final LinearLayout listCol, detailHead, albumHead;
+    private final TextView[] viewBtns = new TextView[3];
+    private int viewMode;          // 0 íconos, 1 lista, 2 detalle
+    private boolean albumDir, musicDir;   // la carpeta abierta es un álbum / tiene música
+    private android.widget.AbsListView view() { return viewMode == 0 ? grid : list; }
     private final ScrollView homeScroll;
     private final LinearLayout home;
     private final List<Entry> entries = new ArrayList<>();
@@ -139,6 +152,15 @@ public class FilePane extends FrameLayout implements Link.Listener {
         hp.setMarginStart(dp(6));
         head.addView(homeBtn, hp);
         head.addView(titles, new LinearLayout.LayoutParams(0, -2, 1));
+        // íconos / lista / detalle
+        String[] vl = {"▦", "☰", "▤"};
+        for (int i = 0; i < 3; i++) {
+            final int vm = i;
+            viewBtns[i] = chip(vl[i], v -> setViewMode(vm));
+            LinearLayout.LayoutParams vp = new LinearLayout.LayoutParams(dp(38), dp(36));
+            vp.setMarginStart(dp(i == 0 ? 6 : 3));
+            head.addView(viewBtns[i], vp);
+        }
         actions = new LinearLayout(a);
         actions.setGravity(Gravity.CENTER_VERTICAL);
         head.addView(actions);
@@ -162,12 +184,37 @@ public class FilePane extends FrameLayout implements Link.Listener {
         bp.topMargin = dp(8);
         col.addView(body, bp);
 
+        listCol = new LinearLayout(a);
+        listCol.setOrientation(LinearLayout.VERTICAL);
+        albumHead = new LinearLayout(a);
+        albumHead.setGravity(Gravity.CENTER_VERTICAL);
+        albumHead.setPadding(dp(8), dp(6), dp(8), dp(10));
+        albumHead.setVisibility(GONE);
+        listCol.addView(albumHead, new LinearLayout.LayoutParams(-1, -2));
+        detailHead = new LinearLayout(a);
+        detailHead.setGravity(Gravity.CENTER_VERTICAL);
+        detailHead.setPadding(dp(10), dp(6), dp(10), dp(6));
+        detailHead.setVisibility(GONE);
+        listCol.addView(detailHead, new LinearLayout.LayoutParams(-1, -2));
+        FrameLayout lists = new FrameLayout(a);
+        listCol.addView(lists, new LinearLayout.LayoutParams(-1, 0, 1));
         list = new ListView(a);
         list.setDivider(null);
         list.setAdapter(adapter);
         list.setOnItemClickListener((p, v, i, id) -> tap(entries.get(i)));
         list.setOnItemLongClickListener((p, v, i, id) -> { toggle(entries.get(i)); return true; });
-        body.addView(list, new LayoutParams(-1, -1));
+        lists.addView(list, new LayoutParams(-1, -1));
+        grid = new android.widget.GridView(a);
+        grid.setNumColumns(android.widget.GridView.AUTO_FIT);
+        grid.setColumnWidth(dp(96));
+        grid.setStretchMode(android.widget.GridView.STRETCH_COLUMN_WIDTH);
+        grid.setVerticalSpacing(dp(4));
+        grid.setAdapter(adapter);
+        grid.setOnItemClickListener((p, v, i, id) -> tap(entries.get(i)));
+        grid.setOnItemLongClickListener((p, v, i, id) -> { toggle(entries.get(i)); return true; });
+        lists.addView(grid, new LayoutParams(-1, -1));
+        body.addView(listCol, new LayoutParams(-1, -1));
+        viewMode = a.getSharedPreferences("mesa", android.content.Context.MODE_PRIVATE).getInt("fmView", 1);
         homeScroll = new ScrollView(a);
         home = new LinearLayout(a);
         home.setOrientation(LinearLayout.VERTICAL);
@@ -212,8 +259,8 @@ public class FilePane extends FrameLayout implements Link.Listener {
     private int listPos(float x, float y) {
         int[] me = new int[2], l = new int[2];
         getLocationInWindow(me);
-        list.getLocationInWindow(l);
-        return list.pointToPosition((int) (x - (l[0] - me[0])), (int) (y - (l[1] - me[1])));
+        view().getLocationInWindow(l);
+        return view().pointToPosition((int) (x - (l[0] - me[0])), (int) (y - (l[1] - me[1])));
     }
 
     private boolean onSelected(int pos) { return pos >= 0 && pos < entries.size() && sel.contains(entries.get(pos).path); }
@@ -404,7 +451,10 @@ public class FilePane extends FrameLayout implements Link.Listener {
         else if (hub.connected()) hub.send("fpPath", "path", "dir".equals(m) ? p : "", "disk", disk());
         if (remote()) showStatus(hub.connected() ? "Leyendo el teléfono " + diskName() + "…" : "El " + diskName() + " no está conectado");
         homeScroll.setVisibility("home".equals(m) ? VISIBLE : GONE);
-        list.setVisibility("home".equals(m) ? GONE : VISIBLE);
+        listCol.setVisibility("home".equals(m) ? GONE : VISIBLE);
+        albumDir = false; musicDir = false;
+        albumHead.setVisibility(GONE);
+        applyViewMode();
         work.execute(() -> {
             String err = null;
             JSONObject res = null;
@@ -441,9 +491,10 @@ public class FilePane extends FrameLayout implements Link.Listener {
                 if (fe == null) entries.addAll(out);
                 if ("home".equals(m)) buildHome(fres, fe);
                 adapter.notifyDataSetChanged();
-                list.setSelection(0);
+                view().setSelection(0);
                 showStatus(fe);
                 refreshActions();
+                if ("dir".equals(m) && fe == null) loadMeta(p);   // música: artista, tema, álbum
             });
         });
     }
@@ -463,6 +514,7 @@ public class FilePane extends FrameLayout implements Link.Listener {
         Entry e = new Entry();
         e.name = o.optString("n"); e.dir = o.optBoolean("d"); e.size = o.optLong("s"); e.mtime = o.optLong("m");
         e.path = o.optString("p", ""); e.pkg = o.optString("k", "");
+        e.audio = o.optInt("au");
         return e;
     }
 
@@ -489,7 +541,7 @@ public class FilePane extends FrameLayout implements Link.Listener {
         if (hub.isPrincipal() && peer == null) {
             if (!extDisk()) tiles.add(tile("HDD", 0xFF37474F, "Disco extendido", hub.connected() ? "Archivos del extendido" : "Sin conexión",
                     hub.connected(), v -> openExtDisk()));
-            else tiles.add(tile("HDD", 0xFFF57C1F, "Disco principal", "Volver a este teléfono", true, v -> { viewDisk = "p"; thumbCache.clear(); goHome(); }));
+            else tiles.add(tile("HDD", 0xFFF57C1F, "Disco principal", "Volver a este teléfono", true, v -> { viewDisk = "p"; thumbCache.clear(); noThumb.clear(); goHome(); }));
         }
         JSONArray st = res == null ? null : res.optJSONArray("storages");
         for (int i = 0; st != null && i < st.length(); i++) {
@@ -526,7 +578,7 @@ public class FilePane extends FrameLayout implements Link.Listener {
     private void openExtDisk() {
         if (!hub.connected()) { toast("El extendido no está conectado"); return; }
         viewDisk = "e";
-        thumbCache.clear();
+        thumbCache.clear(); noThumb.clear();
         goHome();
     }
 
@@ -610,7 +662,7 @@ public class FilePane extends FrameLayout implements Link.Listener {
     // ---------------- lista ----------------
 
     private static String icon(Entry e) {
-        if (e.dir) return "📁";
+        if (e.dir) return e.audio >= 2 ? "💿" : "📁";
         if (!e.pkg.isEmpty()) return "🤖";
         String t = FilesProvider.mime(e.name);
         if (t.startsWith("image/")) return "🖼";
@@ -623,12 +675,196 @@ public class FilePane extends FrameLayout implements Link.Listener {
         return "📄";
     }
 
+    // ---------------- íconos / lista / detalle ----------------
+
+    private void setViewMode(int m) {
+        viewMode = m;
+        a.getSharedPreferences("mesa", android.content.Context.MODE_PRIVATE).edit().putInt("fmView", m).apply();
+        applyViewMode();
+        adapter.notifyDataSetChanged();
+    }
+
+    /** Muestra la lista o la grilla, el encabezado del detalle y marca el botón elegido. */
+    private void applyViewMode() {
+        list.setVisibility(viewMode == 0 ? GONE : VISIBLE);
+        grid.setVisibility(viewMode == 0 ? VISIBLE : GONE);
+        for (int i = 0; i < 3; i++) {
+            GradientDrawable g = (GradientDrawable) viewBtns[i].getBackground();
+            g.setColor(i == viewMode ? th.accent : th.key);
+            viewBtns[i].setTextColor(i == viewMode ? 0xFFFFFFFF : th.fg);
+        }
+        detailHead.removeAllViews();
+        boolean show = viewMode == 2 && !"home".equals(mode);
+        detailHead.setVisibility(show ? VISIBLE : GONE);
+        if (!show) return;
+        String[] cols = musicDir ? new String[]{"Artista", "Tema", "Álbum"} : new String[]{"Nombre", "Tamaño", "Fecha"};
+        float[] w = musicDir ? new float[]{1f, 1.4f, 1f} : new float[]{2.2f, 0.8f, 0.9f};
+        View sp = new View(a);
+        detailHead.addView(sp, new LinearLayout.LayoutParams(dp(34), 1));
+        for (int i = 0; i < 3; i++) {
+            TextView t = new TextView(a);
+            t.setText(cols[i].toUpperCase(Locale.ROOT));
+            t.setTextSize(11);
+            t.setLetterSpacing(0.06f);
+            t.setTextColor(th.accent);
+            t.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+            t.setPadding(dp(6), 0, dp(4), 0);
+            detailHead.addView(t, new LinearLayout.LayoutParams(0, -2, w[i]));
+        }
+        GradientDrawable line = new GradientDrawable();
+        line.setColor((th.accent & 0x00FFFFFF) | 0x22000000);
+        line.setCornerRadius(dp(10));
+        detailHead.setBackground(line);
+    }
+
+    // ---------------- música: datos de los temas y carpetas que son álbumes ----------------
+
+    private void loadMeta(String p) {
+        boolean any = false;
+        for (Entry e : entries) if (e.isAudio()) { any = true; break; }
+        if (!any) return;
+        work.execute(() -> {
+            JSONObject meta = null;
+            try {
+                if (remote()) meta = request("fsMeta", "path", p).optJSONObject("meta");
+                else meta = FileServer.meta(new File(p));
+            } catch (Exception ignored) { }
+            final JSONObject fm = meta;
+            main.post(() -> {
+                if (!"dir".equals(mode) || !p.equals(path) || fm == null) return;
+                int au = 0, files = 0;
+                for (Entry e : entries) {
+                    if (!e.dir) files++;
+                    if (!e.isAudio()) continue;
+                    au++;
+                    JSONObject o = fm.optJSONObject(e.name);
+                    if (o == null) continue;
+                    e.artist = o.optString("ar", o.optString("aa", null));
+                    e.title = o.optString("ti", null);
+                    e.album = o.optString("al", null);
+                    e.year = o.optString("yr", null);
+                    try { e.track = Integer.parseInt(o.optString("tr", "0").split("/")[0].trim()); } catch (Exception ignored) { }
+                    try { e.dur = Long.parseLong(o.optString("du", "0")); } catch (Exception ignored) { }
+                }
+                musicDir = au > 0;
+                albumDir = au >= 2 && au >= files * 0.6f;
+                if (albumDir) {   // en un álbum, los temas en su orden
+                    Collections.sort(entries, (x, y) -> {
+                        if (x.dir != y.dir) return x.dir ? -1 : 1;
+                        if (x.isAudio() != y.isAudio()) return x.isAudio() ? -1 : 1;
+                        if (x.track != y.track) return Integer.compare(x.track == 0 ? 9999 : x.track, y.track == 0 ? 9999 : y.track);
+                        return x.name.compareToIgnoreCase(y.name);
+                    });
+                    buildAlbumHead(p);
+                }
+                applyViewMode();
+                adapter.notifyDataSetChanged();
+            });
+        });
+    }
+
+    private static String most(List<String> l) {
+        java.util.Map<String, Integer> c = new java.util.HashMap<>();
+        String best = null; int bn = 0;
+        for (String x : l) { if (x == null || x.isEmpty()) continue; int n = c.merge(x, 1, Integer::sum); if (n > bn) { bn = n; best = x; } }
+        return best;
+    }
+
+    private static String clock(long ms) {
+        long s = ms / 1000;
+        return s >= 3600 ? (s / 3600) + " h " + (s % 3600 / 60) + " min" : (s / 60) + ":" + String.format(Locale.ROOT, "%02d", s % 60);
+    }
+
+    /** Encabezado del álbum: carátula, nombre, artista, temas y botones para escucharlo. */
+    private void buildAlbumHead(String p) {
+        albumHead.removeAllViews();
+        List<String> albums = new ArrayList<>(), artists = new ArrayList<>(), years = new ArrayList<>();
+        int n = 0; long total = 0;
+        for (Entry e : entries) if (e.isAudio()) { n++; total += e.dur; albums.add(e.album); artists.add(e.artist); years.add(e.year); }
+        String alb = most(albums), art = most(artists), yr = most(years);
+        ImageView cov = new ImageView(a);
+        cov.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        GradientDrawable cg = new GradientDrawable();
+        cg.setColor(0xFF2A2F36);
+        cg.setCornerRadius(dp(12));
+        cov.setBackground(cg);
+        cov.setClipToOutline(true);
+        albumHead.addView(cov, new LinearLayout.LayoutParams(dp(96), dp(96)));
+        thumbs.execute(() -> {   // la carátula (de la carpeta o del primer tema)
+            Bitmap b = null;
+            try {
+                if (!remote()) b = FileServer.thumb(new File(p), 320);
+                else {
+                    JSONObject r = request("fsThumb", "path", p, "size", 320);
+                    byte[] d = android.util.Base64.decode(r.optString("img"), android.util.Base64.DEFAULT);
+                    if (d.length > 0) b = BitmapFactory.decodeByteArray(d, 0, d.length);
+                }
+            } catch (Exception ignored) { }
+            final Bitmap fb = b;
+            main.post(() -> { if (fb != null) cov.setImageBitmap(fb); else { cov.setImageDrawable(null); } });
+        });
+        LinearLayout tx = new LinearLayout(a);
+        tx.setOrientation(LinearLayout.VERTICAL);
+        tx.setPadding(dp(14), 0, 0, 0);
+        TextView kind = new TextView(a);
+        kind.setText("ÁLBUM");
+        kind.setTextSize(11);
+        kind.setLetterSpacing(0.1f);
+        kind.setTextColor(th.accent);
+        TextView t1 = new TextView(a);
+        t1.setText(alb != null ? alb : new File(p).getName());
+        t1.setTextSize(19);
+        t1.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        t1.setTextColor(th.fg);
+        t1.setMaxLines(2);
+        t1.setEllipsize(TextUtils.TruncateAt.END);
+        TextView t2 = new TextView(a);
+        t2.setText((art != null ? art : "Artista desconocido"));
+        t2.setTextSize(14);
+        t2.setTextColor(th.fg);
+        TextView t3 = new TextView(a);
+        t3.setText(n + (n == 1 ? " tema" : " temas") + (yr != null ? " · " + yr : "") + (total > 0 ? " · " + clock(total) : ""));
+        t3.setTextSize(12);
+        t3.setTextColor(th.muted);
+        LinearLayout btns = new LinearLayout(a);
+        btns.setPadding(0, dp(8), 0, 0);
+        TextView play = chip("▶  Reproducir", v -> playAll(false)), shuf = chip("🔀  Aleatorio", v -> playAll(true));
+        GradientDrawable pg = (GradientDrawable) play.getBackground();
+        pg.setColor(th.accent);
+        play.setTextColor(0xFFFFFFFF);
+        play.setTextSize(13.5f);
+        shuf.setTextSize(13.5f);
+        btns.addView(play, new LinearLayout.LayoutParams(-2, dp(36)));
+        LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(-2, dp(36));
+        sl.setMarginStart(dp(8));
+        btns.addView(shuf, sl);
+        tx.addView(kind); tx.addView(t1); tx.addView(t2); tx.addView(t3); tx.addView(btns);
+        albumHead.addView(tx, new LinearLayout.LayoutParams(0, -2, 1));
+        albumHead.setVisibility(VISIBLE);
+    }
+
+    /** Escuchar el álbum entero (en orden o al azar): suena en el principal y queda en la barra. */
+    private void playAll(boolean shuffle) {
+        ArrayList<String> paths = new ArrayList<>();
+        for (Entry e : entries) if (e.isAudio()) paths.add(e.path);
+        if (paths.isEmpty()) return;
+        if (shuffle) Collections.shuffle(paths);
+        if (extDisk() && remote()) { toast("Es música del extendido: cópiala al principal para escucharla"); return; }
+        if (!remote()) MediaHub.open(a, MediaHub.AUDIO, paths, 0);
+        else if (hub.connected()) MediaHub.requestPlay(hub, MediaHub.AUDIO, paths, 0);
+        else toast("El principal no está conectado");
+    }
+
     private class Adapter extends BaseAdapter {
+        @Override public int getViewTypeCount() { return 3; }
+        @Override public int getItemViewType(int i) { return viewMode; }
         @Override public int getCount() { return entries.size(); }
         @Override public Object getItem(int i) { return entries.get(i); }
         @Override public long getItemId(int i) { return i; }
 
         @Override public View getView(int i, View v, ViewGroup parent) {
+            if (viewMode == 0) return cell(i, v);
+            if (viewMode == 2) return detailRow(i, v);
             Holder h;
             if (v == null) {
                 LinearLayout row = new LinearLayout(a);
@@ -672,22 +908,161 @@ public class FilePane extends FrameLayout implements Link.Listener {
             h.check.setText(sel.isEmpty() ? "" : on ? "☑" : "☐");
             h.check.setVisibility(sel.isEmpty() ? GONE : VISIBLE);
             h.emoji.setText(icon(e));
-            h.name.setText(e.name);
-            String date = e.mtime > 0 ? java.text.DateFormat.getDateInstance(java.text.DateFormat.SHORT).format(new java.util.Date(e.mtime)) : "";
-            h.sub.setText(e.dir ? date : size(e.size) + (date.isEmpty() ? "" : "  ·  " + date));
+            h.name.setText(nameOf(e));
+            h.sub.setText(subOf(e));
             v.setBackgroundColor(on ? (th.accent & 0x00FFFFFF) | 0x33000000 : 0);
             h.img.setImageBitmap(null);
             h.path = e.path;
-            if (!e.dir && FilesProvider.mime(e.name).startsWith("image/")) loadThumb(h, e.path);
+            if (wantsThumb(e)) loadThumb(h, e.path);
+            return v;
+        }
+
+        /** Íconos: como en el escritorio, ícono grande y nombre abajo. */
+        private View cell(int i, View v) {
+            Holder h;
+            if (v == null) {
+                LinearLayout c = new LinearLayout(a);
+                c.setOrientation(LinearLayout.VERTICAL);
+                c.setGravity(Gravity.CENTER_HORIZONTAL);
+                c.setPadding(dp(4), dp(8), dp(4), dp(6));
+                h = new Holder();
+                FrameLayout box = new FrameLayout(a);
+                h.emoji = new TextView(a);
+                h.emoji.setTextSize(32);
+                h.emoji.setGravity(Gravity.CENTER);
+                h.img = new ImageView(a);
+                h.img.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                GradientDrawable g = new GradientDrawable();
+                g.setColor(0x00000000);
+                g.setCornerRadius(dp(10));
+                h.img.setBackground(g);
+                h.img.setClipToOutline(true);
+                h.check = new TextView(a);
+                h.check.setTextSize(15);
+                h.check.setTextColor(th.accent);
+                box.addView(h.emoji, new LayoutParams(-1, -1));
+                box.addView(h.img, new LayoutParams(-1, -1));
+                box.addView(h.check, new LayoutParams(-2, -2, Gravity.TOP | Gravity.END));
+                c.addView(box, new LinearLayout.LayoutParams(dp(62), dp(62)));
+                h.name = new TextView(a);
+                h.name.setTextSize(12);
+                h.name.setTextColor(th.fg);
+                h.name.setGravity(Gravity.CENTER);
+                h.name.setMaxLines(2);
+                h.name.setEllipsize(TextUtils.TruncateAt.END);
+                h.name.setPadding(0, dp(4), 0, 0);
+                c.addView(h.name, new LinearLayout.LayoutParams(-1, -2));
+                h.sub = new TextView(a);
+                h.sub.setTextSize(10.5f);
+                h.sub.setTextColor(th.accent);
+                h.sub.setGravity(Gravity.CENTER);
+                h.sub.setSingleLine(true);
+                h.sub.setEllipsize(TextUtils.TruncateAt.END);
+                c.addView(h.sub, new LinearLayout.LayoutParams(-1, -2));
+                c.setTag(h);
+                v = c;
+            }
+            h = (Holder) v.getTag();
+            Entry e = entries.get(i);
+            boolean on = sel.contains(e.path);
+            h.check.setText(sel.isEmpty() ? "" : on ? "☑" : "☐");
+            h.emoji.setText(icon(e));
+            h.name.setText(nameOf(e));
+            // en íconos, abajo solo lo que distingue: el artista de un tema o "Álbum" en una carpeta de música
+            h.sub.setText(e.dir && e.audio >= 2 ? "Álbum · " + e.audio : e.isAudio() && e.artist != null ? e.artist : "");
+            v.setBackgroundColor(on ? (th.accent & 0x00FFFFFF) | 0x33000000 : 0);
+            h.img.setImageBitmap(null);
+            h.path = e.path;
+            if (wantsThumb(e)) loadThumb(h, e.path);
+            return v;
+        }
+
+        /** Detalle: tabla con columnas (en música: Artista, Tema, Álbum), filas a rayas. */
+        private View detailRow(int i, View v) {
+            Holder h;
+            if (v == null) {
+                LinearLayout row = new LinearLayout(a);
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setPadding(dp(10), dp(5), dp(10), dp(5));
+                h = new Holder();
+                FrameLayout box = new FrameLayout(a);
+                h.emoji = new TextView(a);
+                h.emoji.setTextSize(16);
+                h.emoji.setGravity(Gravity.CENTER);
+                h.img = new ImageView(a);
+                h.img.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                box.addView(h.emoji, new LayoutParams(-1, -1));
+                box.addView(h.img, new LayoutParams(-1, -1));
+                row.addView(box, new LinearLayout.LayoutParams(dp(28), dp(28)));
+                LinearLayout.LayoutParams gap = new LinearLayout.LayoutParams(dp(6), 1);
+                row.addView(new View(a), gap);
+                h.cols = new TextView[3];
+                for (int k = 0; k < 3; k++) {
+                    TextView t = new TextView(a);
+                    t.setTextSize(13);
+                    t.setSingleLine(true);
+                    t.setEllipsize(TextUtils.TruncateAt.END);
+                    t.setPadding(dp(6), 0, dp(4), 0);
+                    h.cols[k] = t;
+                    row.addView(t, new LinearLayout.LayoutParams(0, -2, 1));
+                }
+                row.setTag(h);
+                v = row;
+            }
+            h = (Holder) v.getTag();
+            Entry e = entries.get(i);
+            boolean on = sel.contains(e.path);
+            float[] w = musicDir ? new float[]{1f, 1.4f, 1f} : new float[]{2.2f, 0.8f, 0.9f};
+            for (int k = 0; k < 3; k++) ((LinearLayout.LayoutParams) h.cols[k].getLayoutParams()).weight = w[k];
+            String date = e.mtime > 0 ? java.text.DateFormat.getDateInstance(java.text.DateFormat.SHORT).format(new java.util.Date(e.mtime)) : "";
+            String[] txt;
+            if (musicDir && e.isAudio()) txt = new String[]{e.artist != null ? e.artist : "Desconocido", e.title != null ? e.title : stripExt(e.name), e.album != null ? e.album : ""};
+            else if (musicDir) txt = new String[]{e.dir && e.audio >= 2 ? "Álbum" : "", e.name, ""};
+            else txt = new String[]{e.name, e.dir ? "" : size(e.size), date};
+            int[] col = {musicDir ? th.accent : th.fg, th.fg, th.muted};
+            for (int k = 0; k < 3; k++) {
+                h.cols[k].setText(txt[k]);
+                h.cols[k].setTextColor(musicDir && k == 0 && e.artist == null && e.isAudio() ? th.warn : col[k]);
+            }
+            h.emoji.setText(icon(e));
+            int stripe = i % 2 == 1 ? (th.fg & 0x00FFFFFF) | 0x0F000000 : 0;
+            v.setBackgroundColor(on ? (th.accent & 0x00FFFFFF) | 0x33000000 : stripe);
+            h.img.setImageBitmap(null);
+            h.path = e.path;
+            if (wantsThumb(e)) loadThumb(h, e.path);
+            v.requestLayout();
             return v;
         }
     }
 
-    private static class Holder { TextView check, emoji, name, sub; ImageView img; String path; }
+    private static String stripExt(String n) { int d = n.lastIndexOf('.'); return d > 0 ? n.substring(0, d) : n; }
+
+    /** Nombre a mostrar: en música, el título del tema (con su número, en un álbum). */
+    private String nameOf(Entry e) {
+        if (e.isAudio() && e.title != null) return (albumDir && e.track > 0 ? e.track + ". " : "") + e.title;
+        return e.name;
+    }
+
+    private String subOf(Entry e) {
+        String date = e.mtime > 0 ? java.text.DateFormat.getDateInstance(java.text.DateFormat.SHORT).format(new java.util.Date(e.mtime)) : "";
+        if (e.dir && e.audio >= 2) return "Álbum · " + e.audio + " temas";
+        if (e.isAudio() && (e.artist != null || e.album != null))
+            return (e.artist != null ? e.artist : "") + (e.album != null && !albumDir ? (e.artist != null ? "  ·  " : "") + e.album : "")
+                    + (e.dur > 0 ? "  ·  " + clock(e.dur) : "");
+        return e.dir ? date : size(e.size) + (date.isEmpty() ? "" : "  ·  " + date);
+    }
+
+    /** Fotos, carátulas de temas y de álbumes. */
+    private static boolean wantsThumb(Entry e) {
+        return (!e.dir && (FilesProvider.mime(e.name).startsWith("image/") || FilesProvider.mime(e.name).startsWith("audio/"))) || (e.dir && e.audio >= 2);
+    }
+
+    private static class Holder { TextView check, emoji, name, sub; TextView[] cols; ImageView img; String path; }
 
     private void loadThumb(Holder h, String p) {
         Bitmap c = thumbCache.get(p);
         if (c != null) { h.img.setImageBitmap(c); return; }
+        if (noThumb.contains(p)) return;   // ya se sabe que no tiene (tema sin carátula)
         thumbs.execute(() -> {
             Bitmap b = null;
             try {
@@ -699,6 +1074,7 @@ public class FilePane extends FrameLayout implements Link.Listener {
                 }
             } catch (Exception ignored) { }
             final Bitmap fb = b;
+            if (fb == null) noThumb.add(p);
             if (fb != null) {
                 thumbCache.put(p, fb);
                 main.post(() -> { if (p.equals(h.path)) h.img.setImageBitmap(fb); });
