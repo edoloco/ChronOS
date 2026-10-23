@@ -52,7 +52,8 @@ final class Glass {
 
     private Glass() { }
 
-    static boolean on() { return CardTheme.glass == CardTheme.GLASS_INTENSE; }
+    /** ¿Hace falta el fondo desenfocado? Cristal intenso y Aero (como en Windows 7, que desenfoca lo de atrás). */
+    static boolean on() { return CardTheme.glass == CardTheme.GLASS_INTENSE || CardTheme.glass == CardTheme.GLASS_AERO; }
 
     /** ¿El fondo de la mesa es oscuro? (decide el color del texto y del vidrio) */
     static boolean darkDesk() { return CardTheme.dark(CardTheme.desk == 0 ? 0xFF18212B : CardTheme.desk); }

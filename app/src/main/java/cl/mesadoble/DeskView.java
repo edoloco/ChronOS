@@ -1105,7 +1105,22 @@ public class DeskView extends View {
                 Glass.drawBlur(c, W, H);
                 c.restore();
             });
-        } else if (aeroCard) Aero.draw(c, box, rr, CardTheme.aeroTint(), dp);
+        } else if (aeroCard) {
+            // Aero de verdad: lo de atrás se ve borroso a través del vidrio de color (como en Windows 7)
+            if (Glass.blur != null) {
+                final float W = getWidth(), H = getHeight(), cx = width / 2, cy = h / 2, rot = it.rot + wig + appTurn;
+                android.graphics.Path cp = new android.graphics.Path();
+                cp.addRoundRect(box, rr, rr, android.graphics.Path.Direction.CW);
+                c.save();
+                c.clipPath(cp);
+                if (lifted) c.scale(1 / 1.03f, 1 / 1.03f, cx, cy);
+                c.rotate(-rot, cx, cy);
+                c.translate(-left, -top);
+                Glass.drawBlur(c, W, H);
+                c.restore();
+            }
+            Aero.draw(c, box, rr, CardTheme.aeroTint(), dp);
+        }
         else c.drawRoundRect(box, rr, rr, card);
         if (glassCard && !aeroCard && !intense) {
             // cristal: brillo arriba y un borde fino claro

@@ -444,8 +444,19 @@ public class ChronoBar extends FrameLayout {
             c.drawRect(0, 0, W, H, fill);
         } else if (CardTheme.isAero()) {
             int tint = CardTheme.aeroTint();
-            fill.setShader(new LinearGradient(0, 0, 0, H, (tint & 0x00FFFFFF) | 0x90000000,
-                    (CardTheme.shade(tint, -0.25f) & 0x00FFFFFF) | 0xA8000000, Shader.TileMode.CLAMP));
+            boolean blurred = Glass.blur != null && Glass.desk.get() != null;
+            if (blurred) {   // Aero: la mesa borrosa detrás del vidrio de color
+                View d = Glass.desk.get();
+                int[] me = new int[2], other = new int[2];
+                self.getLocationInWindow(me);
+                d.getLocationInWindow(other);
+                c.save();
+                c.translate(other[0] - me[0], other[1] - me[1]);
+                Glass.drawBlur(c, d.getWidth(), d.getHeight());
+                c.restore();
+            }
+            fill.setShader(new LinearGradient(0, 0, 0, H, (tint & 0x00FFFFFF) | (blurred ? 0x78000000 : 0x90000000),
+                    (CardTheme.shade(tint, -0.25f) & 0x00FFFFFF) | (blurred ? 0x90000000 : 0xA8000000), Shader.TileMode.CLAMP));
             c.drawRect(0, 0, W, H, fill);
         } else {
             fill.setShader(null);
