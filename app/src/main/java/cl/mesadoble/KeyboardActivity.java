@@ -721,8 +721,11 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
 
     // ---------------- envío y sugerencias ----------------
 
-    private void sendText(String s) { hub.send("kb", "a", "text", "s", s); }
-    private void sendKey(int code, int meta, int n) { hub.send("kb", "a", "key", "k", code, "m", meta, "n", n); }
+    // cada tecla lleva un número: si por la conexión llegara dos veces, el principal la escribe una sola vez
+    private static final String KB_SESSION = Long.toString(System.nanoTime(), 36);
+    private static int kbSeq;
+    private void sendText(String s) { hub.send("kb", "a", "text", "s", s, "q", ++kbSeq, "qs", KB_SESSION); }
+    private void sendKey(int code, int meta, int n) { hub.send("kb", "a", "key", "k", code, "m", meta, "n", n, "q", ++kbSeq, "qs", KB_SESSION); }
 
     @Override public void text(String s) {
         sendText(s);

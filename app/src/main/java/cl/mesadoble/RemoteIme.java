@@ -202,8 +202,16 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
         }
     }
 
+    private final java.util.ArrayDeque<String> seen = new java.util.ArrayDeque<>();
+
     @Override public void onMessage(JSONObject m) {
         if (!"kb".equals(m.optString("t"))) return;
+        if (m.has("q")) {   // la misma tecla repetida (llegó dos veces): se ignora
+            String id = m.optString("qs") + ":" + m.optInt("q");
+            if (seen.contains(id)) return;
+            seen.addLast(id);
+            if (seen.size() > 64) seen.removeFirst();
+        }
         InputConnection ic = getCurrentInputConnection();
         if (ic == null) return;
         lastEditAt = SystemClock.uptimeMillis();

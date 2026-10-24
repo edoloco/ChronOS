@@ -333,8 +333,13 @@ public class KeyboardView extends View {
             Key k = pointers.remove(e.getPointerId(i));
             if (k != null) release(k);
         } else if (a == MotionEvent.ACTION_CANCEL) {
-            for (Key k : new ArrayList<>(pointers.values())) release(k);
+            // toque cancelado (la pantalla se reacomodó): no se escribe nada, solo se sueltan las teclas
+            for (Key k : new ArrayList<>(pointers.values())) {
+                if (android && k.type == CHAR) { k.down = false; repeat.removeCallbacks(longPress); longKey = null; continue; }
+                release(k);
+            }
             pointers.clear();
+            invalidate();
         }
         return true;
     }
@@ -432,9 +437,17 @@ public class KeyboardView extends View {
         return true;
     }
 
+    private Key lastFired;
+    private long lastFiredAt;
+
     /** Ejecuta una tecla según los modificadores activos. */
     private void fire(Key k) {
         if (sink == null) return;
+        // la misma tecla dos veces en menos de 45 ms no es un dedo de verdad (toque doble del sensor): una sola vez
+        long now = android.os.SystemClock.uptimeMillis();
+        if (k == lastFired && now - lastFiredAt < 45 && k != repeating) return;
+        lastFired = k;
+        lastFiredAt = now;
         int mods = heldMods | latchedMods;
         if (k.type == ACT) { sink.action(k.act); return; }
         if (k.type == MEDIA) { sink.media(k.act); return; }
