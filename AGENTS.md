@@ -61,9 +61,11 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
 `TouchpadView`, `GamepadView`, `BtPad`, `Dict`, `Speller`.
 - **vertical-keyboard** (modo `VERT` de `KeyboardActivity`): arriba un touchpad que solo desliza (el gesto se repite
   en el centro del principal: `vswipe {f, ms}`, `vtap`), abajo el teclado Android con fila de números y teclas
-  cuadradas (`KeyboardView.setNumberRow`, `squareHeight`). Sale **solo si el principal está de pie** (acelerómetro del
-  principal → `pPortrait {on}`; `Hub.wantVertKb()`, pref `vertKbAuto`) y hay que escribir; si el principal se acuesta,
-  el teclado pasa al normal. Emojis: todos (`EmojiData`, generado), por categoría y páginas.
+  cuadradas (`KeyboardView.setNumberRow`, `squareHeight`). Sale cuando **la app del principal está en vertical** (pantalla del
+  principal más alta que ancha, sin importar cómo estén los teléfonos → `pPortrait {on}`; `Hub.wantVertKb()`, pref
+  `vertKbAuto`) y hay que escribir; si la app pasa a horizontal, el teclado pasa al normal. Emojis: todos (`EmojiData`, generado), por categoría y páginas.
+- Inicio (botón de navegación o el del sistema): `goDesk` en los dos, cierra el gestor de archivos y el menú inicio.
+- Widget de baterías: estilo "Horizontal moderno" o "Vertical retro" (Mega Man), en `Item.sz` (0/1), menú de los 3 puntos.
 - Tapa (`LidWatch`): sensores elegibles (imán, proximidad, luz; "todos" o "cualquiera"), prefs `lidSensors`/`lidAll`, mensaje `lidSens`.
 
 **Funciones**

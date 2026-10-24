@@ -135,28 +135,35 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         outBtn = chip("", v -> toggleOutput());
         pairBtn = chip("Vincular", v -> pairBluetooth());
         top.addView(sendBtn); top.addView(pairBtn); top.addView(outBtn); top.addView(resetBtn); top.addView(editBtn); top.addView(emojiBtn); top.addView(modeBtn);
-        // cerrar: un círculo con una X
+        // cerrar: círculo rojo grande que asoma por la esquina de arriba a la izquierda
         TextView x = new TextView(this);
         x.setText("✕");
-        x.setTextSize(15);
+        x.setTextSize(19);
+        x.setTypeface(Typeface.DEFAULT_BOLD);
         x.setGravity(Gravity.CENTER);
-        x.setTextColor(th.fg);
+        x.setTextColor(0xFFFFFFFF);
+        x.setPadding(dp(14), dp(14), 0, 0);   // la X en la parte que se ve del círculo
         GradientDrawable xg = new GradientDrawable();
         xg.setShape(GradientDrawable.OVAL);
-        xg.setColor(th.chip);
-        if (th.stroke != 0) xg.setStroke(dp(1), th.stroke);
+        xg.setColor(0xFFE53935);
+        xg.setStroke(dp(2), 0xFFFFFFFF);
         x.setBackground(xg);
+        x.setElevation(dp(8));
         x.setContentDescription("Cerrar");
         x.setOnClickListener(v -> close());
-        LinearLayout.LayoutParams xl = new LinearLayout.LayoutParams(dp(36), dp(36));
-        xl.setMarginStart(dp(4));
-        top.addView(x, xl);
+        bar3.setPadding(dp(58), dp(4), dp(6), dp(4));   // el texto de la izquierda deja espacio al círculo
         root.addView(bar3, new LinearLayout.LayoutParams(-1, dp(44)));
 
         content = new LinearLayout(this);
         root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1));
 
-        setContentView(root);
+        android.widget.FrameLayout frame = new android.widget.FrameLayout(this);
+        frame.addView(root, new android.widget.FrameLayout.LayoutParams(-1, -1));
+        android.widget.FrameLayout.LayoutParams xl = new android.widget.FrameLayout.LayoutParams(dp(68), dp(68), Gravity.TOP | Gravity.START);
+        xl.leftMargin = -dp(16);
+        xl.topMargin = -dp(16);
+        frame.addView(x, xl);
+        setContentView(frame);
 
         hub = Hub.get(this);
         hub.ensureStarted();
@@ -245,7 +252,23 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
 
     private boolean auto, resumed;
     private final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
-    private final Runnable autoClose = () -> { if (auto && !hub.remoteImeReady()) close(); };
+    /**
+     * Se cierra solo (si se abrió solo) cuando el principal ya no tiene dónde escribir. A veces el principal avisa
+     * "sin campo" un instante mientras se escribe: por eso se espera y nunca se cierra si se tocó hace poco.
+     */
+    private long lastTouchAt;
+    private final Runnable autoClose = () -> {
+        if (!auto || hub.remoteImeReady()) return;
+        long idle = android.os.SystemClock.uptimeMillis() - this.lastTouchAt;
+        if (idle < 12000) { h.postDelayed(this.autoCloseRef(), 12000 - idle); return; }
+        close();
+    };
+    private Runnable autoCloseRef() { return autoClose; }
+
+    @Override public boolean dispatchTouchEvent(android.view.MotionEvent e) {
+        lastTouchAt = android.os.SystemClock.uptimeMillis();
+        return super.dispatchTouchEvent(e);
+    }
 
     /** Cerrar el teclado vuelve a la mesa (no saca de la app, aunque el teclado se haya abierto solo). */
     private void close() {
@@ -692,7 +715,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         // abierto solo (al tocar un campo en el principal): se cierra solo cuando ya no hay dónde escribir
         if ("kbState".equals(t) && auto && (mode == KB || mode == KB_PAD || mode == DICT)) {
             h.removeCallbacks(autoClose);
-            if (!hub.remoteImeReady()) h.postDelayed(autoClose, 3000);
+            if (!hub.remoteImeReady()) h.postDelayed(autoClose, 6000);
         }
     }
 

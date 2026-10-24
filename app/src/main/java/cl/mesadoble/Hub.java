@@ -218,7 +218,7 @@ public class Hub implements Link.Listener {
         sendImeState();
     }
 
-    private void sendImeState() { send("kbState", "ready", imeReady, "sel", imeSelected(app), "ptr", MesaAccess.instance != null); }
+    private void sendImeState() { checkPortrait(); send("kbState", "ready", imeReady, "sel", imeSelected(app), "ptr", MesaAccess.instance != null); }
 
     /** Aviso en el teléfono que recibe: un toque y queda elegido el teclado ChronOS. */
     private void notifySwitch() {
@@ -257,8 +257,8 @@ public class Hub implements Link.Listener {
             main.removeCallbacks(musicPoll);
             musicActive = false;
             xSig = ""; lastVolF = -1; ExtMedia.resetArt();
-            main.post(() -> watchPhys(isPrincipal()));
-            if (isPrincipal() && physKnown) send("pPortrait", "on", physPortrait);
+            physKnown = false;
+            main.postDelayed(this::checkPortrait, 1200);
             videoActive = false;
             videoAppWas = false;
             main.postDelayed(musicPoll, 1500);
@@ -296,7 +296,6 @@ public class Hub implements Link.Listener {
         } else {
             remoteImeReady = false;
             main.post(senStop);
-            main.post(() -> watchPhys(false));
             // Game Pal: sin conexión no llegará el "soltar": los dedos virtuales del principal se levantan ya
             if (isPrincipal() && MesaAccess.instance != null) GamePalTouch.releaseAll(MesaAccess.instance);
             // sin el extendido no hay teclado: si la conexión no vuelve pronto, devolver el teclado normal
@@ -571,6 +570,12 @@ public class Hub implements Link.Listener {
             SketchActivity.dismissed = false;
             for (Link.Listener l : listeners) l.onMessage(m);
             return;
+        }
+        if ("nav".equals(t) && "home".equals(m.optString("k"))) {   // Inicio: las dos pantallas vuelven a la mesa (se cierran las carpetas)
+            JSONObject g = new JSONObject();
+            try { g.put("t", "goDesk"); } catch (JSONException ignored) { }
+            send(g);
+            local(g);
         }
         if ("mouse".equals(t) || "click".equals(t) || "scroll".equals(t) || "nav".equals(t) || "pad".equals(t)
                 || "vswipe".equals(t) || "vtap".equals(t)) {
@@ -892,6 +897,7 @@ public class Hub implements Link.Listener {
             }
             AudioManager am = (AudioManager) app.getSystemService(Context.AUDIO_SERVICE);
             sendXState();
+            checkPortrait();
             if (am != null) {
                 double vf = am.getStreamVolume(AudioManager.STREAM_MUSIC) / (double) Math.max(1, am.getStreamMaxVolume(AudioManager.STREAM_MUSIC));
                 if (Math.abs(vf - lastVolF) > 0.001) sendVolNow();
@@ -928,33 +934,35 @@ public class Hub implements Link.Listener {
 
     private volatile boolean videoApp;
 
-    // ---------------- ¿el principal está de pie? (cómo se TIENE el teléfono, no cómo se ve la app) ----------------
-    // El teclado vertical sale solo si el principal está de pie y hay que escribir. Se mide con el acelerómetro del
-    // principal (una app hecha solo para vertical no cuenta si el teléfono está acostado).
+    // ---------------- ¿la app del principal está en vertical? ----------------
+    // El teclado vertical sale cuando en el principal hay una app funcionando DE PIE (Instagram, TikTok…) y hay
+    // que escribir, sin importar cómo estén los teléfonos. Se mira la pantalla del principal (alto > ancho).
     //   pPortrait {on}: el principal avisa al extendido
-    private android.view.OrientationEventListener phys;
     private boolean physPortrait, physKnown;
     private volatile boolean principalPortrait;
 
-    /** En el extendido: ¿el principal está de pie? */
+    /** En el extendido: ¿la app del principal está en vertical? */
     public boolean principalPortrait() { return principalPortrait; }
-    /** ¿Usar el teclado vertical ahora? (principal de pie y el ajuste activo) */
+    /** ¿Usar el teclado vertical ahora? (app del principal en vertical y el ajuste activo) */
     public boolean wantVertKb() { return principalPortrait && prefs.getBoolean("vertKbAuto", true); }
 
-    private void watchPhys(boolean on) {
-        if (!on) { if (phys != null) phys.disable(); return; }
-        if (phys == null) phys = new android.view.OrientationEventListener(app) {
-            @Override public void onOrientationChanged(int o) {
-                if (o < 0) return;   // acostado sobre la mesa: se mantiene lo último
-                boolean p = o < 35 || o > 325 || (o > 145 && o < 215), l = (o > 55 && o < 125) || (o > 235 && o < 305);
-                if (!p && !l) return;   // en diagonal: se espera
-                if (physKnown && p == physPortrait) return;
-                physKnown = true;
-                physPortrait = p;
-                if (isPrincipal() && connected()) send("pPortrait", "on", p);
-            }
-        };
-        if (phys.canDetectOrientation()) phys.enable();
+    /** ¿La pantalla del principal está en vertical ahora? */
+    private boolean displayPortrait() {
+        try {
+            android.graphics.Point p = new android.graphics.Point();
+            ((android.view.WindowManager) app.getSystemService(Context.WINDOW_SERVICE)).getDefaultDisplay().getRealSize(p);
+            return p.y > p.x;
+        } catch (Exception e) { return false; }
+    }
+
+    /** Principal: avisa si la pantalla cambió entre vertical y horizontal. */
+    void checkPortrait() {
+        if (!isPrincipal() || !connected()) return;
+        boolean p = displayPortrait();
+        if (physKnown && p == physPortrait) return;
+        physKnown = true;
+        physPortrait = p;
+        send("pPortrait", "on", p);
     }
 
     private boolean lastHeadphones;

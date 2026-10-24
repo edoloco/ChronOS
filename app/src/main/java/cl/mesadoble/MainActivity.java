@@ -247,6 +247,11 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         if (intent.getBooleanExtra("overLock", false)) showOverLock(true);
+        // botón Inicio del sistema estando en ChronOS: se cierra el gestor de archivos (vuelve la mesa)
+        if (Intent.ACTION_MAIN.equals(intent.getAction()) && intent.hasCategory(Intent.CATEGORY_HOME)) {
+            if (fileMode) setFileMode(false, false);
+            if (startOverlay != null && startOverlay.getVisibility() == View.VISIBLE) showStart(false);
+        }
         String bw = intent.getStringExtra("bindWidget");
         if (bw != null) { intent.removeExtra("bindWidget"); bindRequested(bw, 0); }
         if (intent.hasExtra("homeSet")) { boolean on = intent.getBooleanExtra("homeSet", true); intent.removeExtra("homeSet"); main.post(() -> { if (on) forceHome(); else releaseHome(); }); }
@@ -258,8 +263,20 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         handleShare(intent);
     }
 
+    /**
+     * Al volver a la mesa (por ejemplo cuando se cierra el teclado) los toques que venían para el teclado no deben
+     * caer en la mesa: se ignoran un instante.
+     */
+    private long blockTouchUntil;
+
+    @Override public boolean dispatchTouchEvent(android.view.MotionEvent e) {
+        if (e.getActionMasked() == android.view.MotionEvent.ACTION_DOWN && android.os.SystemClock.uptimeMillis() < blockTouchUntil) return true;
+        return super.dispatchTouchEvent(e);
+    }
+
     @Override protected void onResume() {
         super.onResume();
+        blockTouchUntil = android.os.SystemClock.uptimeMillis() + 450;
         ForceView.apply(this);   // por si se acaba de dar el permiso
         LockArt.noteRotation(this, hub, getWindowManager().getDefaultDisplay().getRotation());
         immersive();
@@ -3802,6 +3819,10 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             sh.option(Ui.GRID, -1, "Cuadrado estándar", "El tamaño de siempre", it.sz == 0, () -> setAppSize(it, 0));
             sh.option(Ui.GRID, -1, "Cuadrado grande", "Más grande, para las apps que más usas", it.sz == 1, () -> setAppSize(it, 1));
         }
+        if (Item.BATTERY.equals(it.kind)) {   // estilo del widget de baterías
+            sh.option(Ui.BATTERY, -1, "Horizontal moderno", "Barras acostadas con el porcentaje al lado", it.sz == 0, () -> setAppSize(it, 0));
+            sh.option(Ui.BATTERY, -1, "Vertical retro", "Barras de energía de pie, como las de Mega Man", it.sz == 1, () -> setAppSize(it, 1));
+        }
         sh.option(Ui.TRASH, "Quitar del escritorio", null, () -> (desk.find(it.id) != null ? desk : desk2 != null ? desk2 : desk).removeItem(it));
         sh.button("Cerrar", false, null).show();
     }
@@ -4169,6 +4190,12 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 break;
             case "boostMixOpen":   // el extendido pidió abrir las perillas de volumen aquí
                 main.post(this::boostMixer);
+                break;
+            case "goDesk":   // se tocó Inicio: fuera el gestor de archivos y el menú inicio, a la mesa
+                main.post(() -> {
+                    if (fileMode) setFileMode(false, true);
+                    if (startOverlay != null && startOverlay.getVisibility() == View.VISIBLE) showStart(false);
+                });
                 break;
             case "nlOpen":
                 main.post(() -> showNotifList(false));

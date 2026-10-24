@@ -130,10 +130,10 @@ public class MediaControlView extends LinearLayout {
         next.setOnClickListener(v -> act("next", "next", 0));
         vd.setOnClickListener(v -> act("vol", "vdown", -1));
         vu.setOnClickListener(v -> act("vol", "vup", 1));
-        meter = new VolMeter(c, 10, 0xFF4CD964, 0x33FFFFFF);   // nivel del volumen, como la energía de Mega Man
+        meter = new VolMeter(c, 14, 0xFF4CD964, 0x33FFFFFF);   // nivel del volumen, como la energía de Mega Man
         for (View v : new View[]{vd, meter, prev, back, playBtn, fwd, next, vu}) {
             if (v == meter) {
-                LayoutParams ml = new LayoutParams(dp(12), dp(40));
+                LayoutParams ml = new LayoutParams(dp(14), dp(50));
                 ml.setMargins(dp(1), 0, dp(6), 0);
                 row.addView(v, ml);
                 continue;
@@ -162,7 +162,7 @@ public class MediaControlView extends LinearLayout {
         vr.addView(vlo);
         vr.addView(vol, new LayoutParams(0, -2, 1));
         vr.addView(vhi);
-        addView(vr, new LayoutParams(Math.round(Math.min(c.getResources().getDisplayMetrics().widthPixels * 0.8f, dp(520))), -2));
+        // (la línea de volumen se quitó: el nivel se ve en las barritas estilo Mega Man junto a los botones)
 
         note = new TextView(c);
         note.setTextColor(0xFF777777);

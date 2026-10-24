@@ -1014,7 +1014,7 @@ public class DeskView extends View {
         } else if (Item.CLOCK.equals(it.kind)) {
             it.hPx = Math.max(118 * dp, width * 0.52f);
         } else if (Item.BATTERY.equals(it.kind)) {
-            it.hPx = Math.max(128 * dp, width * 0.42f);
+            it.hPx = it.sz == 1 ? Math.max(190 * dp, width * 0.8f) : Math.max(128 * dp, width * 0.42f);   // retro: barras de pie
         } else if (Item.RECENTS.equals(it.kind)) {
             it.hPx = 96 * dp;
         } else if (Item.CAMERA.equals(it.kind)) {
@@ -1151,8 +1151,13 @@ public class DeskView extends View {
         } else if (isBatt) {
             c.drawText(tag, 10 * dp, 18 * dp, label);
             int[] b = host != null ? host.battery() : new int[]{-1, 0, -1, 0};
-            drawBattery(c, "Principal", b[0], b[1] == 1, width, h * 0.40f);
-            drawBattery(c, "Extendido", b[2], b[3] == 1, width, h * 0.70f);
+            if (it.sz == 1) {   // vertical retro: dos barras de energía como las de Mega Man
+                drawRetroBattery(c, "PRINCIPAL", b[0], b[1] == 1, width * 0.30f, 28 * dp, h - 34 * dp);
+                drawRetroBattery(c, "EXTENDIDO", b[2], b[3] == 1, width * 0.70f, 28 * dp, h - 34 * dp);
+            } else {   // horizontal moderno
+                drawBattery(c, "Principal", b[0], b[1] == 1, width, h * 0.40f);
+                drawBattery(c, "Extendido", b[2], b[3] == 1, width, h * 0.70f);
+            }
         } else if (isClock) {
             java.util.Date now = new java.util.Date();
             boolean is24 = android.text.format.DateFormat.is24HourFormat(getContext());
@@ -1509,6 +1514,37 @@ public class DeskView extends View {
         } else txt = "—";
         small.setColor(fg);
         c.drawText(txt, x1 + 10 * dp, cy + small.getTextSize() * 0.35f, small);
+    }
+
+    /** Barra de energía estilo Mega Man: marco negro, rayitas claras que bajan con la batería; abajo el nombre. */
+    private void drawRetroBattery(Canvas c, String who, int lvl, boolean charging, float cx, float top, float bottom) {
+        int segs = 28;
+        float bw = 22 * dp, x0 = cx - bw / 2, barTop = top + 18 * dp, barBottom = bottom - 18 * dp;
+        // porcentaje arriba
+        small.setColor(fg);
+        small.setTextSize(13 * dp);
+        String pct = lvl >= 0 ? lvl + "%" + (charging ? "⚡" : "") : "—";
+        c.drawText(pct, cx - small.measureText(pct) / 2, top + 10 * dp, small);
+        // marco
+        battFill.setColor(0xFF101010);
+        c.drawRoundRect(new RectF(x0 - 3 * dp, barTop - 3 * dp, x0 + bw + 3 * dp, barBottom + 3 * dp), 3 * dp, 3 * dp, battFill);
+        float gap = 1.6f * dp, seg = (barBottom - barTop - gap * (segs - 1)) / segs;
+        int lit = lvl < 0 ? 0 : Math.round(Math.min(100, lvl) / 100f * segs);
+        long t = android.os.SystemClock.uptimeMillis();
+        for (int i = 0; i < segs; i++) {
+            float yb = barBottom - i * (seg + gap), yt = yb - seg;
+            boolean on = i < lit || (charging && i == lit && (t / 400) % 2 == 0);   // cargando: la siguiente parpadea
+            int body = !on ? 0xFF2A2A2A : lvl <= 15 ? 0xFFE04A3A : 0xFFFCE4A8;
+            battFill.setColor(body);
+            c.drawRect(x0 + 3 * dp, yt, x0 + bw - 3 * dp, yb, battFill);
+            if (on) {   // brillo blanco al centro, como en el juego
+                battFill.setColor(0xFFFFFFFF);
+                c.drawRect(cx - 2 * dp, yt, cx + 2 * dp, yb, battFill);
+            }
+        }
+        if (charging) postInvalidateDelayed(400);
+        small.setTextSize(11 * dp);
+        c.drawText(who, cx - small.measureText(who) / 2, bottom, small);
     }
 
     private static String ellipsize(String t, Paint p, float max) {
