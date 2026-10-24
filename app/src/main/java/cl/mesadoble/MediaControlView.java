@@ -16,8 +16,8 @@ import org.json.JSONObject;
 
 /**
  * Controlador de video (y música) del principal, como modo del teclado en el extendido.
- * Con el reproductor de ChronOS muestra título y barra de avance; con otras apps (YouTube, Netflix…)
- * envía las teclas de reproducción.
+ * Con el reproductor de ChronOS muestra título y barra de avance. Con otras apps (YouTube, Netflix…) usa su
+ * sesión multimedia (xState/xCmd, ver ExtMedia): título, canal, miniatura, barra de avance y ±10 s de verdad.
  */
 public class MediaControlView extends LinearLayout {
 
@@ -48,7 +48,11 @@ public class MediaControlView extends LinearLayout {
         super.onAttachedToWindow();
         if (hub.connected()) hub.send("volAsk");
     }
-    private long dur, lastOwn;   // última vez que llegó el estado del reproductor propio
+    private long dur, lastOwn, lastX;   // última vez que llegó el estado del reproductor propio / de otra app
+    private final android.widget.ImageView thumb;
+    private final VolMeter meter;
+    private boolean xSeek;
+    private boolean ext() { return SystemClock.uptimeMillis() - lastX < 4000; }
     private String ownKind = "";
 
     private int dp(float v) { return Math.round(v * getResources().getDisplayMetrics().density); }
@@ -61,6 +65,10 @@ public class MediaControlView extends LinearLayout {
         setBackgroundColor(0xFF0F0F0F);
         setPadding(dp(18), dp(10), dp(18), dp(10));
 
+        thumb = new android.widget.ImageView(c);   // miniatura del video (YouTube…)
+        thumb.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
+        thumb.setVisibility(GONE);
+        addView(thumb, new LayoutParams(-1, dp(110)));
         label = new TextView(c);
         label.setTextColor(RED);
         label.setTextSize(11);
@@ -92,7 +100,11 @@ public class MediaControlView extends LinearLayout {
         seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar s, int p, boolean u) { if (u) posText.setText(MediaHub.fmt(p * dur / 1000)); }
             @Override public void onStartTrackingTouch(SeekBar s) { dragging = true; }
-            @Override public void onStopTrackingTouch(SeekBar s) { dragging = false; MediaHub.cmd(getContext(), "seek", (double) s.getProgress() * dur / 1000); }
+            @Override public void onStopTrackingTouch(SeekBar s) {
+                dragging = false;
+                double to = (double) s.getProgress() * dur / 1000;
+                if (!own() && ext()) xCmd("seek", to); else MediaHub.cmd(getContext(), "seek", to);
+            }
         });
         seekRow.addView(posText);
         seekRow.addView(seek, new LayoutParams(0, -2, 1));
@@ -118,7 +130,14 @@ public class MediaControlView extends LinearLayout {
         next.setOnClickListener(v -> act("next", "next", 0));
         vd.setOnClickListener(v -> act("vol", "vdown", -1));
         vu.setOnClickListener(v -> act("vol", "vup", 1));
-        for (View v : new View[]{vd, prev, back, playBtn, fwd, next, vu}) {
+        meter = new VolMeter(c, 10, 0xFF4CD964, 0x33FFFFFF);   // nivel del volumen, como la energía de Mega Man
+        for (View v : new View[]{vd, meter, prev, back, playBtn, fwd, next, vu}) {
+            if (v == meter) {
+                LayoutParams ml = new LayoutParams(dp(12), dp(40));
+                ml.setMargins(dp(1), 0, dp(6), 0);
+                row.addView(v, ml);
+                continue;
+            }
             LayoutParams lp = new LayoutParams(-2, -2);
             lp.setMargins(dp(3), 0, dp(3), 0);
             row.addView(v, lp);
@@ -157,8 +176,11 @@ public class MediaControlView extends LinearLayout {
     /** ¿El reproductor propio está activo? (si no, es otra app y se usan teclas multimedia) */
     private boolean own() { return SystemClock.uptimeMillis() - lastOwn < 3000; }
 
+    private void xCmd(String a, double v) { if (hub.connected()) hub.send("xCmd", "a", a, "v", v); }
+
     private void act(String cmd, String key, double v) {
         if (own()) MediaHub.cmd(getContext(), cmd, v);
+        else if (ext() && !"vol".equals(cmd)) xCmd(cmd, v);   // YouTube y otras apps: por su sesión multimedia
         else if (hub.isPrincipal()) hub.media(key);   // abierto en el mismo principal
         else if (hub.connected()) hub.send("media", "k", key);
     }
@@ -181,6 +203,7 @@ public class MediaControlView extends LinearLayout {
             post(() -> {
                 lastOwn = SystemClock.uptimeMillis();
                 ownKind = k;
+                thumb.setVisibility(GONE);
                 label.setText(MediaHub.VIDEO.equals(k) ? "▶  VIDEO EN EL PRINCIPAL" : "♪  MÚSICA EN EL PRINCIPAL");
                 title.setText(m.optString("title"));
                 sub.setText(m.optString("sub"));
@@ -192,11 +215,41 @@ public class MediaControlView extends LinearLayout {
                 if (!dragging) { posText.setText(MediaHub.fmt(pos)); seek.setProgress(dur > 0 ? (int) (pos * 1000 / dur) : 0); }
                 playBtn.setKind(m.optBoolean("play") ? MediaIcon.PAUSE : MediaIcon.PLAY);
             });
+        } else if ("xState".equals(t)) {   // YouTube u otra app: qué se está viendo
+            post(() -> {
+                if (own()) return;
+                lastX = SystemClock.uptimeMillis();
+                String app = m.optString("app");
+                label.setText("▶  " + (app.isEmpty() ? "VIDEO" : app.toUpperCase()) + " EN EL PRINCIPAL");
+                title.setText(m.optString("title").isEmpty() ? "Reproduciendo" : m.optString("title"));
+                sub.setText(m.optString("sub"));
+                dur = m.optLong("dur");
+                xSeek = m.optBoolean("seek", true);
+                boolean bar = dur > 0;
+                seekRow.setVisibility(bar ? VISIBLE : GONE);
+                seek.setEnabled(xSeek);
+                note.setVisibility(GONE);
+                if (bar) {
+                    durText.setText(MediaHub.fmt(dur));
+                    long pos = m.optLong("pos");
+                    if (!dragging) { posText.setText(MediaHub.fmt(pos)); seek.setProgress((int) (pos * 1000 / dur)); }
+                }
+                playBtn.setKind(m.optBoolean("play") ? MediaIcon.PAUSE : MediaIcon.PLAY);
+                if (m.has("art")) {
+                    try {
+                        byte[] d = android.util.Base64.decode(m.optString("art"), android.util.Base64.DEFAULT);
+                        thumb.setImageBitmap(android.graphics.BitmapFactory.decodeByteArray(d, 0, d.length));
+                        thumb.setVisibility(VISIBLE);
+                    } catch (Exception ignored) { }
+                }
+            });
+        } else if ("xEnd".equals(t)) {
+            post(() -> { lastX = 0; thumb.setVisibility(GONE); if (!own()) showExternal(false); });
         } else if ("volNow".equals(t)) {
-            post(() -> { if (!volDrag) vol.setProgress((int) Math.round(m.optDouble("f") * 100)); });
+            post(() -> { meter.setLevel((float) m.optDouble("f")); if (!volDrag) vol.setProgress((int) Math.round(m.optDouble("f") * 100)); });
         } else if ("mEnd".equals(t)) {
             post(() -> { lastOwn = 0; showExternal(false); });
-        } else if ("mActive".equals(t) && !own()) {
+        } else if ("mActive".equals(t) && !own() && !ext()) {
             post(() -> showExternal(m.optBoolean("on")));
         }
     }

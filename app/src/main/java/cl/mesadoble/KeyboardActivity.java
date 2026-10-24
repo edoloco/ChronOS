@@ -687,7 +687,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         }
         if ("wordFix".equals(t) && suggestBar != null) h.post(() -> showFix(m));
         if ("userDict".equals(t)) dict.setUser(m.optJSONArray("w"));
-        if (mediaView != null && (t.startsWith("m") || "volNow".equals(t))) mediaView.onMessage(m);
+        if (mediaView != null && (t.startsWith("m") || "xState".equals(t) || "xEnd".equals(t) || "volNow".equals(t))) mediaView.onMessage(m);
         if (cameraView != null && t.startsWith("cam")) cameraView.onMessage(m);
         // abierto solo (al tocar un campo en el principal): se cierra solo cuando ya no hay dónde escribir
         if ("kbState".equals(t) && auto && (mode == KB || mode == KB_PAD || mode == DICT)) {

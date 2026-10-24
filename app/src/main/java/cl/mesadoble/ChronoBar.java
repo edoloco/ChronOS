@@ -376,7 +376,9 @@ public class ChronoBar extends FrameLayout {
     private void paperInsets() {
         int o = Math.round(OVL * dp);
         if (ticker instanceof TickerView) ((TickerView) ticker).setHidden(o, !edgeTop);
-        if (player != null) player.setPadding(player.getPaddingLeft(), edgeTop ? o : 0, player.getPaddingRight(), edgeTop ? 0 : o);
+        // a la derecha, la hoja del reproductor queda debajo de la pestaña del logo: sus botones (la X) no van ahí
+        int right = kind == NAV ? Math.round(diag() * 0.7f + 22 * dp) : player == null ? 0 : player.getPaddingRight();
+        if (player != null) player.setPadding(player.getPaddingLeft(), edgeTop ? o : 0, right, edgeTop ? 0 : o);
     }
 
     private final Paint paperShadow = new Paint(Paint.ANTI_ALIAS_FLAG);

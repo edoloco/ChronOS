@@ -4251,6 +4251,13 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 else if (side == 0 && barPlayer != null && !m.optBoolean("on") && !m.optBoolean("app"))   // se cerró la app o terminó: se recoge
                     main.postDelayed(() -> { if (barPlayer != null && barPlayer.isExternal() && cbar.playerShown()) { cbar.showPlayer(false); main.postDelayed(() -> layoutChrono(false), 400); } }, 8000);
                 break;
+            case "xState":   // YouTube u otra app del principal: título y avance en la barra
+                if (barPlayer != null && cbar != null && (barPlayer.isExternal() || !cbar.playerShown()))
+                    main.post(() -> { boolean was = cbar.playerShown(); barPlayer.updateExternal(m); if (!was) { cbar.showPlayer(true); main.postDelayed(() -> layoutChrono(false), 560); } });
+                break;
+            case "volNow":
+                if (barPlayer != null) main.post(() -> barPlayer.setVolume((float) m.optDouble("f")));
+                break;
             case "mState":
                 if ((MediaHub.AUDIO.equals(m.optString("kind")) || MediaHub.VIDEO.equals(m.optString("kind"))) && barPlayer != null)
                     main.post(() -> { boolean was = cbar.playerShown(); cbar.showPlayer(true); barPlayer.update(m); if (!was) main.postDelayed(() -> { layoutChrono(false); }, 560); });

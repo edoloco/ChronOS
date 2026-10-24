@@ -90,6 +90,11 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   perillas `Knob` que se abre en el principal): prefs `gainP`/`gainE`, mensaje `boostGain {p,e}`, tono de prueba
   `boostTone`. Bajo 100 % se atenúa la pista; sobre 100 % se refuerza con `LoudnessEnhancer`. Toda pista de Boost
   pasa por `Boost.track()`/`liveTrack()` (ahí se aplica el nivel). Llamadas: `CallHub`, `CallActivity`, `Phone`.
+- Video/música de otras apps (YouTube, Spotify…): `ExtMedia` usa la sesión multimedia (con el acceso a
+  notificaciones): `xState` (título, canal, avance, miniatura) y `xCmd` (±10 s, mover la barra, play, siguiente).
+  Las teclas multimedia de adelantar no las respeta YouTube: no volver a usarlas para ±10 s. Volumen: `volNow` al
+  cambiar; barritas `VolMeter` (estilo Mega Man) entre los botones de volumen. El reproductor propio salta con
+  `SEEK_CLOSEST` (VideoView saltaba al cuadro clave y el +10 s parecía no funcionar).
 - Pantallas unidas y tapa: `ScreenSync`, `LidWatch` (imán), `LockArt` (fondo de bloqueo), `SensorTestActivity`.
 - Barra y notificaciones: `ChronoBar`, `TickerView`, `NotifService`, `NotifCard`, `RecentsBar`, `TaskbarView`, `QuickToggles`.
   - Las action bars son **CARPETAS (folders)**: CLOCK (principal, arriba, pestaña del reloj colgando) y NAV

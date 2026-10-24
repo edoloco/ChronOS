@@ -256,6 +256,7 @@ public class Hub implements Link.Listener {
             // revisión periódica del principal (video, juegos, notificaciones): arranca al conectarse
             main.removeCallbacks(musicPoll);
             musicActive = false;
+            xSig = ""; lastVolF = -1; ExtMedia.resetArt();
             main.post(() -> watchPhys(isPrincipal()));
             if (isPrincipal() && physKnown) send("pPortrait", "on", physPortrait);
             videoActive = false;
@@ -531,6 +532,16 @@ public class Hub implements Link.Listener {
         }
         if ("pPortrait".equals(t)) { principalPortrait = m.optBoolean("on"); for (Link.Listener l : listeners) l.onMessage(m); return; }
         if ("vertKbPref".equals(t)) { prefs.edit().putBoolean("vertKbAuto", m.optBoolean("on")).apply(); return; }
+        if ("xCmd".equals(t)) {   // control de YouTube/otras apps desde el extendido
+            if (isPrincipal()) {
+                if (!ExtMedia.command(app, m)) {   // sin sesión: las teclas multimedia de siempre
+                    String a = m.optString("a");
+                    media("toggle".equals(a) ? "play" : "rel".equals(a) ? (m.optDouble("v") > 0 ? "ff" : "rw") : a);
+                }
+                main.postDelayed(this::sendXState, 350);
+            }
+            return;
+        }
         if ("fmPush".equals(t)) { FileServer.get(app).pushJob(m, this); return; }   // túnel: este teléfono manda sus archivos al otro
         if ("fmJob".equals(t)) { if (isPrincipal()) FileServer.get(app).runJob(m, this); return; }
         if ("fmOpenFile".equals(t)) { FileServer.openHere(app, this, m.optString("path")); return; }   // en el teléfono dueño del archivo
@@ -804,15 +815,53 @@ public class Hub implements Link.Listener {
         AudioManager am = (AudioManager) app.getSystemService(Context.AUDIO_SERVICE);
         if (am == null) return;
         switch (k) {
-            case "vup": am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI); break;
-            case "vdown": am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI); break;
+            case "vup": am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI); sendVolNow(); break;
+            case "vdown": am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI); sendVolNow(); break;
             case "mute": am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_TOGGLE_MUTE, AudioManager.FLAG_SHOW_UI); break;
             case "play": mediaKey(am, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE); break;
             case "next": mediaKey(am, KeyEvent.KEYCODE_MEDIA_NEXT); break;
             case "prev": mediaKey(am, KeyEvent.KEYCODE_MEDIA_PREVIOUS); break;
-            case "ff": mediaKey(am, KeyEvent.KEYCODE_MEDIA_FAST_FORWARD); break;
-            case "rw": mediaKey(am, KeyEvent.KEYCODE_MEDIA_REWIND); break;
+            // YouTube y otras apps no hacen caso a las teclas de adelantar: con su sesión multimedia se salta 10 s de verdad
+            case "ff": if (!xRel(10000)) mediaKey(am, KeyEvent.KEYCODE_MEDIA_FAST_FORWARD); break;
+            case "rw": if (!xRel(-10000)) mediaKey(am, KeyEvent.KEYCODE_MEDIA_REWIND); break;
         }
+    }
+
+    private boolean xRel(long ms) {
+        JSONObject m = new JSONObject();
+        try { m.put("a", "rel"); m.put("v", ms); } catch (JSONException ignored) { }
+        boolean ok = ExtMedia.command(app, m);
+        if (ok) main.postDelayed(this::sendXState, 350);
+        return ok;
+    }
+
+    // ---------------- lo que suena en otras apps (YouTube…) y el volumen, para los controles del extendido ----------------
+    private String xSig = "";
+    private double lastVolF = -1;
+
+    /** Manda al extendido qué se está viendo en otra app (título, canal, avance, miniatura). */
+    void sendXState() {
+        if (!isPrincipal() || !connected()) return;
+        RecentApps.worker.execute(() -> {
+            JSONObject x = ExtMedia.state(app);
+            if (x == null) {
+                if (!xSig.isEmpty()) { xSig = ""; send("xEnd"); }
+                return;
+            }
+            String sig = x.optString("pkg") + x.optString("title") + x.optBoolean("play") + (x.optLong("pos") / 1000);
+            if (sig.equals(xSig) && !x.has("art")) return;
+            xSig = sig;
+            send(x);
+        });
+    }
+
+    /** Nivel de volumen del principal (para las barritas del extendido). */
+    void sendVolNow() {
+        AudioManager am = (AudioManager) app.getSystemService(Context.AUDIO_SERVICE);
+        if (am == null || !connected()) return;
+        double f = am.getStreamVolume(AudioManager.STREAM_MUSIC) / (double) Math.max(1, am.getStreamMaxVolume(AudioManager.STREAM_MUSIC));
+        lastVolF = f;
+        send("volNow", "f", f);
     }
 
     // ---------------- video en otras apps del principal ----------------
@@ -842,6 +891,11 @@ public class Hub implements Link.Listener {
                 }
             }
             AudioManager am = (AudioManager) app.getSystemService(Context.AUDIO_SERVICE);
+            sendXState();
+            if (am != null) {
+                double vf = am.getStreamVolume(AudioManager.STREAM_MUSIC) / (double) Math.max(1, am.getStreamMaxVolume(AudioManager.STREAM_MUSIC));
+                if (Math.abs(vf - lastVolF) > 0.001) sendVolNow();
+            }
             boolean on = am != null && am.isMusicActive() && MediaHub.current == null;   // los visores propios ya tienen sus controles
             boolean appNow = videoApp && MediaHub.current == null;
             boolean video = (on && moviePlaying(am)) || appNow;

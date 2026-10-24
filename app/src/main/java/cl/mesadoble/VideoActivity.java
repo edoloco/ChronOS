@@ -43,6 +43,20 @@ public class VideoActivity extends Activity implements MediaHub.Controller {
     private boolean prepared, dragging;
     // Boost: el sonido del video lo toca el motor de Boost (derecho aquí, izquierdo en el extendido) y la imagen lo sigue
     private android.media.MediaPlayer player;
+    private long seekHold;   // tras saltar, el sonido (Boost) tarda un poco: no se corrige la imagen mientras tanto
+
+    /**
+     * Salto exacto: VideoView salta al cuadro clave anterior, y en videos con cuadros clave cada ~10 s el
+     * "+10 s" volvía al mismo punto (parecía que no funcionaba). Con SEEK_CLOSEST llega justo al segundo pedido.
+     */
+    private void seekExact(int ms) {
+        seekHold = android.os.SystemClock.uptimeMillis() + 1500;
+        try {
+            if (player != null) player.seekTo(ms, android.media.MediaPlayer.SEEK_CLOSEST);
+            else video.seekTo(ms);
+        } catch (Exception e) { video.seekTo(ms); }
+        if (boost != null) boost.seek(ms);
+    }
     private Boost.Engine boost;
     static VideoActivity instance;
 
@@ -103,7 +117,7 @@ public class VideoActivity extends Activity implements MediaHub.Controller {
         seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar s, int p, boolean user) { if (user && prepared) time.setText(MediaHub.fmt((long) p * video.getDuration() / 1000) + " / " + MediaHub.fmt(video.getDuration())); }
             @Override public void onStartTrackingTouch(SeekBar s) { dragging = true; h.removeCallbacks(hide); }
-            @Override public void onStopTrackingTouch(SeekBar s) { dragging = false; if (prepared) video.seekTo((int) ((long) s.getProgress() * video.getDuration() / 1000)); showControls(); }
+            @Override public void onStopTrackingTouch(SeekBar s) { dragging = false; if (prepared) seekExact((int) ((long) s.getProgress() * video.getDuration() / 1000)); showControls(); }
         });
         bottom.addView(seek);
         ov.addView(bottom, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
@@ -196,7 +210,7 @@ public class VideoActivity extends Activity implements MediaHub.Controller {
         @Override public void run() {
             if (boost == null || player == null) return;
             try {
-                if (video.isPlaying() && boost.playing()) {
+                if (video.isPlaying() && boost.playing() && android.os.SystemClock.uptimeMillis() > seekHold) {
                     long drift = boost.heard() - video.getCurrentPosition();   // > 0: la imagen va atrasada
                     if (Math.abs(drift) > 350) { video.seekTo((int) boost.heard()); player.setPlaybackParams(player.getPlaybackParams().setSpeed(1f)); }
                     else {
@@ -284,12 +298,8 @@ public class VideoActivity extends Activity implements MediaHub.Controller {
             case "toggle": if (video.isPlaying()) { video.pause(); if (boost != null) boost.pause(); } else { video.start(); if (boost != null) boost.play(); } break;
             case "play": video.start(); if (boost != null) boost.play(); break;
             case "pause": video.pause(); if (boost != null) boost.pause(); break;
-            case "seek": if (prepared) { video.seekTo((int) v); if (boost != null) boost.seek((long) v); } break;
-            case "rel": if (prepared) {
-                int to = Math.max(0, Math.min(video.getDuration(), video.getCurrentPosition() + (int) v));
-                video.seekTo(to);
-                if (boost != null) boost.seek(to);
-            } break;
+            case "seek": if (prepared) seekExact((int) v); break;
+            case "rel": if (prepared) seekExact(Math.max(0, Math.min(video.getDuration() - 500, video.getCurrentPosition() + (int) v))); break;
             case "next": if (idx + 1 < list.size()) load(idx + 1); break;
             case "prev": if (prepared && video.getCurrentPosition() > 3000) video.seekTo(0); else if (idx > 0) load(idx - 1); break;
             case "stop": finish(); return;
