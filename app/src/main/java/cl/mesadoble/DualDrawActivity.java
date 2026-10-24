@@ -318,7 +318,18 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         rightPanel.addView(label("Capas", 14));
         layerList = new LinearLayout(this);
         layerList.setOrientation(LinearLayout.VERTICAL);
-        rightPanel.addView(layerList);
+        // con muchas capas la lista se desliza: los controles de abajo (opacidad, mezcla, botones) siempre se ven
+        android.widget.ScrollView layerScroll = new android.widget.ScrollView(this) {
+            @Override protected void onMeasure(int ws, int hs) {
+                int max = Math.max(dp(90), getResources().getDisplayMetrics().heightPixels - dp(300));
+                super.onMeasure(ws, MeasureSpec.makeMeasureSpec(max, MeasureSpec.AT_MOST));
+            }
+        };
+        layerScroll.setVerticalScrollBarEnabled(true);
+        layerScroll.setFadingEdgeLength(dp(16));
+        layerScroll.setVerticalFadingEdgeEnabled(true);
+        layerScroll.addView(layerList);
+        rightPanel.addView(layerScroll, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout op = new LinearLayout(this);
         op.setGravity(Gravity.CENTER_VERTICAL);
         op.addView(label("Opac.", 11));
@@ -788,9 +799,68 @@ public class DualDrawActivity extends Activity implements Link.Listener {
 
     // ======================= mensajes =======================
 
+    // ======================= tableta de dibujo (lápiz) =======================
+    // Una tableta (Wacom, XP-Pen, Huion…) conectada al PRINCIPAL dibuja en el área de trabajo del extendido: el lápiz no
+    // toca los paneles del principal (color, capas); toda la tableta corresponde a lo que se ve en el lienzo del
+    // extendido (con su zoom). Con la tableta conectada al extendido, Android la usa directo como lápiz.
+    //   dwPen {a: 0 bajar · 1 mover · 2 subir · 3 flotar · 4 dejó de flotar, pts:[x,y,p,…] (0..1), er: borrador}
+
+    private static boolean isPen(MotionEvent e) {
+        int tt = e.getPointerCount() > 0 ? e.getToolType(0) : 0;
+        return tt == MotionEvent.TOOL_TYPE_STYLUS || tt == MotionEvent.TOOL_TYPE_ERASER
+                || (e.getSource() & android.view.InputDevice.SOURCE_STYLUS) == android.view.InputDevice.SOURCE_STYLUS;
+    }
+
+    private boolean penHere() { return "view".equals(mode) && linked() && hub != null && hub.connected(); }
+
+    @Override public boolean dispatchTouchEvent(MotionEvent e) {
+        if (penHere() && isPen(e)) { forwardPen(e); return true; }   // el lápiz no toca los paneles del principal
+        return super.dispatchTouchEvent(e);
+    }
+
+    @Override public boolean dispatchGenericMotionEvent(MotionEvent e) {
+        int a = e.getActionMasked();
+        if (penHere() && isPen(e) && (a == MotionEvent.ACTION_HOVER_MOVE || a == MotionEvent.ACTION_HOVER_ENTER || a == MotionEvent.ACTION_HOVER_EXIT)) {
+            forwardPen(e);
+            return true;
+        }
+        return super.dispatchGenericMotionEvent(e);
+    }
+
+    private long lastHoverSent;
+
+    private void forwardPen(MotionEvent e) {
+        View root = getWindow().getDecorView();
+        float W = Math.max(1, root.getWidth()), H = Math.max(1, root.getHeight());
+        int act = e.getActionMasked(), a;
+        switch (act) {
+            case MotionEvent.ACTION_DOWN: a = 0; break;
+            case MotionEvent.ACTION_MOVE: a = 1; break;
+            case MotionEvent.ACTION_UP: case MotionEvent.ACTION_CANCEL: a = 2; break;
+            case MotionEvent.ACTION_HOVER_EXIT: a = 4; break;
+            case MotionEvent.ACTION_HOVER_MOVE: case MotionEvent.ACTION_HOVER_ENTER: a = 3; break;
+            default: return;
+        }
+        if (a == 3) {   // flotar: basta unas 40 veces por segundo
+            long now = android.os.SystemClock.uptimeMillis();
+            if (now - lastHoverSent < 25) return;
+            lastHoverSent = now;
+        }
+        JSONArray pts = new JSONArray();
+        try {
+            if (a == 1) for (int i = 0; i < e.getHistorySize(); i++) {
+                pts.put(e.getHistoricalX(0, i) / W); pts.put(e.getHistoricalY(0, i) / H); pts.put((double) e.getHistoricalPressure(0, i));
+            }
+            pts.put(e.getX() / W); pts.put(e.getY() / H); pts.put((double) e.getPressure());
+        } catch (Exception ignored) { }
+        boolean er = e.getToolType(0) == MotionEvent.TOOL_TYPE_ERASER || (e.getButtonState() & MotionEvent.BUTTON_STYLUS_PRIMARY) != 0;
+        hub.send("dwPen", "a", a, "pts", pts, "er", er);
+    }
+
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
         switch (t) {
+            case "dwPen": if (editing() && editor != null) h.post(() -> editor.pen(m)); break;
             case "dw": h.post(() -> { doc.apply(m); changed(); }); break;
             case "dwFull": h.post(() -> { doc.fromJson(m); changed(); }); break;
             case "dwHello": if (editing()) h.post(() -> { sendFull(); sendState(); }); break;
@@ -1278,10 +1348,79 @@ public class DualDrawActivity extends Activity implements Link.Listener {
                 else c.drawOval(new RectF(Math.min(ax, bx), Math.min(ay, by), Math.max(ax, bx), Math.max(ay, by)), prev);
             }
             c.restore();
+            if (edit) drawPenRing(c);
             if (edit) {   // tamaño del dibujo y versión, abajo a la izquierda
                 if (info == null) { info = new Paint(Paint.ANTI_ALIAS_FLAG); info.setColor(0xCCFFFFFF); info.setTextSize(11 * dp); info.setShadowLayer(2 * dp, 0, dp / 2, 0x99000000); }
                 c.drawText(doc.W + " × " + doc.H + " px · " + Updater.installedVersion(getContext()), 8 * dp, getHeight() - 8 * dp, info);
             }
+        }
+
+        // ---- lápiz de una tableta conectada al principal
+        private long penDown;
+        private int penSavedBrush = -1;
+        private boolean penHover;
+        private float penHx, penHy;
+        private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        /** Repite en el lienzo el trazo del lápiz (como si se dibujara aquí, con su presión). */
+        void pen(JSONObject m) {
+            if (!edit) return;
+            int a = m.optInt("a");
+            JSONArray pts = m.optJSONArray("pts");
+            if (pts == null || pts.length() < 3) return;
+            float W = getWidth(), H = getHeight();
+            if (a >= 3) {   // flotando: solo el circulito que muestra dónde va a caer
+                penHover = a == 3;
+                penHx = (float) pts.optDouble(pts.length() - 3) * W;
+                penHy = (float) pts.optDouble(pts.length() - 2) * H;
+                invalidate();
+                return;
+            }
+            penHover = false;
+            long now = android.os.SystemClock.uptimeMillis();
+            if (a == 0) {
+                penDown = now;
+                if (m.optBoolean("er") && !DrawDoc.eraser(brush)) { penSavedBrush = brush; brush = DrawDoc.ERASER; }   // goma del lápiz
+            }
+            MotionEvent.PointerProperties[] pp = {new MotionEvent.PointerProperties()};
+            pp[0].id = 0;
+            pp[0].toolType = MotionEvent.TOOL_TYPE_STYLUS;
+            int action = a == 0 ? MotionEvent.ACTION_DOWN : a == 1 ? MotionEvent.ACTION_MOVE : MotionEvent.ACTION_UP;
+            MotionEvent ev = null;
+            for (int i = 0; i + 2 < pts.length(); i += 3) {
+                MotionEvent.PointerCoords[] pc = {new MotionEvent.PointerCoords()};
+                pc[0].x = (float) pts.optDouble(i) * W;
+                pc[0].y = (float) pts.optDouble(i + 1) * H;
+                pc[0].pressure = (float) pts.optDouble(i + 2);
+                pc[0].size = 0.05f;
+                if (ev == null) ev = MotionEvent.obtain(penDown, now, action, 1, pp, pc, 0, 0, 1, 1, 0, 0, android.view.InputDevice.SOURCE_STYLUS, 0);
+                else ev.addBatch(now, pc, 0);
+            }
+            if (ev != null) { onTouchEvent(ev); ev.recycle(); }
+            if (a == 2 && penSavedBrush >= 0) { brush = penSavedBrush; penSavedBrush = -1; }
+            penHx = (float) pts.optDouble(pts.length() - 3) * W;
+            penHy = (float) pts.optDouble(pts.length() - 2) * H;
+        }
+
+        /** Lápiz conectado a este mismo teléfono: el circulito mientras flota. */
+        @Override public boolean onHoverEvent(MotionEvent e) {
+            if (!edit || !isPen(e)) return super.onHoverEvent(e);
+            penHover = e.getActionMasked() != MotionEvent.ACTION_HOVER_EXIT;
+            penHx = e.getX(); penHy = e.getY();
+            invalidate();
+            return true;
+        }
+
+        private void drawPenRing(Canvas c) {
+            if (!penHover) return;
+            float r = Math.max(4 * dp, size * zoom / 2);
+            ring.setStyle(Paint.Style.STROKE);
+            ring.setStrokeWidth(2.5f * dp);
+            ring.setColor(0xAA000000);
+            c.drawCircle(penHx, penHy, r, ring);
+            ring.setStrokeWidth(1.2f * dp);
+            ring.setColor(0xFFFFFFFF);
+            c.drawCircle(penHx, penHy, r, ring);
         }
 
         private float sxv(float x) { return flip ? getWidth() - x : x; }
@@ -1292,6 +1431,11 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         private float pressure(MotionEvent e, float x, float y, long t) {
             if (brush == DrawDoc.VALUE) return Math.max(0.03f, valueLevel);   // el grosor lo pone la barra, en vivo
             float raw = e.getPressure(0);
+            if (e.getToolType(0) == MotionEvent.TOOL_TYPE_STYLUS || e.getToolType(0) == MotionEvent.TOOL_TYPE_ERASER) {
+                // lápiz (tableta o pantalla con lápiz): su presión es de verdad, se usa tal cual (suavizada)
+                ps = ps * 0.5f + Math.max(0.02f, Math.min(1f, raw)) * 0.5f;
+                return ps;
+            }
             pMin = Math.min(pMin, raw); pMax = Math.max(pMax, raw);
             float p;
             if (pMax - pMin > 0.12f) p = Math.max(0f, Math.min(1f, (raw - pMin) / Math.max(0.05f, pMax - pMin)));

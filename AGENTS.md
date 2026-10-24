@@ -71,6 +71,9 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
 **Funciones**
 - DUAL-Draw (dibujo en dos pantallas): `DualDrawActivity` (interfaz) + `DrawDoc` (motor: capas, pinceles,
   selección, transformar). Los dos teléfonos aplican **las mismas órdenes en el mismo orden** (`dw {op…}`).
+  Tableta de dibujo (lápiz USB/Bluetooth) en el **principal**: `dispatchTouchEvent`/`dispatchGenericMotionEvent` la
+  capturan (no toca los paneles del principal) y la mandan como `dwPen {a, pts:[x,y,p…], er}`; el extendido la repite
+  en su lienzo (lo que se ve, con su zoom) con presión real y circulito al flotar. La lista de capas se desliza.
 - Game Pal (control de Brawl Stars en el extendido): `GamePalActivity` + `GamePalTouch` (dedos virtuales en el principal).
   El gamepad de `KeyboardActivity` (`GamepadView`) usa esos mismos dedos (`pad` → `MesaAccess.pad` → `GamePalTouch.touch`); al editar
   pide una captura del principal (`gpShot`/`gpImg`) para ubicar los controles, y tiene botones − / + de tamaño.
