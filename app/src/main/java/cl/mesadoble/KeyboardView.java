@@ -444,7 +444,7 @@ public class KeyboardView extends View {
     private void fire(Key k) {
         if (sink == null) return;
         // la misma tecla dos veces en menos de 45 ms no es un dedo de verdad (toque doble del sensor): una sola vez
-        long now = android.os.SystemClock.uptimeMillis();
+        long now = System.nanoTime() / 1_000_000L;   // ("android" aquí es un campo: no se puede escribir android.os…)
         if (k == lastFired && now - lastFiredAt < 45 && k != repeating) return;
         lastFired = k;
         lastFiredAt = now;
