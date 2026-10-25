@@ -428,6 +428,13 @@ public class Hub implements Link.Listener {
             return;
         }
         if ("ytChatPref".equals(t)) { prefs.edit().putBoolean("ytChat", m.optBoolean("on", true)).apply(); LiveChat.refresh(); return; }
+        if ("openAsist".equals(t)) {
+            if (!isPrincipal() && !KeyboardActivity.showingAsist)
+                main.post(() -> startOwn(new Intent(app, KeyboardActivity.class).putExtra("mode", KeyboardActivity.ASIST)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                        () -> KeyboardActivity.showingAsist, 96, "Game-Asist", "Toca para abrir la ayuda de RetroArch"));
+            return;
+        }
         if ("ra".equals(t) || "raPoll".equals(t) || "raStates".equals(t)) { if (isPrincipal()) RetroLink.handle(this, m); return; }   // Game Pal ↔ RetroArch
         if ("gp".equals(t) || "gpShot".equals(t)) {
             if (isPrincipal() && MesaAccess.instance != null) main.post(() -> {

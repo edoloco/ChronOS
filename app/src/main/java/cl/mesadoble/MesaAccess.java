@@ -83,6 +83,8 @@ public class MesaAccess extends AccessibilityService {
         if (!h.isPrincipal() || !h.connected()) return;
         // mesa de dibujo: Sketchbook al frente → el extendido se vuelve tableta (teclados y avisos del sistema no cuentan)
         if (pkg.equals(getPackageName()) || getPackageManager().getLaunchIntentForPackage(pkg) != null) Sketch.front(h, pkg);
+        // RetroArch al frente: en el extendido se abre Game-Asist
+        if (pkg.startsWith("com.retroarch")) h.send("openAsist");
         if (CHAT_APPS.contains(pkg)) {
             switchToMesa();
             h.send("openKb", "pkg", pkg);

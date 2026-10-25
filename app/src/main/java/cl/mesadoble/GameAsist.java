@@ -85,6 +85,7 @@ final class GameAsist extends LinearLayout {
             // sin respuesta: RetroArch cerrado (o sin comandos de red)
             if (System.currentTimeMillis() - lastReply > 5000) {
                 setOn(false);
+                timeV.setText("Principal: " + (hub.connected() ? "conectado, sin respuesta" : "desconectado"));
                 idle(hub.connected() ? "El principal no responde: actualiza ChronOS también en el principal (necesita esta misma versión)."
                         : "Sin conexión con el principal.");
             }
@@ -94,7 +95,7 @@ final class GameAsist extends LinearLayout {
 
     void start() { if (!polling) { polling = true; lastReply = System.currentTimeMillis(); if (!on) nameV.setText("Esperando un juego en RetroArch…"); idle("Buscando RetroArch en el principal…"); h.post(poll); } }
 
-    private void idle(String why) { if (!on) infoV.setText(why); }
+    private void idle(String why) { if (!on) { infoV.setText(why); infoV.setTextColor(TXT); } }
 
     void stop() { polling = false; h.removeCallbacks(poll); }
 
@@ -124,6 +125,9 @@ final class GameAsist extends LinearLayout {
             if (!game) {
                 setOn(false);
                 String fg = m.optString("fg"), ver = m.optString("ver");
+                // datos técnicos (para revisar a distancia con una foto)
+                timeV.setText("Principal: responde · RetroArch: " + (run ? "responde (" + s + ")" : ver.isEmpty() ? "no responde" : "solo versión " + ver)
+                        + " · Al frente: " + (fg.isEmpty() ? "?" : fg));
                 if (run) idle("RetroArch está abierto, pero sin un juego cargado.");
                 else if (!ver.isEmpty()) idle("Tu RetroArch (" + ver + ") es antiguo y no informa qué juego corre: actualízalo a la versión más nueva.");
                 else if (fg.startsWith("com.retroarch")) idle("RetroArch está abierto pero no responde. En RetroArch: Ajustes → Red → Comandos de red: ACTIVADO "
@@ -141,6 +145,7 @@ final class GameAsist extends LinearLayout {
             name = m.optString("name");
             crc = m.optString("crc");
             setOn(true);
+            infoV.setTextColor(MUTED);
             statusV.setText("RetroArch · " + ("PAUSED".equals(st) ? "en pausa" : "jugando"));
             timeV.setText("Jugado: " + played(prefs.getLong("raTime_" + id(), 0)));
             if (!id().equals(shown)) { shown = id(); loadInfo(); askStates(); }
@@ -213,7 +218,7 @@ final class GameAsist extends LinearLayout {
         nameV.setPadding(0, dp(8), 0, 0);
         info.addView(nameV);
         infoV = text("", 12, MUTED, false);
-        infoV.setMaxLines(3);
+        infoV.setMaxLines(9);
         info.addView(infoV);
         timeV = text("", 12, TXT, false);
         info.addView(timeV);

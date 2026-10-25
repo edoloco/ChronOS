@@ -42,7 +42,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
      */
     static boolean showingVert;
     /** ¿Está a la vista el control de video? (para no abrirlo de nuevo) */
-    static boolean showingMedia, showingCamera;
+    static boolean showingMedia, showingCamera, showingAsist;
 
     private boolean night;
     private KbTheme th;
@@ -306,6 +306,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         showingMedia = mode == MEDIA;
         showingCamera = mode == CAMERA;
         showingVert = mode == VERT;
+        showingAsist = mode == ASIST;
         if (mode == VERT) ForceView.remove();
         hub.add(this);
         hub.send("kbAsk");
@@ -394,6 +395,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         showingMedia = false;
         showingCamera = false;
         showingVert = false;
+        showingAsist = false;
         if (mode == VERT) ForceView.apply(this);   // vuelve la vista forzada del extendido, si había
         h.removeCallbacks(autoClose);
         hub.remove(this);
@@ -528,7 +530,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
                 field.post(() -> { if (imm != null) imm.showSoftInput(field, InputMethodManager.SHOW_IMPLICIT); });
             }
         }
-        if (hub != null && resumed) { hub.keyboardVisible = mode < MEDIA || mode == VERT; showingMedia = mode == MEDIA; showingCamera = mode == CAMERA; showingVert = mode == VERT; }
+        if (hub != null && resumed) { hub.keyboardVisible = mode < MEDIA || mode == VERT; showingMedia = mode == MEDIA; showingCamera = mode == CAMERA; showingVert = mode == VERT; showingAsist = mode == ASIST; }
         updateTouchpadHint();
         refreshSuggestions();
         syncBluetooth();
