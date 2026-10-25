@@ -432,6 +432,7 @@ public class Hub implements Link.Listener {
             main.post(() -> startExternal(fi, PermCheck.pkgOf(fi), "Ajustes", true));
             return;
         }
+        if ("ytChatPref".equals(t)) { prefs.edit().putBoolean("ytChat", m.optBoolean("on", true)).apply(); LiveChat.refresh(); return; }
         if ("gpPref".equals(t)) { prefs.edit().putBoolean("gamePal", m.optBoolean("on", true)).apply(); return; }
         if ("gp".equals(t) || "gpShot".equals(t)) {
             if (isPrincipal() && MesaAccess.instance != null) main.post(() -> {

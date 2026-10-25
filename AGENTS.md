@@ -79,6 +79,12 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   `vec {a:set|del, l, i, s}` con deshacer (`Step.vb/va`). Toca = punto recto, arrastra = curva, primer punto = cerrar,
   último punto = terminar. Las formas se pasan a pintura solo al combinar capas. Balde: `fill {tol, gap, all}` (mira solo
   la capa salvo `all`; `gap` cierra huecos). Combinar: con la de abajo, `mergeVis` o `mergeSet {ids}`.
+- Chat en vivo de YouTube (solo versión completa): `LiveChat` (lo llama `MesaAccess` con `typeWindowsChanged`). YouTube en
+  pantalla flotante (PiP) → burbuja animada con "?" al lado; al tocarla, ventanita gris oscura (overlay de accesibilidad,
+  se arrastra por la cabecera y cambia de tamaño por la esquina) con el chat del directo/estreno. Lee el chat público
+  (página `live_chat` + `youtubei/v1/live_chat/get_live_chat`, sin cuenta); el video se busca por título y canal de la
+  sesión de medios (o 🔗 pegar enlace). Escribir: YouTube Data API con token de `AccountManager` (`YtLogin`); requiere un
+  cliente OAuth Android en Google Cloud (paquete cl.mesadoble + SHA-1 de app/debug.keystore). Ajuste `ytChat`.
 - Game Pal (control de Brawl Stars en el extendido): `GamePalActivity` + `GamePalTouch` (dedos virtuales en el principal).
   El gamepad de `KeyboardActivity` (`GamepadView`) usa esos mismos dedos (`pad` → `MesaAccess.pad` → `GamePalTouch.touch`); al editar
   pide una captura del principal (`gpShot`/`gpImg`) para ubicar los controles, y tiene botones − / + de tamaño.

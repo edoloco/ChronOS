@@ -1878,6 +1878,15 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             Toast.makeText(this, !gpOn ? "Game Pal activado" : "Game Pal desactivado", Toast.LENGTH_SHORT).show();
             configMenu();
         });
+        boolean ycOn = LiveChat.enabled(this);
+        sh.option(Ui.NOTE, -1, "Chat en vivo de YouTube: " + (ycOn ? "sí" : "no"),
+                "Con un directo o estreno en pantalla flotante, sale una burbuja para abrir su chat al lado", ycOn, () -> {
+                    prefs.edit().putBoolean("ytChat", !ycOn).apply();
+                    hub.send("ytChatPref", "on", !ycOn);
+                    LiveChat.refresh();
+                    Toast.makeText(this, !ycOn ? "La burbuja del chat saldrá con YouTube flotante" : "Burbuja del chat desactivada", Toast.LENGTH_SHORT).show();
+                    configMenu();
+                });
         boolean lidOn = LidWatch.enabled(this);
         sh.option(Ui.LOCK, -1, "Bloquear al cerrar la tapa: " + (lidOn ? "sí" : "no"),
                 "Al cerrar la carcasa se bloquean los dos; al abrir se encienden", lidOn, () -> {

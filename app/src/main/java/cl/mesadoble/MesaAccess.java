@@ -33,6 +33,7 @@ import java.util.Set;
  * 2) avisa al extendido cuando se abre una app de chat, para mostrar el teclado allá;
  * 3) ejecuta el touchpad (puntero, clic, desplazar, atrás/inicio) y el gamepad (toques en pantalla).
  * 4) mesa de dibujo para Sketchbook: dibuja los trazos que llegan del extendido y captura la zona para mostrarla allá.
+ * 5) chat en vivo de YouTube: con el video en pantalla flotante, burbuja y ventanita de chat ({@link LiveChat}).
  * Fuera de la captura de la mesa de dibujo (solo con Sketchbook abierto), no lee el contenido de las pantallas.
  */
 public class MesaAccess extends AccessibilityService {
@@ -60,10 +61,14 @@ public class MesaAccess extends AccessibilityService {
 
     @Override public boolean onUnbind(android.content.Intent intent) {
         if (instance == this) instance = null;
+        LiveChat.release();
         return super.onUnbind(intent);
     }
 
     @Override public void onAccessibilityEvent(AccessibilityEvent e) {
+        // chat en vivo de YouTube: ¿quedó el video en pantalla flotante? (solo mira la lista de ventanas)
+        if (e.getEventType() == AccessibilityEvent.TYPE_WINDOWS_CHANGED
+                || (e.getPackageName() != null && LiveChat.YT.equals(e.getPackageName().toString()))) LiveChat.get(this).windowsChanged();
         if (e.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || e.getPackageName() == null) return;
         String pkg = e.getPackageName().toString();
         // ventanas propias que no son la pantalla de ChronOS (marco de la mesa de dibujo, teclado…): no cambian "la app del frente"
