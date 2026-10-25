@@ -130,8 +130,8 @@ final class GameAsist extends LinearLayout {
                         + " · Al frente: " + (fg.isEmpty() ? "?" : fg));
                 if (run) idle("RetroArch está abierto, pero sin un juego cargado.");
                 else if (!ver.isEmpty()) idle("Tu RetroArch (" + ver + ") es antiguo y no informa qué juego corre: actualízalo a la versión más nueva.");
-                else if (fg.startsWith("com.retroarch")) idle("RetroArch está abierto pero no responde. En RetroArch: Ajustes → Red → Comandos de red: ACTIVADO "
-                        + "(puerto 55355). Después ciérralo del todo (sácalo de Recientes) y ábrelo de nuevo.");
+                else if (fg.startsWith("com.retroarch")) { if (++mute >= 2) setupHelp(); idle("RetroArch está abierto pero no responde. En RetroArch: Ajustes → Red → Comandos de red: ACTIVADO "
+                        + "(puerto 55355). Después ciérralo del todo (sácalo de Recientes) y ábrelo de nuevo."); }
                 else idle("Abre un juego en RetroArch en el principal. Si ya está abierto: Ajustes → Red → Comandos de red: activado, "
                         + "y reinicia RetroArch.");
                 return;
@@ -146,10 +146,28 @@ final class GameAsist extends LinearLayout {
             crc = m.optString("crc");
             setOn(true);
             infoV.setTextColor(MUTED);
+            if (!prefs.getBoolean("raOk", false)) prefs.edit().putBoolean("raOk", true).apply();   // ya quedó configurado: no se vuelve a explicar
             statusV.setText("RetroArch · " + ("PAUSED".equals(st) ? "en pausa" : "jugando"));
             timeV.setText("Jugado: " + played(prefs.getLong("raTime_" + id(), 0)));
             if (!id().equals(shown)) { shown = id(); loadInfo(); askStates(); }
         } else if ("raStList".equals(t)) showStates(m);
+    }
+
+    private int mute;
+    private boolean helped;
+
+    /** RetroArch abierto pero mudo: ventana con los pasos (una vez por sesión, y nunca más cuando ya funcionó). */
+    private void setupHelp() {
+        if (helped || prefs.getBoolean("raOk", false) || !isAttachedToWindow()) return;
+        helped = true;
+        new Ui.Sheet(a).title("Falta configurar RetroArch")
+                .message("RetroArch está abierto, pero no le contesta a ChronOS. Hazlo una sola vez en el principal:\n\n"
+                        + "1. En RetroArch toca el engranaje ⚙ (Ajustes) → Red → activa «Comandos de red» (puerto 55355).\n"
+                        + "   Si no aparece: Ajustes → Interfaz de usuario → «Mostrar ajustes avanzados».\n\n"
+                        + "2. Ajustes → Guardado → activa las miniaturas de las partidas guardadas.\n\n"
+                        + "3. Menú principal → Archivo de configuración → «Guardar configuración actual».\n\n"
+                        + "4. Cierra RetroArch del todo (Menú principal → Salir, o sácalo de Recientes) y ábrelo de nuevo.")
+                .button("Entendido", true, null).show();
     }
 
     private String id() { return crc.isEmpty() ? name : crc; }
