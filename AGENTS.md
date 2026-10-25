@@ -85,11 +85,12 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   (página `live_chat` + `youtubei/v1/live_chat/get_live_chat`, sin cuenta); el video se busca por título y canal de la
   sesión de medios (o 🔗 pegar enlace). Escribir: YouTube Data API con token de `AccountManager` (`YtLogin`); requiere un
   cliente OAuth Android en Google Cloud (paquete cl.mesadoble + SHA-1 de app/debug.keystore). Ajuste `ytChat`.
-- Game Pal (modo de Teclados, antes "Gamepad"; el control de Brawl Stars se eliminó): `GamePal` (vista en el extendido) +
-  `RetroLink` (principal, comandos de red de RetroArch por UDP 127.0.0.1:55355: GET_STATUS, GET_CONFIG_PARAM, SAVE_STATE…).
-  Con un juego en RetroArch muestra ficha (libretro-database y libretro-thumbnails, guardadas en caché), partidas guardadas
-  con miniatura (`raStates`/`raStList`) y botones (`ra {c}`); sin RetroArch, el gamepad de siempre (`GamepadView`, dedos
-  virtuales con `GamePalTouch`; al editar pide captura `gpShot`/`gpImg`).
+- Gamepad (modo de Teclados, sin cambios): `GamepadView`, dedos virtuales en el principal con `GamePalTouch`; al editar pide
+  captura `gpShot`/`gpImg`. El control de Brawl Stars (GamePalActivity) se eliminó.
+- Game-Asist (modo de Teclados, `KeyboardActivity.ASIST`): `GameAsist` (vista en el extendido) + `RetroLink` (principal,
+  comandos de red de RetroArch por UDP 127.0.0.1:55355: GET_STATUS, GET_CONFIG_PARAM, SAVE_STATE…). Ficha (libretro-database
+  y libretro-thumbnails), "Acerca del juego" y jugabilidad (Wikipedia es/en), partidas guardadas con miniatura
+  (`raStates`/`raStList`) y botones (`ra {c}`). Todo se guarda en caché: nada se agrega a mano por juego.
 - PALS (apps web acomodadas a horizontal): `Pals` (recetas, catálogo de redes sociales y de Google, íconos) +
   `PalActivity` (WebView con panel en árbol). Google no deja iniciar sesión dentro de un WebView: los PALS de
   Google pueden abrirse en una pestaña de Chrome.

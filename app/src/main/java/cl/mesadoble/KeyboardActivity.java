@@ -29,12 +29,12 @@ import java.util.List;
 
 /**
  * Pantalla del teléfono que controla al principal, por la misma conexión WiFi de la mesa.
- * Modos: teclado, teclado + touchpad, touchpad, Game Pal (panel de RetroArch o gamepad), dictado y control de video.
+ * Modos: teclado, teclado + touchpad, touchpad, gamepad, Game-Asist (ayuda para RetroArch), dictado y control de video.
  */
 public class KeyboardActivity extends Activity implements Link.Listener, KeyboardView.Sink {
 
-    static final int KB = 0, KB_PAD = 1, PAD = 2, GAME = 3, DICT = 4, MEDIA = 5, CAMERA = 6, VERT = 7;
-    private static final String[] NAMES = {"Teclado", "Teclado + touchpad", "Touchpad", "Game Pal", "Dictado", "Control de video", "Cámara", "Teclado vertical"};
+    static final int KB = 0, KB_PAD = 1, PAD = 2, GAME = 3, DICT = 4, MEDIA = 5, CAMERA = 6, VERT = 7, ASIST = 8;
+    private static final String[] NAMES = {"Teclado", "Teclado + touchpad", "Touchpad", "Gamepad", "Dictado", "Control de video", "Cámara", "Teclado vertical", "Game-Asist"};
     /**
      * vertical-keyboard (VERT): con el principal DE PIE (acelerómetro del principal: pPortrait) y algo que escribir.
      * Arriba, un touchpad que solo desliza (el gesto se repite en el principal: vswipe/vtap); abajo, el teclado
@@ -52,7 +52,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     private KeyboardView keyboard;
     private TouchpadView touchpad;
     private GamepadView gamepad;
-    private GamePal retro;   // Game Pal: con RetroArch jugando en el principal, panel retro en vez del gamepad
+    private GameAsist retro;   // Game-Asist: ficha, partidas y botones del juego de RetroArch en el principal
     private MediaControlView mediaView;
     private CameraControlView cameraView;
     private EditText field;
@@ -86,7 +86,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         MainActivity.applyOrientation(this);   // misma orientación que la mesa
         prefs = getSharedPreferences("mesa", MODE_PRIVATE);
-        mode = Math.min(VERT, Math.max(KB, prefs.getInt("kbMode3", KB)));
+        mode = Math.min(ASIST, Math.max(KB, prefs.getInt("kbMode3", KB)));
         mode = startMode(getIntent(), mode);
         // el vertical guardado de antes no se abre si el principal está acostado (salvo que se pida a mano)
         if (mode == VERT && getIntent().getIntExtra("mode", -1) != VERT && !Hub.get(this).wantVertKb()) mode = KB;
@@ -209,7 +209,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
             @Override public void tapCenter() { hub.send("vtap"); }
         });
 
-        retro = new GamePal(this, Hub.get(this), on -> h.post(() -> { if (mode == GAME) { gamepad.releaseAll(); arrange(); } }));
+        retro = new GameAsist(this, Hub.get(this), null);
         gamepad = new GamepadView(this, night);
         gamepad.fromJson(prefs.getString("padLayout", ""));
         gamepad.setSink(new GamepadView.Sink() {
@@ -289,7 +289,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     /** Modo pedido al abrir: el control de video (al empezar un video) o, si se abrió para escribir, un modo de teclado. */
     private static int startMode(Intent i, int current) {
         int m = i.getIntExtra("mode", -1);
-        if (m >= KB && m <= VERT) return m;
+        if (m >= KB && m <= ASIST) return m;
         if (i.getBooleanExtra("auto", false)) {   // se abrió para escribir: el teclado según cómo esté el principal
             if (i.getBooleanExtra("vert", false)) return VERT;
             if (current == VERT || current >= MEDIA) return KB;
@@ -309,7 +309,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         if (mode == VERT) ForceView.remove();
         hub.add(this);
         hub.send("kbAsk");
-        if (mode == GAME) retro.start();
+        if (mode == ASIST) retro.start();
     }
 
     // ---------------- Bluetooth (gamepad y mouse) ----------------
@@ -441,11 +441,11 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         applyVertOrientation();
         keyboard.setNumberRow(mode == VERT);   // vertical: fila de números y teclas cuadradas
         for (View v : new View[]{keyboard, suggestBar, touchpad, gamepad, retro, field, mediaView, cameraView}) detach(v);
-        if (mode == GAME) retro.start(); else retro.stop();
+        if (mode == ASIST) retro.start(); else retro.stop();
         content.removeAllViews();
         boolean land = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
         InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-        editBtn.setVisibility(mode == GAME && !retro.isOn() ? View.VISIBLE : View.GONE);
+        editBtn.setVisibility(mode == GAME ? View.VISIBLE : View.GONE);
         boolean btCapable = mode == GAME || mode == PAD || mode == KB_PAD;
         outBtn.setVisibility(btCapable ? View.VISIBLE : View.GONE);
         outBtn.setText(btMode() ? "Salida: Bluetooth" : "Salida: WiFi");
@@ -503,7 +503,11 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
             }
             case GAME:
                 content.setOrientation(LinearLayout.VERTICAL);
-                content.addView(retro.isOn() ? retro : gamepad, new LinearLayout.LayoutParams(-1, -1));
+                content.addView(gamepad, new LinearLayout.LayoutParams(-1, -1));
+                break;
+            case ASIST:
+                content.setOrientation(LinearLayout.VERTICAL);
+                content.addView(retro, new LinearLayout.LayoutParams(-1, -1));
                 break;
             case MEDIA:
                 content.setOrientation(LinearLayout.VERTICAL);
@@ -531,16 +535,17 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     }
 
     private void pickMode() {
-        int[] icons = {Ui.KEYBOARD, Ui.KB_TOUCHPAD, Ui.TOUCHPAD, Ui.GAMEPAD, Ui.MIC, Ui.SEND, Ui.IMAGE, Ui.KB_TOUCHPAD};
+        int[] icons = {Ui.KEYBOARD, Ui.KB_TOUCHPAD, Ui.TOUCHPAD, Ui.GAMEPAD, Ui.MIC, Ui.SEND, Ui.IMAGE, Ui.KB_TOUCHPAD, Ui.GAMEPAD};
         String[] subs = {
                 "Teclado completo con sugerencias",
                 "Teclado y touchpad juntos",
                 "Mover el puntero, clic, desplazar, atrás e inicio",
-                "Con RetroArch: ficha del juego, partidas guardadas y botones. Si no, gamepad con botones que se mueven",
+                "Joystick, cruceta y botones que se pueden mover",
                 "Escribir con el teclado del teléfono o dictar por voz",
                 "Play/pausa, adelantar 10 s y volumen del video del principal",
                 "Cámara del principal: ver aquí lo que ve, trasera/delantera, foto, flash y zoom",
-                "Para Instagram, YouTube y redes de pie: arriba deslizas, abajo escribes"};
+                "Para Instagram, YouTube y redes de pie: arriba deslizas, abajo escribes",
+                "RetroArch en el principal: ficha e instrucciones del juego, partidas guardadas y botones"};
         Ui.Sheet sh = new Ui.Sheet(this).title("¿Cómo quieres controlar el principal?");
         for (int i = 0; i < NAMES.length; i++) {
             final int m = i;

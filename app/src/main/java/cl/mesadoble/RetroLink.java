@@ -19,7 +19,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Game Pal en el PRINCIPAL: habla con RetroArch por sus "comandos de red" (UDP 127.0.0.1:55355; en RetroArch:
+ * Game-Asist en el PRINCIPAL: habla con RetroArch por sus "comandos de red" (UDP 127.0.0.1:55355; en RetroArch:
  * Ajustes → Red → Comandos de red). Responde al extendido:
  *  - raPoll   → raSt {run, st, sys, name, crc}: qué juego corre (GET_STATUS).
  *  - ra {c}   → manda el comando tal cual (SAVE_STATE, LOAD_STATE_SLOT 3, PAUSE_TOGGLE…).

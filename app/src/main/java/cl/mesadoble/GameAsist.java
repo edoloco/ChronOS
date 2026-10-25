@@ -33,14 +33,14 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 
 /**
- * Game Pal (en el extendido, dentro de Teclados): mientras RetroArch corre un juego en el principal muestra
+ * Game-Asist (modo de Teclados, en el extendido): mientras RetroArch corre un juego en el principal muestra
  *  - Ficha: carátula, pantalla de título, nombre, año, desarrolladora, género y tiempo jugado (bases públicas de
  *    libretro: libretro-database y libretro-thumbnails; se bajan una vez y quedan guardadas en el teléfono);
  *  - Partidas guardadas con su miniatura (tocar una la carga);
  *  - Botones: guardar, cargar, pausa, rápido, rebobinar, reiniciar, captura, menú y ranura.
- * Sin RetroArch, Teclados muestra el gamepad de siempre. El principal responde con {@link RetroLink}.
+ * Sin RetroArch, espera a que se abra un juego. El principal responde con {@link RetroLink}.
  */
-final class GamePal extends LinearLayout {
+final class GameAsist extends LinearLayout {
 
     interface Change { void retro(boolean on); }
 
@@ -59,10 +59,10 @@ final class GamePal extends LinearLayout {
     private int slot;
 
     private ImageView box, titleImg;
-    private TextView nameV, infoV, timeV, statusV, slotV, statesNote;
+    private TextView nameV, infoV, timeV, statusV, slotV, statesNote, aboutV;
     private LinearLayout states;
 
-    GamePal(Activity a, Hub hub, Change change) {
+    GameAsist(Activity a, Hub hub, Change change) {
         super(a);
         this.a = a;
         this.hub = hub;
@@ -95,6 +95,17 @@ final class GamePal extends LinearLayout {
     private void setOn(boolean v) {
         if (v == on) return;
         on = v;
+        if (!v) {
+            shown = "";
+            nameV.setText("Esperando un juego en RetroArch…");
+            infoV.setText("Abre un juego en RetroArch en el principal. En RetroArch: Ajustes → Red → Comandos de red: activado.");
+            statusV.setText("");
+            timeV.setText("");
+            aboutV.setText("");
+            box.setImageDrawable(null);
+            titleImg.setImageDrawable(null);
+            states.removeAllViews();
+        }
         if (change != null) change.retro(v);
     }
 
@@ -193,7 +204,19 @@ final class GamePal extends LinearLayout {
         info.addView(timeV);
         statusV = text("", 11, RED, true);
         info.addView(statusV);
-        addView(info, col(1.15f));
+        addView(info, col(1.05f));
+
+        // acerca del juego e instrucciones (Wikipedia)
+        LinearLayout ab = card();
+        ab.addView(text("Acerca del juego", 14, TXT, true));
+        android.widget.ScrollView sc = new android.widget.ScrollView(a);
+        sc.setVerticalFadingEdgeEnabled(true);
+        aboutV = text("", 12, 0xFFD0D0D8, false);
+        aboutV.setLineSpacing(0, 1.12f);
+        aboutV.setPadding(0, dp(4), 0, 0);
+        sc.addView(aboutV);
+        ab.addView(sc, new LinearLayout.LayoutParams(-1, 0, 1));
+        addView(ab, col(1.25f));
 
         // partidas guardadas
         LinearLayout sv = card();
@@ -213,7 +236,7 @@ final class GamePal extends LinearLayout {
         LinearLayout.LayoutParams hl = new LinearLayout.LayoutParams(-1, 0, 1);
         hl.topMargin = dp(6);
         sv.addView(hs, hl);
-        addView(sv, col(1.6f));
+        addView(sv, col(1.3f));
 
         // botones
         LinearLayout bt = card();
@@ -316,6 +339,7 @@ final class GamePal extends LinearLayout {
         final String n = name, c = crc, base = db(sys);
         nameV.setText(n);
         infoV.setText("Buscando la ficha…");
+        aboutV.setText("Buscando información…");
         box.setImageDrawable(null);
         titleImg.setImageDrawable(null);
         new Thread(() -> {
@@ -328,16 +352,19 @@ final class GamePal extends LinearLayout {
                 if (s != null && !s.isEmpty()) sb.append(sb.length() > 0 ? " · " : "").append(s);
             Bitmap bx = image(base, "Named_Boxarts", real), ti = image(base, "Named_Titles", real);
             if (bx == null && !real.equals(n)) bx = image(base, "Named_Boxarts", n);
+            String about = wiki(real);
+            final String ab = about == null ? "No encontré información de este juego en Wikipedia." : about;
             final String rn = real, inf = sb.length() == 0 ? "Sin datos en la base pública" : sb.toString();
             final Bitmap fb = bx, ft = ti;
             h.post(() -> {
                 if (!id().equals(c.isEmpty() ? n : c)) return;
                 nameV.setText(rn);
                 infoV.setText(inf);
+                aboutV.setText(ab);
                 if (fb != null) box.setImageBitmap(fb);
                 if (ft != null) titleImg.setImageBitmap(ft);
             });
-        }, "gamepal").start();
+        }, "gameasist").start();
     }
 
     private File cache(String sub) {
@@ -381,6 +408,64 @@ final class GamePal extends LinearLayout {
             java.util.regex.Matcher mm = java.util.regex.Pattern.compile("\\n\\s*" + key + " \"?([^\"\\n]*)\"?").matcher(block);
             return mm.find() ? mm.group(1).trim() : null;
         } catch (Exception e) { return null; }
+    }
+
+    private static String http(String url) {
+        try {
+            HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+            c.setConnectTimeout(10000);
+            c.setReadTimeout(20000);
+            c.setRequestProperty("User-Agent", "ChronOS-GameAsist/1.0 (cl.mesadoble)");
+            if (c.getResponseCode() != 200) return null;
+            try (InputStream in = c.getInputStream()) {
+                java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+                byte[] b = new byte[16384];
+                int r;
+                while ((r = in.read(b)) > 0) bo.write(b, 0, r);
+                return new String(bo.toByteArray(), StandardCharsets.UTF_8);
+            }
+        } catch (Exception e) { return null; }
+    }
+
+    /**
+     * Acerca del juego + cómo se juega, desde Wikipedia (primero en español, si no en inglés). Se guarda en caché.
+     * Muestra la introducción y la sección de jugabilidad (Jugabilidad / Modo de juego / Gameplay).
+     */
+    private String wiki(String game) {
+        String clean = game.replaceAll("\\s*[\\(\\[].*$", "").trim();
+        File f = new File(cache("wiki"), clean.replaceAll("[^A-Za-z0-9]", "_") + ".txt");
+        try { if (f.exists()) return new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8); } catch (Exception ignored) { }
+        for (String lang : new String[]{"es", "en"}) {
+            try {
+                String q = http("https://" + lang + ".wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=1&srsearch="
+                        + enc(clean + (lang.equals("es") ? " videojuego" : " video game")));
+                if (q == null) continue;
+                JSONArray hits = new JSONObject(q).optJSONObject("query").optJSONArray("search");
+                if (hits == null || hits.length() == 0) continue;
+                String title = hits.optJSONObject(0).optString("title");
+                String ex = http("https://" + lang + ".wikipedia.org/w/api.php?action=query&prop=extracts&explaintext=1&format=json&redirects=1&titles=" + enc(title));
+                if (ex == null) continue;
+                JSONObject pages = new JSONObject(ex).optJSONObject("query").optJSONObject("pages");
+                String txt = null;
+                for (java.util.Iterator<String> it = pages.keys(); it.hasNext(); ) txt = pages.optJSONObject(it.next()).optString("extract", null);
+                if (txt == null || txt.length() < 80) continue;
+                StringBuilder out = new StringBuilder();
+                int firstH = txt.indexOf("\n== ");
+                out.append((firstH > 0 ? txt.substring(0, firstH) : txt).trim());
+                java.util.regex.Matcher m = java.util.regex.Pattern.compile("\n==\\s*(Jugabilidad|Modo de juego|Sistema de juego|Mecánica de juego|Gameplay)\\s*==\n", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(txt);
+                if (m.find()) {
+                    int s = m.end(), e = txt.indexOf("\n== ", s);
+                    String sec = txt.substring(s, e < 0 ? txt.length() : e).replaceAll("\n=== ?(.*?) ?===", "\n▸ $1").trim();
+                    out.append("\n\n🎮 ").append(lang.equals("es") ? "Cómo se juega" : "Cómo se juega (en inglés)").append("\n").append(sec);
+                }
+                out.append("\n\nFuente: Wikipedia — ").append(title);
+                String res = out.toString();
+                if (res.length() > 9000) res = res.substring(0, 9000) + "…";
+                try (FileOutputStream o = new FileOutputStream(f)) { o.write(res.getBytes(StandardCharsets.UTF_8)); }
+                return res;
+            } catch (Exception ignored) { }
+        }
+        return null;
     }
 
     /** Imagen de libretro-thumbnails (los caracteres &*\/:`<>?\| van como _). */
