@@ -73,7 +73,12 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   selección, transformar). Los dos teléfonos aplican **las mismas órdenes en el mismo orden** (`dw {op…}`).
   Tableta de dibujo (lápiz USB/Bluetooth) en el **principal**: `dispatchTouchEvent`/`dispatchGenericMotionEvent` la
   capturan (no toca los paneles del principal) y la mandan como `dwPen {a, pts:[x,y,p…], er}`; el extendido la repite
-  en su lienzo (lo que se ve, con su zoom) con presión real y circulito al flotar. La lista de capas se desliza.
+  en su lienzo (lo que se ve, con su zoom) con presión real y circulito al flotar (del porte real de la punta:
+  `DrawDoc.radiusFor`). La lista de capas se desliza.
+  Pluma (T_PEN, como FreeHand MX): formas vectoriales `DrawDoc.VShape` en `Layer.shapes` (nodos x,y + 2 manillas), orden
+  `vec {a:set|del, l, i, s}` con deshacer (`Step.vb/va`). Toca = punto recto, arrastra = curva, primer punto = cerrar,
+  último punto = terminar. Las formas se pasan a pintura solo al combinar capas. Balde: `fill {tol, gap, all}` (mira solo
+  la capa salvo `all`; `gap` cierra huecos). Combinar: con la de abajo, `mergeVis` o `mergeSet {ids}`.
 - Game Pal (control de Brawl Stars en el extendido): `GamePalActivity` + `GamePalTouch` (dedos virtuales en el principal).
   El gamepad de `KeyboardActivity` (`GamepadView`) usa esos mismos dedos (`pad` → `MesaAccess.pad` → `GamePalTouch.touch`); al editar
   pide una captura del principal (`gpShot`/`gpImg`) para ubicar los controles, y tiene botones − / + de tamaño.
