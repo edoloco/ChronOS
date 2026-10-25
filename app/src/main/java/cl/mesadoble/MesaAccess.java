@@ -49,6 +49,8 @@ public class MesaAccess extends AccessibilityService {
             "com.google.android.apps.dynamite", "com.skype.raider"));
 
     private String lastPkg = "";
+    /** App que está al frente en este teléfono (para Game-Asist: ¿RetroArch abierto?). */
+    static volatile String front = "";
 
     @Override protected void onServiceConnected() {
         super.onServiceConnected();
@@ -76,6 +78,7 @@ public class MesaAccess extends AccessibilityService {
         if (pkg.equals(getPackageName()) && (cls == null || !cls.toString().endsWith("Activity"))) return;
         if (pkg.equals(lastPkg)) return;
         lastPkg = pkg;
+        front = pkg;
         Hub h = Hub.get(this);
         if (!h.isPrincipal() || !h.connected()) return;
         // mesa de dibujo: Sketchbook al frente → el extendido se vuelve tableta (teclados y avisos del sistema no cuentan)

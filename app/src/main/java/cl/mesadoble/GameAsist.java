@@ -83,12 +83,18 @@ final class GameAsist extends LinearLayout {
             if (!polling) return;
             if (hub.connected()) hub.send("raPoll");
             // sin respuesta: RetroArch cerrado (o sin comandos de red)
-            if (on && System.currentTimeMillis() - lastReply > 5000) setOn(false);
+            if (System.currentTimeMillis() - lastReply > 5000) {
+                setOn(false);
+                idle(hub.connected() ? "El principal no responde: actualiza ChronOS también en el principal (necesita esta misma versión)."
+                        : "Sin conexión con el principal.");
+            }
             h.postDelayed(this, 1500);
         }
     };
 
-    void start() { if (!polling) { polling = true; h.post(poll); } }
+    void start() { if (!polling) { polling = true; lastReply = System.currentTimeMillis(); if (!on) nameV.setText("Esperando un juego en RetroArch…"); idle("Buscando RetroArch en el principal…"); h.post(poll); } }
+
+    private void idle(String why) { if (!on) infoV.setText(why); }
 
     void stop() { polling = false; h.removeCallbacks(poll); }
 
@@ -98,7 +104,6 @@ final class GameAsist extends LinearLayout {
         if (!v) {
             shown = "";
             nameV.setText("Esperando un juego en RetroArch…");
-            infoV.setText("Abre un juego en RetroArch en el principal. En RetroArch: Ajustes → Red → Comandos de red: activado.");
             statusV.setText("");
             timeV.setText("");
             aboutV.setText("");
@@ -116,7 +121,17 @@ final class GameAsist extends LinearLayout {
             String s = m.optString("st");
             boolean game = run && !s.isEmpty() && !"CONTENTLESS".equals(s);
             lastReply = System.currentTimeMillis();
-            if (!game) { setOn(false); return; }
+            if (!game) {
+                setOn(false);
+                String fg = m.optString("fg"), ver = m.optString("ver");
+                if (run) idle("RetroArch está abierto, pero sin un juego cargado.");
+                else if (!ver.isEmpty()) idle("Tu RetroArch (" + ver + ") es antiguo y no informa qué juego corre: actualízalo a la versión más nueva.");
+                else if (fg.startsWith("com.retroarch")) idle("RetroArch está abierto pero no responde. En RetroArch: Ajustes → Red → Comandos de red: ACTIVADO "
+                        + "(puerto 55355). Después ciérralo del todo (sácalo de Recientes) y ábrelo de nuevo.");
+                else idle("Abre un juego en RetroArch en el principal. Si ya está abierto: Ajustes → Red → Comandos de red: activado, "
+                        + "y reinicia RetroArch.");
+                return;
+            }
             long now = System.currentTimeMillis();
             if ("PLAYING".equals(st) && lastTick > 0 && now - lastTick < 10000)
                 prefs.edit().putLong("raTime_" + id(), prefs.getLong("raTime_" + id(), 0) + (now - lastTick)).apply();

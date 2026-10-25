@@ -52,6 +52,11 @@ final class RetroLink {
             JSONObject o = new JSONObject().put("t", "raSt");
             String r = udp("GET_STATUS", true);
             o.put("run", r != null);
+            if (r == null) {   // para explicar en el extendido por qué no se lee el juego
+                String v = udp("VERSION", true);
+                if (v != null) o.put("ver", v);
+                o.put("fg", MesaAccess.front);
+            }
             // "GET_STATUS PLAYING nes,Super Mario Bros. (World),crc32=3337ec46"  (el nombre puede tener comas)
             if (r != null && r.startsWith("GET_STATUS ")) {
                 String rest = r.substring(11).trim();
