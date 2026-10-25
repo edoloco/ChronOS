@@ -29,12 +29,12 @@ import java.util.List;
 
 /**
  * Pantalla del teléfono que controla al principal, por la misma conexión WiFi de la mesa.
- * Modos: teclado, teclado + touchpad, touchpad, gamepad, dictado y control de video.
+ * Modos: teclado, teclado + touchpad, touchpad, Game Pal (panel de RetroArch o gamepad), dictado y control de video.
  */
 public class KeyboardActivity extends Activity implements Link.Listener, KeyboardView.Sink {
 
     static final int KB = 0, KB_PAD = 1, PAD = 2, GAME = 3, DICT = 4, MEDIA = 5, CAMERA = 6, VERT = 7;
-    private static final String[] NAMES = {"Teclado", "Teclado + touchpad", "Touchpad", "Gamepad", "Dictado", "Control de video", "Cámara", "Teclado vertical"};
+    private static final String[] NAMES = {"Teclado", "Teclado + touchpad", "Touchpad", "Game Pal", "Dictado", "Control de video", "Cámara", "Teclado vertical"};
     /**
      * vertical-keyboard (VERT): con el principal DE PIE (acelerómetro del principal: pPortrait) y algo que escribir.
      * Arriba, un touchpad que solo desliza (el gesto se repite en el principal: vswipe/vtap); abajo, el teclado
@@ -52,6 +52,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     private KeyboardView keyboard;
     private TouchpadView touchpad;
     private GamepadView gamepad;
+    private GamePal retro;   // Game Pal: con RetroArch jugando en el principal, panel retro en vez del gamepad
     private MediaControlView mediaView;
     private CameraControlView cameraView;
     private EditText field;
@@ -208,6 +209,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
             @Override public void tapCenter() { hub.send("vtap"); }
         });
 
+        retro = new GamePal(this, Hub.get(this), on -> h.post(() -> { if (mode == GAME) { gamepad.releaseAll(); arrange(); } }));
         gamepad = new GamepadView(this, night);
         gamepad.fromJson(prefs.getString("padLayout", ""));
         gamepad.setSink(new GamepadView.Sink() {
@@ -307,6 +309,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         if (mode == VERT) ForceView.remove();
         hub.add(this);
         hub.send("kbAsk");
+        if (mode == GAME) retro.start();
     }
 
     // ---------------- Bluetooth (gamepad y mouse) ----------------
@@ -385,6 +388,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
 
     @Override protected void onPause() {
         gamepad.releaseAll();   // no dejar dedos apoyados en el principal si se sale del control
+        retro.stop();
         resumed = false;
         hub.keyboardVisible = false;
         showingMedia = false;
@@ -436,11 +440,12 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     private void arrange() {
         applyVertOrientation();
         keyboard.setNumberRow(mode == VERT);   // vertical: fila de números y teclas cuadradas
-        for (View v : new View[]{keyboard, suggestBar, touchpad, gamepad, field, mediaView, cameraView}) detach(v);
+        for (View v : new View[]{keyboard, suggestBar, touchpad, gamepad, retro, field, mediaView, cameraView}) detach(v);
+        if (mode == GAME) retro.start(); else retro.stop();
         content.removeAllViews();
         boolean land = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
         InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-        editBtn.setVisibility(mode == GAME ? View.VISIBLE : View.GONE);
+        editBtn.setVisibility(mode == GAME && !retro.isOn() ? View.VISIBLE : View.GONE);
         boolean btCapable = mode == GAME || mode == PAD || mode == KB_PAD;
         outBtn.setVisibility(btCapable ? View.VISIBLE : View.GONE);
         outBtn.setText(btMode() ? "Salida: Bluetooth" : "Salida: WiFi");
@@ -498,7 +503,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
             }
             case GAME:
                 content.setOrientation(LinearLayout.VERTICAL);
-                content.addView(gamepad, new LinearLayout.LayoutParams(-1, -1));
+                content.addView(retro.isOn() ? retro : gamepad, new LinearLayout.LayoutParams(-1, -1));
                 break;
             case MEDIA:
                 content.setOrientation(LinearLayout.VERTICAL);
@@ -531,7 +536,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
                 "Teclado completo con sugerencias",
                 "Teclado y touchpad juntos",
                 "Mover el puntero, clic, desplazar, atrás e inicio",
-                "Joystick, cruceta y botones que se pueden mover",
+                "Con RetroArch: ficha del juego, partidas guardadas y botones. Si no, gamepad con botones que se mueven",
                 "Escribir con el teclado del teléfono o dictar por voz",
                 "Play/pausa, adelantar 10 s y volumen del video del principal",
                 "Cámara del principal: ver aquí lo que ve, trasera/delantera, foto, flash y zoom",
@@ -686,6 +691,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         String t = m.optString("t");
         if ("navAck".equals(t) && !m.optBoolean("ok"))
             android.widget.Toast.makeText(this, "Recientes necesita la versión completa en el principal", android.widget.Toast.LENGTH_SHORT).show();
+        if ("raSt".equals(t) || "raStList".equals(t)) { h.post(() -> retro.onMessage(m)); return; }
         if ("gpImg".equals(t)) h.post(() -> {
             if (m.has("err")) { gamepad.setNote(m.optString("err"), 6000); return; }
             try {

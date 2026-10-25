@@ -383,11 +383,6 @@ public class Hub implements Link.Listener {
         if ("game".equals(t)) {
             if (!isPrincipal()) {
                 GameBg.handle(app, this, m);
-                // Game Pal: control en pantalla para los juegos que lo tienen (por ahora, Brawl Stars)
-                String gp = m.optString("pkg");
-                if (GamePalActivity.supported(gp) && GamePalActivity.enabled(app) && !GamePalActivity.open)
-                    main.postDelayed(() -> startOwn(GamePalActivity.intent(app, gp), () -> GamePalActivity.open, 99,
-                            "Game Pal", "Toca para abrir el control de Brawl Stars"), 600);
             }
             return;
         }
@@ -433,7 +428,7 @@ public class Hub implements Link.Listener {
             return;
         }
         if ("ytChatPref".equals(t)) { prefs.edit().putBoolean("ytChat", m.optBoolean("on", true)).apply(); LiveChat.refresh(); return; }
-        if ("gpPref".equals(t)) { prefs.edit().putBoolean("gamePal", m.optBoolean("on", true)).apply(); return; }
+        if ("ra".equals(t) || "raPoll".equals(t) || "raStates".equals(t)) { if (isPrincipal()) RetroLink.handle(this, m); return; }   // Game Pal ↔ RetroArch
         if ("gp".equals(t) || "gpShot".equals(t)) {
             if (isPrincipal() && MesaAccess.instance != null) main.post(() -> {
                 if (MesaAccess.instance == null) return;

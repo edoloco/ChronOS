@@ -1839,7 +1839,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 "Principal: " + ForceView.NAMES[fvp].toLowerCase() + " · Extendido: " + ForceView.NAMES[fve].toLowerCase(), fvp != 0 || fve != 0, this::forceViewMenu);
         sh.option(Ui.PALETTE, "Apariencia", "Colores de fondo y menú, pantalla de bloqueo", this::appearanceMenu);
         sh.option(Ui.PALETTE, "Intro", "Al iniciar: " + (prefs.getBoolean("introOn", true) ? "sí" : "no") + " · verla ahora", this::introMenu);
-        sh.option(Ui.GEAR, "Configuración y pruebas", "Volumen de los dos, Game Pal, tapa, sensores, teclado, pantalla unida, notificaciones, llamadas, permisos",
+        sh.option(Ui.GEAR, "Configuración y pruebas", "Volumen de los dos, chat de YouTube, tapa, sensores, teclado, pantalla unida, notificaciones, llamadas, permisos",
                 this::configMenu);
         if (SystemSetup.canSecure(this)) {
             boolean cl = prefs.getBoolean("cleanLock", true);
@@ -1871,13 +1871,6 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         boolean auto = hub.autoKeyboard(), principal = side == 1;
         Ui.Sheet sh = new Ui.Sheet(this).title("Configuración y pruebas");
         sh.option(Ui.AUTO, -1, "Nivelar volumen (Boost)", "Perillas para que los dos teléfonos suenen igual de fuerte", Boost.enabled(this), this::boostMixer);
-        boolean gpOn = GamePalActivity.enabled(this);
-        sh.option(Ui.AUTO, -1, "Game Pal: " + (gpOn ? "sí" : "no"), "Control en pantalla en el extendido al jugar Brawl Stars", gpOn, () -> {
-            prefs.edit().putBoolean("gamePal", !gpOn).apply();
-            hub.send("gpPref", "on", !gpOn);
-            Toast.makeText(this, !gpOn ? "Game Pal activado" : "Game Pal desactivado", Toast.LENGTH_SHORT).show();
-            configMenu();
-        });
         boolean ycOn = LiveChat.enabled(this);
         sh.option(Ui.NOTE, -1, "Chat en vivo de YouTube: " + (ycOn ? "sí" : "no"),
                 "Con un directo o estreno en pantalla flotante, sale una burbuja para abrir su chat al lado", ycOn, () -> {
