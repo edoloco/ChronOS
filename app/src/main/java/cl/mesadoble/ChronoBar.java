@@ -88,8 +88,6 @@ public class ChronoBar extends FrameLayout {
     // extendido: renglón de la barra de tareas; hojas: lo que asoma del reproductor (PV) y de la banda (TV), y lo
     // que queda escondido detrás del fichero (OVL)
     static final float ROW_T = 38, PV = 46, TV = 34, OVL = 12;
-    /** Ancho de las baterías P y E (de pie, al final del renglón de la barra de tareas, junto a la pestaña del reloj). */
-    static final float BATT_W = 50;
     float strip() { return (kind == NAV ? 4 + ROW_T + 4 : 36) * dp; }
     private boolean tickerOn() { return ticker != null && ticker.getVisibility() == VISIBLE; }
     /** Avance del reproductor al abrirse (0 = cerrado, 1 = abierto): sale desde el logo hacia la izquierda. */
@@ -258,7 +256,7 @@ public class ChronoBar extends FrameLayout {
             }
             if (kind == NAV && (v == player || v == ticker || v == taskbar)) {
                 // la hoja del reproductor llega hasta debajo de la pestaña; la banda termina donde empieza la pestaña
-                float rowW = v == taskbar ? W - tabW() - 14 * dp - BATT_W * dp : v == player ? W - tabW() + 10 * dp : W - tabW() - 14 * dp;
+                float rowW = v == taskbar ? W - Math.max(tabW(), logoW() + timeW()) - 14 * dp : v == player ? W - tabW() + 10 * dp : W - tabW() - 14 * dp;
                 float rh = v == taskbar ? ROW_T : v == player ? OVL + PV : OVL + TV;
                 v.measure(MeasureSpec.makeMeasureSpec(Math.max(1, Math.round(rowW)), MeasureSpec.EXACTLY),
                         MeasureSpec.makeMeasureSpec(Math.round(rh * dp), MeasureSpec.EXACTLY));
@@ -521,7 +519,8 @@ public class ChronoBar extends FrameLayout {
         float s = Math.min(T - 18 * dp, 52 * dp);
         float cx = W - TW / 2 + 4 * dp, cy = edgeTop ? T / 2 + 2 * dp : getHeight() - T / 2 - 2 * dp;
         if (tp > 0.01f) drawTime(c, W, cy);
-        drawBatteries(c, W - tabW() - 8 * dp - BATT_W * dp, lightText() ? 0xFFF5F8FA : 0xFF1D2733);
+        // baterías: fijas, chiquitas, justo debajo de donde aparece la hora
+        drawBatteries(c, W - logoW() + 6 * dp - timeW() / 2f, lightText() ? 0xFFF5F8FA : 0xFF1D2733);
         logoBox.setColor(lightText() ? 0x26FFFFFF : 0x99FFFFFF);
         c.drawRoundRect(cx - s * 0.9f, cy - s / 2 - 3 * dp, cx + s * 0.9f, cy + s / 2 + 3 * dp, 14 * dp, 14 * dp, logoBox);
         if (logoDrawable != null) {
@@ -563,39 +562,38 @@ public class ChronoBar extends FrameLayout {
      */
     private final Paint battP = new Paint(Paint.ANTI_ALIAS_FLAG);
 
-    private void drawBatteries(Canvas c, float x0, int ink) {
+    private void drawBatteries(Canvas c, float cx, int ink) {
         Hub hub = Hub.get(getContext());
         boolean pr = hub.isPrincipal();
         int pl = pr ? hub.myBatt : hub.otherBatt, el = pr ? hub.otherBatt : hub.myBatt;
         boolean pc = pr ? hub.myChg : hub.otherChg, ec = pr ? hub.otherChg : hub.myChg;
         if (!hub.connected()) { if (pr) el = -1; else pl = -1; }
-        float top = Math.min(y(6 * dp), y((ROW_T + 2) * dp)), bot = Math.max(y(6 * dp), y((ROW_T + 2) * dp));
-        float x = x0 + 3 * dp;
-        x = battery(c, "P", pl, pc, x, top, bot, ink);
-        battery(c, "E", el, ec, x + 5 * dp, top, bot, ink);
-    }
-
-    private float battery(Canvas c, String l, int pct, boolean chg, float x, float top, float bot, int ink) {
         battP.setTypeface(Typeface.DEFAULT_BOLD);
-        battP.setTextSize(11 * dp);
+        battP.setTextSize(8 * dp);
         battP.setTextAlign(Paint.Align.LEFT);
         battP.clearShadowLayer();
-        battP.setColor(chg ? 0xFFFFC400 : ink);
-        float mid = (top + bot) / 2;
-        c.drawText(l, x, mid + 4 * dp, battP);
-        x += battP.measureText(l) + 3 * dp;
-        int segs = 7;
-        float bw = 8 * dp, gap = 1.3f * dp, seg = (bot - top - gap * (segs - 1)) / segs;
+        float lw = battP.measureText("P"), bw = 3.5f * dp, one = lw + 2 * dp + bw, total = 2 * one + 7 * dp;
+        float mid = y(strip() / 2f), top = mid - 7 * dp, bot = mid + 7 * dp;
+        float x = cx - total / 2;
+        battery(c, "P", pl, pc, x, top, bot, bw, ink);
+        battery(c, "E", el, ec, x + one + 7 * dp, top, bot, bw, ink);
+    }
+
+    private void battery(Canvas c, String l, int pct, boolean chg, float x, float top, float bot, float bw, int ink) {
+        battP.setColor(chg ? 0xFFFFC400 : (ink & 0x00FFFFFF) | 0xCC000000);
+        c.drawText(l, x, (top + bot) / 2 + 3 * dp, battP);
+        x += battP.measureText(l) + 2 * dp;
+        int segs = 5;
+        float gap = 1 * dp, seg = (bot - top - gap * (segs - 1)) / segs;
         int col = pct < 0 ? 0xFF8A8A8A : pct <= 20 ? 0xFFFF3B30 : pct <= 50 ? 0xFFFFC400 : 0xFF3DDC84;
         int lit = pct < 0 ? 0 : Math.max(pct > 0 ? 1 : 0, Math.round(pct / 100f * segs));
-        battP.setColor(0x66000000);
-        c.drawRoundRect(x - 1.5f * dp, top - 1.5f * dp, x + bw + 1.5f * dp, bot + 1.5f * dp, 2 * dp, 2 * dp, battP);
+        battP.setColor(0x55000000);
+        c.drawRoundRect(x - dp, top - dp, x + bw + dp, bot + dp, 1.5f * dp, 1.5f * dp, battP);
         for (int i = 0; i < segs; i++) {   // se llenan de abajo hacia arriba
             float sb = bot - i * (seg + gap);
-            battP.setColor(i < lit ? col : 0x33FFFFFF);
+            battP.setColor(i < lit ? col : 0x2EFFFFFF);
             c.drawRect(x, sb - seg, x + bw, sb, battP);
         }
-        return x + bw + 2 * dp;
     }
 
     boolean onLogo(float x, float y) {
