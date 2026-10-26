@@ -79,6 +79,12 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   `vec {a:set|del, l, i, s}` con deshacer (`Step.vb/va`). Toca = punto recto, arrastra = curva, primer punto = cerrar,
   último punto = terminar. Las formas se pasan a pintura solo al combinar capas. Balde: `fill {tol, gap, all}` (mira solo
   la capa salvo `all`; `gap` cierra huecos). Combinar: con la de abajo, `mergeVis` o `mergeSet {ids}`.
+- Barra de abajo del extendido (`ChronoBar` NAV): baterías P y E de pie (tipo Mega Man), siempre visibles al final del
+  renglón de la barra de tareas, junto a la pestaña del reloj (`BATT_W`). Íconos de apps: giran según la posición del
+  PRINCIPAL (`pOrient {q}`), nunca a 180°.
+- Separar al alejarlos: `Proximity` (Ajustes → Configuración y pruebas). Por imán (el principal mide µT; calibración
+  `sepMagJ` con los dos juntos) o por Bluetooth (el extendido emite BLE con UUID propio, el principal mide RSSI). Separados
+  8 s → teléfono normal (`PhoneMode`, preguntando o directo según `sepAsk`); juntos 5 s → vuelve ChronOS. `sepPref`, `sepCal`.
 - Chat en vivo de YouTube (solo versión completa): `LiveChat` (lo llama `MesaAccess` con `typeWindowsChanged`). YouTube en
   pantalla flotante (PiP) → burbuja animada con "?" al lado; al tocarla, ventanita gris oscura (overlay de accesibilidad,
   se arrastra por la cabecera y cambia de tamaño por la esquina) con el chat del directo/estreno. Lee el chat público

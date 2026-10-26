@@ -62,6 +62,7 @@ public class Hub implements Link.Listener {
         link = new Link(c, this);
         ScreenSync.listen(c, this);
         LidWatch.update(c, this);
+        Proximity.update(c, this);   // separar al alejarlos (imán o Bluetooth), si está activado
         ForceView.apply(c);
         CallHub.listen(c, this);   // llamadas del principal → controles en el extendido
         // batería: la de este teléfono se comparte con el otro para el widget de baterías
@@ -250,6 +251,7 @@ public class Hub implements Link.Listener {
     // ---------------- Link.Listener ----------------
 
     @Override public void onState(int st, String inf) {
+        Proximity.update(app, this);   // el papel (principal/extendido) puede haber cambiado
         state = st;
         info = inf;
         if (st == Link.CONNECTED) {
@@ -428,6 +430,16 @@ public class Hub implements Link.Listener {
             return;
         }
         if ("ytChatPref".equals(t)) { prefs.edit().putBoolean("ytChat", m.optBoolean("on", true)).apply(); LiveChat.refresh(); return; }
+        // separar al alejarlos: ajuste compartido; la calibración del imán se hace en el principal
+        if ("sepPref".equals(t)) {
+            prefs.edit().putInt("sepMode", m.optInt("m")).putBoolean("sepAsk", m.optBoolean("ask", true)).apply();
+            Proximity.update(app, this);
+            if (m.optInt("m") == Proximity.BT && !MainActivity.btPermsOk(app))
+                startOrNotify(new Intent(app, MainActivity.class).putExtra("sepPerm", true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                        89, "Separar al alejarlos", "Toca para permitir Bluetooth");
+            return;
+        }
+        if ("sepCal".equals(t)) { if (isPrincipal()) Proximity.calibrate(app, this, r -> send("boostMsg", "msg", r)); return; }
         if ("openAsist".equals(t)) {
             if (!isPrincipal() && !KeyboardActivity.showingAsist)
                 main.post(() -> startOwn(new Intent(app, KeyboardActivity.class).putExtra("mode", KeyboardActivity.ASIST)

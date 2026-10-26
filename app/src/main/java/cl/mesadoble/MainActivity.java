@@ -242,6 +242,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (getIntent().hasExtra("phoneAsk")) { String pt = getIntent().getStringExtra("phoneAsk"); getIntent().removeExtra("phoneAsk"); main.post(() -> phoneOffer(pt)); }
         if (getIntent().getBooleanExtra("forceLink", false)) { getIntent().removeExtra("forceLink"); main.post(() -> { hub.forceLink(); Toast.makeText(this, "Buscando al extendido…", Toast.LENGTH_SHORT).show(); }); }
         if (getIntent().getBooleanExtra("phoneNow", false)) { getIntent().removeExtra("phoneNow"); main.post(this::goNormal); }
+        if (getIntent().getBooleanExtra("sepPerm", false)) { getIntent().removeExtra("sepPerm"); askBtPerms(); }
     }
 
     @Override protected void onNewIntent(Intent intent) {
@@ -260,6 +261,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (intent.hasExtra("phoneAsk")) { String pt = intent.getStringExtra("phoneAsk"); intent.removeExtra("phoneAsk"); main.post(() -> phoneOffer(pt)); }
         if (intent.getBooleanExtra("forceLink", false)) { intent.removeExtra("forceLink"); main.post(() -> { hub.forceLink(); Toast.makeText(this, "Buscando al extendido…", Toast.LENGTH_SHORT).show(); }); }
         if (intent.getBooleanExtra("phoneNow", false)) { intent.removeExtra("phoneNow"); main.post(this::goNormal); }
+        if (intent.getBooleanExtra("sepPerm", false)) { intent.removeExtra("sepPerm"); askBtPerms(); }
         handleShare(intent);
     }
 
@@ -1890,6 +1892,10 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         boolean auto = hub.autoKeyboard(), principal = side == 1;
         Ui.Sheet sh = new Ui.Sheet(this).title("Configuración y pruebas");
         sh.option(Ui.AUTO, -1, "Nivelar volumen (Boost)", "Perillas para que los dos teléfonos suenen igual de fuerte", Boost.enabled(this), this::boostMixer);
+        int sm = Proximity.mode(this);
+        sh.option(Ui.UNLOCK, -1, "Al separar los teléfonos: " + (sm == Proximity.MAG ? "por imán" : sm == Proximity.BT ? "por Bluetooth" : "no hacer nada"),
+                "Pasar solo a teléfono normal cuando se alejan" + (sm == Proximity.OFF ? "" : (Proximity.ask(this) ? " · pregunta" : " · sin preguntar")),
+                sm != Proximity.OFF, this::sepMenu);
         boolean ycOn = LiveChat.enabled(this);
         sh.option(Ui.NOTE, -1, "Chat en vivo de YouTube: " + (ycOn ? "sí" : "no"),
                 "Con un directo o estreno en pantalla flotante, sale una burbuja para abrir su chat al lado", ycOn, () -> {
@@ -1947,6 +1953,56 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 .option(Ui.GEAR, "Revisar configuración", principal ? "Permisos del principal" : "Permisos del extendido", () -> checkSetup(true))
                 .button("Volver", false, this::settingsMenu)
                 .show();
+    }
+
+    /** Al separar los teléfonos: cómo se nota (imán o Bluetooth) y si pregunta o pasa directo a teléfono normal. */
+    private void sepMenu() {
+        int m = Proximity.mode(this);
+        boolean ask = Proximity.ask(this);
+        String st = Proximity.status(this);
+        Ui.Sheet sh = new Ui.Sheet(this).title("Al separar los teléfonos")
+                .message("Cuando los alejas, el principal pasa a teléfono normal; al juntarlos de nuevo, vuelve ChronOS."
+                        + (st.isEmpty() ? "" : "\nAhora: " + st));
+        sh.option(m == Proximity.OFF ? Ui.CHECK : Ui.PLUS, -1, "No hacer nada", "Siguen en ChronOS aunque se separen", m == Proximity.OFF, () -> setSep(Proximity.OFF, ask));
+        sh.option(m == Proximity.MAG ? Ui.CHECK : Ui.PLUS, -1, "Por imán", "El principal nota el imán del extendido. Al elegirlo se calibra: deja los dos juntos y abiertos",
+                m == Proximity.MAG, () -> { setSep(Proximity.MAG, ask); calibrateSep(); });
+        sh.option(m == Proximity.BT ? Ui.CHECK : Ui.PLUS, -1, "Por Bluetooth", "Mide la señal entre los dos: se separan a unos 3 a 5 metros (Bluetooth encendido en ambos)",
+                m == Proximity.BT, () -> { setSep(Proximity.BT, ask); askBtPerms(); });
+        sh.option(Ui.AUTO, -1, "Al separarse: " + (ask ? "preguntar" : "sin preguntar"),
+                ask ? "Pregunta si sigues en ChronOS o pasas a teléfono normal" : "Pasa directo a teléfono normal (y vuelve solo al juntarlos)", !ask,
+                () -> { setSep(m, !ask); sepMenu(); });
+        if (m == Proximity.MAG) sh.option(Ui.LOCK, "Calibrar imán", "Con los dos teléfonos juntos y abiertos", this::calibrateSep);
+        sh.button("Volver", false, this::configMenu).show();
+    }
+
+    private void setSep(int m, boolean ask) {
+        prefs.edit().putInt("sepMode", m).putBoolean("sepAsk", ask).apply();
+        hub.send("sepPref", "m", m, "ask", ask);
+        Proximity.update(this, hub);
+    }
+
+    private void calibrateSep() {
+        Toast.makeText(this, "Midiendo el imán con los dos juntos… (3 segundos)", Toast.LENGTH_SHORT).show();
+        if (hub.isPrincipal()) Proximity.calibrate(this, hub, r -> runOnUiThread(() -> Toast.makeText(this, r, Toast.LENGTH_LONG).show()));
+        else hub.send("sepCal");   // lo mide el principal y avisa
+    }
+
+    static boolean btPermsOk(android.content.Context c) {
+        for (String p : btPerms()) if (c.checkSelfPermission(p) != android.content.pm.PackageManager.PERMISSION_GRANTED) return false;
+        return true;
+    }
+
+    private static String[] btPerms() {
+        return android.os.Build.VERSION.SDK_INT >= 31
+                ? new String[]{"android.permission.BLUETOOTH_SCAN", "android.permission.BLUETOOTH_ADVERTISE", "android.permission.BLUETOOTH_CONNECT"}
+                : new String[]{android.Manifest.permission.ACCESS_FINE_LOCATION};
+    }
+
+    private void askBtPerms() {
+        if (!btPermsOk(this)) requestPermissions(btPerms(), 62);
+        if (android.os.Build.VERSION.SDK_INT < 31 && hub.isPrincipal())
+            Toast.makeText(this, "En este Android, Bluetooth necesita la Ubicación encendida para medir la distancia", Toast.LENGTH_LONG).show();
+        main.postDelayed(() -> { Proximity.update(this, hub); }, 1500);
     }
 
     /** Elegir qué sensores bloquean al cerrar la tapa (se guarda en los dos teléfonos). */
