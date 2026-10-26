@@ -447,7 +447,7 @@ public class Hub implements Link.Listener {
                         () -> KeyboardActivity.showingAsist, 96, "Game-Asist", "Toca para abrir la ayuda de RetroArch"));
             return;
         }
-        if ("ra".equals(t) || "raPoll".equals(t) || "raStates".equals(t)) { if (isPrincipal()) RetroLink.handle(this, m); return; }   // Game Pal ↔ RetroArch
+        if ("ra".equals(t) || "raHold".equals(t) || "raPoll".equals(t) || "raStates".equals(t)) { if (isPrincipal()) RetroLink.handle(this, m); return; }   // Game Pal ↔ RetroArch
         if ("gp".equals(t) || "gpShot".equals(t)) {
             if (isPrincipal() && MesaAccess.instance != null) main.post(() -> {
                 if (MesaAccess.instance == null) return;

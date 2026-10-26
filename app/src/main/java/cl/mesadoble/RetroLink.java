@@ -48,6 +48,7 @@ final class RetroLink {
     private static void run(Hub hub, JSONObject m) throws Exception {
         String t = m.optString("t");
         if ("ra".equals(t)) { udp(m.optString("c"), false); return; }
+        if ("raHold".equals(t)) { hold(m.optString("c"), m.optBoolean("on")); return; }
         if ("raPoll".equals(t)) {
             JSONObject o = new JSONObject().put("t", "raSt");
             String r = udp("GET_STATUS", true);
@@ -101,6 +102,29 @@ final class RetroLink {
             o.put("items", items);
             hub.send(o);
         }
+    }
+
+    // ---- botones "mantener" (rebobinar): RetroArch los toma como apretados solo el cuadro en que llega el comando,
+    // así que mientras se mantiene se repite unas 60 veces por segundo
+    private static volatile String holding;
+    private static volatile long holdUntil;
+
+    private static void hold(String cmd, boolean on) {
+        if (!on) { holding = null; return; }
+        holdUntil = System.currentTimeMillis() + 15000;   // por si se pierde el "soltar"
+        if (holding != null) { holding = cmd; return; }
+        holding = cmd;
+        new Thread(() -> {
+            try (DatagramSocket s = new DatagramSocket()) {
+                InetAddress lo = InetAddress.getByName("127.0.0.1");
+                while (holding != null && System.currentTimeMillis() < holdUntil) {
+                    byte[] b = holding.getBytes(StandardCharsets.UTF_8);
+                    s.send(new DatagramPacket(b, b.length, lo, 55355));
+                    Thread.sleep(16);
+                }
+            } catch (Exception ignored) { }
+            holding = null;
+        }, "raHold").start();
     }
 
     private static int parse(String s) { try { return Integer.parseInt(s); } catch (Exception e) { return -9; } }

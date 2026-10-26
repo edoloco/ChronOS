@@ -279,8 +279,9 @@ final class GameAsist extends LinearLayout {
         // botones
         LinearLayout bt = card();
         String[][] b = {{"💾 Guardar", "SAVE_STATE"}, {"📂 Cargar", "LOAD_STATE"}, {"⏯ Pausa", "PAUSE_TOGGLE"}, {"⏩ Rápido", "FAST_FORWARD"},
-                {"⏪ Rebobinar", "REWIND"}, {"↺ Reiniciar", "RESET"}, {"📷 Captura", "SCREENSHOT"}, {"☰ Menú", "MENU_TOGGLE"}};
-        for (int r = 0; r < 4; r++) {
+                {"⏪ Rebobinar", "REWIND"}, {"🐢 Lento", "SLOWMOTION"}, {"↺ Reiniciar", "RESET"}, {"📷 Captura", "SCREENSHOT"},
+                {"🔇 Silencio", "MUTE"}, {"☰ Menú", "MENU_TOGGLE"}};
+        for (int r = 0; r < 5; r++) {
             LinearLayout row = new LinearLayout(a);
             for (int c = 0; c < 2; c++) {
                 final String[] it = b[r * 2 + c];
@@ -288,6 +289,17 @@ final class GameAsist extends LinearLayout {
                     cmd(it[1]);
                     if ("SAVE_STATE".equals(it[1])) h.postDelayed(this::askStates, 1500);
                 });
+                if ("REWIND".equals(it[1])) {
+                    // rebobinar en RetroArch es "mantener apretado": mientras el dedo está encima, el principal lo repite
+                    p.setText("⏪ Mantén: rebobinar");
+                    p.setOnClickListener(null);
+                    p.setOnTouchListener((v, e) -> {
+                        int ac = e.getActionMasked();
+                        if (ac == android.view.MotionEvent.ACTION_DOWN) { v.setPressed(true); if (hub.connected()) hub.send("raHold", "c", "REWIND", "on", true); }
+                        else if (ac == android.view.MotionEvent.ACTION_UP || ac == android.view.MotionEvent.ACTION_CANCEL) { v.setPressed(false); if (hub.connected()) hub.send("raHold", "c", "REWIND", "on", false); }
+                        return true;
+                    });
+                }
                 LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -1, 1);
                 lp.setMargins(dp(3), dp(3), dp(3), dp(3));
                 row.addView(p, lp);
