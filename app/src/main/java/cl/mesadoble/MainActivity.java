@@ -300,7 +300,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         main.postDelayed(callsTick, 800);
         main.postDelayed(camKeepAlive, 500);
         if (!hub.isPrincipal()) desk.setBgImage(GameBg.current);
-        snapped = -1;   // se vuelve a calcular (por ejemplo al volver del teclado vertical)
+        snapped = -1; appliedQ = -1;   // se vuelve a calcular (por ejemplo al volver del teclado vertical)
         if (orient.canDetectOrientation()) orient.enable();
         if (hub.isPrincipal() && hub.connected() && MesaAccess.instance != null) MesaAccess.instance.switchToMesa();
     }
@@ -358,7 +358,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     /** Elige orientación y bloqueo (en el principal) y los comparte con el extendido. */
     private void setView(boolean horizontal, boolean lock, boolean fromRemote) {
         prefs.edit().putBoolean("orientH", horizontal).putBoolean("viewLock", lock).apply();
-        snapped = -1;
+        snapped = -1; appliedQ = -1;
         applyOrientation(this);
         relayout();
         if (!fromRemote) sendView();
@@ -1808,16 +1808,35 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         Toast.makeText(this, lock ? "Apps bloqueadas en su lugar" : auto ? "Las apps se ordenan solas" : "Apps libres", Toast.LENGTH_SHORT).show();
     }
 
-    /** Gira los íconos para que se lean derechos, sin mover nada de lugar. */
+    /**
+     * Gira los íconos para que se lean derechos, sin mover nada de lugar.
+     * Manda la posición del PRINCIPAL: el extendido usa la que le avisa el principal (pOrient), no su propio sensor.
+     * Nunca quedan en horizontal invertido (180°): en ese caso se quedan derechos.
+     */
+    private long orientSentAt;
+
     private void onPhysicalOrientation(int o) {
         if (o == OrientationEventListener.ORIENTATION_UNKNOWN || solo) return;
+        boolean pr = hub.isPrincipal(), linked = hub.connected();
+        if (!pr && linked) return;   // el extendido sigue al principal
         int q = ((o + 45) / 90 * 90) % 360;
         if (snapped >= 0 && q != snapped) {
             int diff = Math.abs(o - snapped); diff = Math.min(diff, 360 - diff);
-            if (diff < 60) return;   // margen para que no titubee entre dos posiciones
+            if (diff < 60) q = snapped;   // margen para que no titubee entre dos posiciones
         }
+        long now = android.os.SystemClock.uptimeMillis();
+        if (pr && linked && (q != snapped || now - orientSentAt > 5000)) { orientSentAt = now; hub.send("pOrient", "q", q); }
         if (q == snapped) return;
         snapped = q;
+        applyOrient(q);
+    }
+
+    private int appliedQ = -1;
+
+    private void applyOrient(int q) {
+        if (q == 180) q = 0;   // jamás en horizontal invertido
+        if (q == appliedQ) return;
+        appliedQ = q;
         int r = getWindowManager().getDefaultDisplay().getRotation() * 90;
         float glyph = -((q + r) % 360);
         if (glyph < -180) glyph += 360;
@@ -4409,8 +4428,12 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                         : label + " ya no está instalada en el principal", Toast.LENGTH_LONG).show();
                 break;
             }
+            case "pOrient":
+                if (!hub.isPrincipal() && !solo) applyOrient(m.optInt("q"));
+                break;
             case "batt":
                 desk.invalidate();
+                if (cbar != null) cbar.invalidate();
                 break;
             case "snap":
                 prefs.edit().putBoolean("snapGrid", m.optBoolean("on")).apply();

@@ -548,10 +548,49 @@ public class ChronoBar extends FrameLayout {
         float x = zoneRight - tw / 2f + (1 - tp) * tw;   // llega desde la derecha (desde el logo)
         c.save();
         c.clipRect(W - tabW(), 0, W, getHeight());
-        c.drawText(time, x, cy + navTimeP.getTextSize() * 0.36f, navTimeP);
+        float base = cy + navTimeP.getTextSize() * 0.36f - 5 * dp;
+        c.drawText(time, x, base, navTimeP);
+        drawBatteries(c, x, base + 4 * dp, ink);
         c.restore();
         // el minuto siguiente
         postInvalidateDelayed(60_000 - System.currentTimeMillis() % 60_000 + 50);
+    }
+
+    /** Debajo de la hora: "P ▮▮▮▮▮ E ▮▮▮▮▮", barritas de energía tipo Mega Man con el color según la carga. */
+    private final Paint battP = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+    private void drawBatteries(Canvas c, float cx, float top, int ink) {
+        Hub hub = Hub.get(getContext());
+        boolean pr = hub.isPrincipal();
+        int pl = pr ? hub.myBatt : hub.otherBatt, el = pr ? hub.otherBatt : hub.myBatt;
+        boolean pc = pr ? hub.myChg : hub.otherChg, ec = pr ? hub.otherChg : hub.myChg;
+        if (!hub.connected()) { if (pr) el = -1; else pl = -1; }
+        int segs = 6;
+        float sh = 7 * dp, sw = 2.6f * dp, gap = 1.2f * dp, letter = 8 * dp, mid = 7 * dp;
+        float barW = segs * sw + (segs - 1) * gap, total = 2 * (letter + barW) + mid;
+        float x = cx - total / 2;
+        int alpha = Math.round(Math.min(1f, tp * 1.3f) * 255);
+        battP.setTypeface(Typeface.DEFAULT_BOLD);
+        battP.setTextSize(8.5f * dp);
+        battP.setTextAlign(Paint.Align.LEFT);
+        x = battery(c, "P", pl, pc, x, top, sw, sh, gap, segs, letter, ink, alpha);
+        battery(c, "E", el, ec, x + mid, top, sw, sh, gap, segs, letter, ink, alpha);
+    }
+
+    private float battery(Canvas c, String l, int pct, boolean chg, float x, float top, float sw, float sh, float gap, int segs, float letter, int ink, int alpha) {
+        battP.setColor((chg ? 0x00FFD84D : ink & 0x00FFFFFF) | (alpha << 24));
+        c.drawText(l, x, top + sh - 0.5f * dp, battP);
+        x += letter;
+        int col = pct < 0 ? 0x888888 : pct <= 20 ? 0xFF3B30 : pct <= 50 ? 0xFFC400 : 0x3DDC84;
+        int lit = pct < 0 ? 0 : Math.max(pct > 0 ? 1 : 0, Math.round(pct / 100f * segs));
+        battP.setColor(0x66000000 & ((alpha << 24) | 0xFFFFFF));
+        c.drawRoundRect(x - dp, top - dp, x + segs * sw + (segs - 1) * gap + dp, top + sh + dp, 1.5f * dp, 1.5f * dp, battP);
+        for (int i = 0; i < segs; i++) {
+            battP.setColor(i < lit ? col | (alpha << 24) : 0x33FFFFFF & ((alpha << 24) | 0xFFFFFF));
+            c.drawRect(x, top, x + sw, top + sh, battP);
+            x += sw + gap;
+        }
+        return x;
     }
 
     boolean onLogo(float x, float y) {
