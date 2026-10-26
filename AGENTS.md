@@ -79,8 +79,8 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   `vec {a:set|del, l, i, s}` con deshacer (`Step.vb/va`). Toca = punto recto, arrastra = curva, primer punto = cerrar,
   último punto = terminar. Las formas se pasan a pintura solo al combinar capas. Balde: `fill {tol, gap, all}` (mira solo
   la capa salvo `all`; `gap` cierra huecos). Combinar: con la de abajo, `mergeVis` o `mergeSet {ids}`.
-- Barra de abajo del extendido (`ChronoBar` NAV): baterías P y E chiquitas de pie (tipo Mega Man), siempre visibles y fijas
-  debajo de donde aparece la hora (la barra de tareas deja ese espacio libre). Íconos de apps: giran según la posición del
+- Barra de abajo del extendido (`ChronoBar` NAV): baterías P y E fijas debajo de donde aparece la hora; Ajustes → Apariencia →
+  Mostrar baterías: no / retro (Mega Man) / moderna (ícono de celular), de pie o acostadas (`battSkin`, `battUp`, `battPref`) (la barra de tareas deja ese espacio libre). Íconos de apps: giran según la posición del
   PRINCIPAL (`pOrient {q}`), nunca a 180°.
 - Separar al alejarlos: `Proximity` (Ajustes → Configuración y pruebas). Por imán (el principal mide µT; calibración
   `sepMagJ` con los dos juntos) o por Bluetooth (el extendido emite BLE con UUID propio, el principal mide RSSI). Separados

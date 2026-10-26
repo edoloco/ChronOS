@@ -563,6 +563,10 @@ public class ChronoBar extends FrameLayout {
     private final Paint battP = new Paint(Paint.ANTI_ALIAS_FLAG);
 
     private void drawBatteries(Canvas c, float cx, int ink) {
+        android.content.SharedPreferences pf = getContext().getSharedPreferences("mesa", android.content.Context.MODE_PRIVATE);
+        int skin = pf.getInt("battSkin", 2);   // 0 no, 1 retro (Mega Man), 2 moderna (celular)
+        if (skin == 0) return;
+        boolean up = pf.getBoolean("battUp", false);
         Hub hub = Hub.get(getContext());
         boolean pr = hub.isPrincipal();
         int pl = pr ? hub.myBatt : hub.otherBatt, el = pr ? hub.otherBatt : hub.myBatt;
@@ -572,27 +576,58 @@ public class ChronoBar extends FrameLayout {
         battP.setTextSize(8 * dp);
         battP.setTextAlign(Paint.Align.LEFT);
         battP.clearShadowLayer();
-        float lw = battP.measureText("P"), bw = 3.5f * dp, one = lw + 2 * dp + bw, total = 2 * one + 7 * dp;
-        float mid = y(strip() / 2f), top = mid - 7 * dp, bot = mid + 7 * dp;
+        // medida de cada batería: de pie (angosta y alta) o acostada (ancha y baja)
+        float bw = up ? (skin == 1 ? 3.5f : 6.5f) * dp : 15 * dp, bh = up ? 13 * dp : (skin == 1 ? 3.5f : 7) * dp;
+        float lw = battP.measureText("P"), one = lw + 2.5f * dp + bw + (skin == 2 && !up ? 1.5f * dp : 0), sep = 7 * dp, total = 2 * one + sep;
+        float mid = y(strip() / 2f);
         float x = cx - total / 2;
-        battery(c, "P", pl, pc, x, top, bot, bw, ink);
-        battery(c, "E", el, ec, x + one + 7 * dp, top, bot, bw, ink);
+        battery(c, "P", pl, pc, x, mid, bw, bh, skin, up, ink);
+        battery(c, "E", el, ec, x + one + sep, mid, bw, bh, skin, up, ink);
     }
 
-    private void battery(Canvas c, String l, int pct, boolean chg, float x, float top, float bot, float bw, int ink) {
+    private static int battColor(int pct) { return pct < 0 ? 0xFF8A8A8A : pct <= 20 ? 0xFFFF3B30 : pct <= 50 ? 0xFFFFC400 : 0xFF3DDC84; }
+
+    private void battery(Canvas c, String l, int pct, boolean chg, float x, float mid, float bw, float bh, int skin, boolean up, int ink) {
+        battP.setStyle(Paint.Style.FILL);
         battP.setColor(chg ? 0xFFFFC400 : (ink & 0x00FFFFFF) | 0xCC000000);
-        c.drawText(l, x, (top + bot) / 2 + 3 * dp, battP);
-        x += battP.measureText(l) + 2 * dp;
-        int segs = 5;
-        float gap = 1 * dp, seg = (bot - top - gap * (segs - 1)) / segs;
-        int col = pct < 0 ? 0xFF8A8A8A : pct <= 20 ? 0xFFFF3B30 : pct <= 50 ? 0xFFFFC400 : 0xFF3DDC84;
-        int lit = pct < 0 ? 0 : Math.max(pct > 0 ? 1 : 0, Math.round(pct / 100f * segs));
-        battP.setColor(0x55000000);
-        c.drawRoundRect(x - dp, top - dp, x + bw + dp, bot + dp, 1.5f * dp, 1.5f * dp, battP);
-        for (int i = 0; i < segs; i++) {   // se llenan de abajo hacia arriba
-            float sb = bot - i * (seg + gap);
-            battP.setColor(i < lit ? col : 0x2EFFFFFF);
-            c.drawRect(x, sb - seg, x + bw, sb, battP);
+        c.drawText(l, x, mid + 3 * dp, battP);
+        x += battP.measureText(l) + 2.5f * dp;
+        float top = mid - bh / 2, bot = mid + bh / 2, right = x + bw;
+        int col = battColor(pct);
+        float f = pct < 0 ? 0 : Math.max(0.04f, pct / 100f);
+        if (skin == 1) {   // retro: rayitas de energía
+            int segs = 5;
+            float gap = 1 * dp, len = up ? bh : bw, seg = (len - gap * (segs - 1)) / segs;
+            int lit = pct < 0 ? 0 : Math.max(pct > 0 ? 1 : 0, Math.round(pct / 100f * segs));
+            battP.setColor(0x55000000);
+            c.drawRoundRect(x - dp, top - dp, right + dp, bot + dp, 1.5f * dp, 1.5f * dp, battP);
+            for (int i = 0; i < segs; i++) {
+                battP.setColor(i < lit ? col : 0x2EFFFFFF);
+                if (up) { float sb = bot - i * (seg + gap); c.drawRect(x, sb - seg, right, sb, battP); }
+                else { float sl = x + i * (seg + gap); c.drawRect(sl, top, sl + seg, bot, battP); }
+            }
+            return;
+        }
+        // moderna: el ícono de batería de los celulares (contorno, puntita y relleno según la carga)
+        int line = (ink & 0x00FFFFFF) | 0xCC000000;
+        float sw = 1.1f * dp, in = 1.6f * dp, r = 1.8f * dp;
+        battP.setStyle(Paint.Style.STROKE);
+        battP.setStrokeWidth(sw);
+        battP.setColor(line);
+        c.drawRoundRect(x, top, right, bot, r, r, battP);
+        battP.setStyle(Paint.Style.FILL);
+        if (up) c.drawRoundRect(x + bw * 0.3f, top - 1.6f * dp, right - bw * 0.3f, top + 0.3f * dp, 0.6f * dp, 0.6f * dp, battP);
+        else c.drawRoundRect(right - 0.3f * dp, mid - bh * 0.22f, right + 1.6f * dp, mid + bh * 0.22f, 0.6f * dp, 0.6f * dp, battP);
+        battP.setColor(col);
+        if (up) c.drawRoundRect(x + in, bot - in - (bh - 2 * in) * f, right - in, bot - in, 0.8f * dp, 0.8f * dp, battP);
+        else c.drawRoundRect(x + in, top + in, x + in + (bw - 2 * in) * f, bot - in, 0.8f * dp, 0.8f * dp, battP);
+        if (chg) {   // rayito de carga
+            android.graphics.Path z = new android.graphics.Path();
+            float cx = (x + right) / 2, s = Math.min(bw, bh) * 0.42f;
+            z.moveTo(cx + s * 0.25f, mid - s * 1.1f); z.lineTo(cx - s * 0.55f, mid + s * 0.15f); z.lineTo(cx - s * 0.05f, mid + s * 0.15f);
+            z.lineTo(cx - s * 0.25f, mid + s * 1.1f); z.lineTo(cx + s * 0.55f, mid - s * 0.15f); z.lineTo(cx + s * 0.05f, mid - s * 0.15f); z.close();
+            battP.setColor(0xFFFFFFFF);
+            c.drawPath(z, battP);
         }
     }
 

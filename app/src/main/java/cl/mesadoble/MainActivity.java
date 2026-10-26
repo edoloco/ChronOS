@@ -2129,7 +2129,35 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                     Toast.makeText(this, "El mensaje dirá: " + LockArt.message(this), Toast.LENGTH_LONG).show();
                     appearanceMenu();
                 });
+        int bs = prefs.getInt("battSkin", 2);
+        sh.option(Ui.BATTERY, -1, "Mostrar baterías: " + BATT_SKINS[bs] + (bs == 0 ? "" : prefs.getBoolean("battUp", false) ? ", de pie" : ", acostadas"),
+                "Batería del principal (P) y del extendido (E), debajo de la hora en la barra", bs != 0, this::batteryMenu);
         sh.button("Volver", false, this::settingsMenu).show();
+    }
+
+    static final String[] BATT_SKINS = {"no", "retro", "moderna"};
+
+    /** Ajustes → Apariencia → Mostrar baterías: estilo (retro tipo Mega Man o moderna de celular) y de pie o acostadas. */
+    private void batteryMenu() {
+        int bs = prefs.getInt("battSkin", 2);
+        boolean up = prefs.getBoolean("battUp", false);
+        Ui.Sheet sh = new Ui.Sheet(this).title("Mostrar baterías");
+        String[] subs = {"Sin baterías en la barra", "Barritas de energía como las de Mega Man", "El ícono de batería de los celulares"};
+        for (int i = 0; i < 3; i++) {
+            final int k = i;
+            sh.option(bs == i ? Ui.CHECK : Ui.PLUS, -1, i == 0 ? "No mostrar" : "Estilo " + BATT_SKINS[i], subs[i], bs == i, () -> { setBatt(k, up); batteryMenu(); });
+        }
+        if (bs != 0) {
+            sh.option(Ui.BATTERY, -1, "De pie", "Verticales, una al lado de la otra", up, () -> { setBatt(bs, true); batteryMenu(); });
+            sh.option(Ui.BATTERY, -1, "Acostadas", "Horizontales, una al lado de la otra", !up, () -> { setBatt(bs, false); batteryMenu(); });
+        }
+        sh.button("Volver", false, this::appearanceMenu).show();
+    }
+
+    private void setBatt(int skin, boolean up) {
+        prefs.edit().putInt("battSkin", skin).putBoolean("battUp", up).apply();
+        if (hub.connected()) hub.send("battPref", "s", skin, "up", up);
+        if (cbar != null) cbar.invalidate();
     }
 
     private final Runnable updatePoll = new Runnable() {
@@ -4484,6 +4512,10 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                         : label + " ya no está instalada en el principal", Toast.LENGTH_LONG).show();
                 break;
             }
+            case "battPref":
+                prefs.edit().putInt("battSkin", m.optInt("s", 2)).putBoolean("battUp", m.optBoolean("up")).apply();
+                if (cbar != null) cbar.invalidate();
+                break;
             case "pOrient":
                 if (!hub.isPrincipal() && !solo) applyOrient(m.optInt("q"));
                 break;
