@@ -97,6 +97,9 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   comandos de red de RetroArch por UDP 127.0.0.1:55355: GET_STATUS, GET_CONFIG_PARAM, SAVE_STATE…). Ficha (libretro-database
   y libretro-thumbnails), "Acerca del juego" y jugabilidad (Wikipedia es/en), partidas guardadas con miniatura
   (`raStates`/`raStList`) y botones (`ra {c}`). Todo se guarda en caché: nada se agrega a mano por juego.
+  Nintendo DS (`isDs`): Ficha/Partidas/Acerca pasan a pestañas en la columna izquierda y el centro muestra la pantalla de
+  abajo del DS: `DsMirror` (principal, MediaProjection a media resolución, recorta la zona `dsRect`, JPEG ~18 fps por
+  `dsFrame`); toques `dsTouch {ph,u,v}` → `GamePalTouch` (dedo 77). "⛶ Zona" (`dsFull`) manda la pantalla entera para marcarla.
 - PALS (apps web acomodadas a horizontal): `Pals` (recetas, catálogo de redes sociales y de Google, íconos) +
   `PalActivity` (WebView con panel en árbol). Google no deja iniciar sesión dentro de un WebView: los PALS de
   Google pueden abrirse en una pestaña de Chrome.

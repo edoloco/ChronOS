@@ -440,6 +440,10 @@ public class Hub implements Link.Listener {
             return;
         }
         if ("sepCal".equals(t)) { if (isPrincipal()) Proximity.calibrate(app, this, r -> send("boostMsg", "msg", r)); return; }
+        if ("dsOn".equals(t) || "dsOff".equals(t) || "dsRect".equals(t) || "dsFull".equals(t) || "dsTouch".equals(t)) {   // segunda pantalla DS
+            if (isPrincipal()) DsMirror.handle(app, this, m);
+            return;
+        }
         if ("openAsist".equals(t)) {
             if (!isPrincipal() && !KeyboardActivity.showingAsist)
                 main.post(() -> startOwn(new Intent(app, KeyboardActivity.class).putExtra("mode", KeyboardActivity.ASIST)

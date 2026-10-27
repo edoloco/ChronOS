@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
@@ -97,7 +98,7 @@ final class GameAsist extends LinearLayout {
 
     private void idle(String why) { if (!on) { infoV.setText(why); infoV.setTextColor(TXT); } }
 
-    void stop() { polling = false; h.removeCallbacks(poll); }
+    void stop() { polling = false; h.removeCallbacks(poll); dsStop(); }
 
     private void setOn(boolean v) {
         if (v == on) return;
@@ -111,6 +112,7 @@ final class GameAsist extends LinearLayout {
             box.setImageDrawable(null);
             titleImg.setImageDrawable(null);
             states.removeAllViews();
+            if (dsMode) setDs(false);
         }
         if (change != null) change.retro(v);
     }
@@ -142,6 +144,8 @@ final class GameAsist extends LinearLayout {
             lastTick = now;
             st = s;
             sys = m.optString("sys");
+            boolean ds = isDs(sys);
+            if (ds != dsMode) setDs(ds);
             name = m.optString("name");
             crc = m.optString("crc");
             setOn(true);
@@ -219,7 +223,7 @@ final class GameAsist extends LinearLayout {
         setPadding(dp(4), dp(2), dp(4), dp(2));
 
         // ficha
-        LinearLayout info = card();
+        LinearLayout info = infoC = card();
         LinearLayout imgs = new LinearLayout(a);
         box = new ImageView(a);
         box.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -245,7 +249,7 @@ final class GameAsist extends LinearLayout {
         addView(info, col(1.05f));
 
         // acerca del juego e instrucciones (Wikipedia)
-        LinearLayout ab = card();
+        LinearLayout ab = abC = card();
         ab.addView(text("Acerca del juego", 14, TXT, true));
         android.widget.ScrollView sc = new android.widget.ScrollView(a);
         sc.setVerticalFadingEdgeEnabled(true);
@@ -257,7 +261,7 @@ final class GameAsist extends LinearLayout {
         addView(ab, col(1.25f));
 
         // partidas guardadas
-        LinearLayout sv = card();
+        LinearLayout sv = svC = card();
         LinearLayout sh = new LinearLayout(a);
         sh.setGravity(Gravity.CENTER_VERTICAL);
         sh.addView(text("Partidas guardadas", 14, TXT, true), new LinearLayout.LayoutParams(0, -2, 1));
@@ -277,7 +281,7 @@ final class GameAsist extends LinearLayout {
         addView(sv, col(1.3f));
 
         // botones
-        LinearLayout bt = card();
+        LinearLayout bt = btC = card();
         String[][] b = {{"💾 Guardar", "SAVE_STATE"}, {"📂 Cargar", "LOAD_STATE"}, {"⏯ Pausa", "PAUSE_TOGGLE"}, {"⏩ Rápido", "FAST_FORWARD"},
                 {"⏪ Rebobinar", "REWIND"}, {"🐢 Lento", "SLOWMOTION"}, {"↺ Reiniciar", "RESET"}, {"📷 Captura", "SCREENSHOT"},
                 {"🔇 Silencio", "MUTE"}, {"☰ Menú", "MENU_TOGGLE"}};
@@ -315,6 +319,7 @@ final class GameAsist extends LinearLayout {
         sr.addView(pill("+", v -> { slot = Math.min(999, slot + 1); cmd("STATE_SLOT_PLUS"); slotV.setText("Ranura " + slot); }));
         bt.addView(sr, new LinearLayout.LayoutParams(-1, dp(42)));
         addView(bt, col(1f));
+        buildDs();
     }
 
     private TextView pill(String s, View.OnClickListener l) {
@@ -380,6 +385,8 @@ final class GameAsist extends LinearLayout {
             case "master_system": case "sms": return "Sega - Master System - Mark III";
             case "game_gear": case "gg": return "Sega - Game Gear";
             case "psx": case "playstation": return "Sony - PlayStation";
+            case "nds": case "ds": case "nintendo_ds": return "Nintendo - Nintendo DS";
+            case "3ds": return "Nintendo - Nintendo 3DS";
             case "pce": case "pc_engine": return "NEC - PC Engine - TurboGrafx 16";
             default: return "Nintendo - Nintendo Entertainment System";
         }
@@ -527,5 +534,207 @@ final class GameAsist extends LinearLayout {
                     + "/master/" + kind + "/" + enc(fn) + ".png", f)) return null;
             return BitmapFactory.decodeFile(f.getPath());
         } catch (Exception e) { return null; }
+    }
+
+    // ================= Nintendo DS: la pantalla de abajo, grande, en el extendido =================
+
+    private LinearLayout infoC, abC, svC, btC, leftCol;
+    private android.widget.FrameLayout stack, dsBox;
+    private DsView dsView;
+    private boolean dsMode, dsActive, dsAsked;
+    private TextView zoneB;
+    private final TextView[] tabs = new TextView[3];
+
+    static boolean isDs(String sys) {
+        String s = sys == null ? "" : sys.toLowerCase(java.util.Locale.ROOT);
+        return s.equals("nds") || s.equals("ds") || s.contains("nintendo_ds") || s.contains("nintendo ds") || s.contains("melonds") || s.contains("desmume");
+    }
+
+    private void buildDs() {
+        dsView = new DsView();
+        dsBox = new android.widget.FrameLayout(a);
+        dsBox.setBackground(round(Color.BLACK, 16));
+        dsBox.setClipToOutline(true);
+        dsBox.addView(dsView, new android.widget.FrameLayout.LayoutParams(-1, -1));
+        LinearLayout pills = new LinearLayout(a);
+        zoneB = pill("⛶ Zona", v -> calibrate(!dsView.full));
+        pills.addView(zoneB);
+        TextView stopB = pill("■", v -> dsStop());
+        LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(-2, -2);
+        sl.setMarginStart(dp(6));
+        pills.addView(stopB, sl);
+        android.widget.FrameLayout.LayoutParams pl = new android.widget.FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.END);
+        pl.setMargins(dp(6), dp(6), dp(6), dp(6));
+        dsBox.addView(pills, pl);
+        leftCol = new LinearLayout(a);
+        leftCol.setOrientation(VERTICAL);
+        LinearLayout tr = new LinearLayout(a);
+        String[] names = {"Ficha", "Partidas", "Acerca"};
+        for (int i = 0; i < 3; i++) {
+            final int k = i;
+            tabs[i] = pill(names[i], v -> tab(k));
+            tabs[i].setTextSize(11);
+            tabs[i].setPadding(dp(6), dp(4), dp(6), dp(4));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1);
+            lp.setMargins(dp(2), 0, dp(2), dp(5));
+            tr.addView(tabs[i], lp);
+        }
+        leftCol.addView(tr);
+        stack = new android.widget.FrameLayout(a);
+        leftCol.addView(stack, new LinearLayout.LayoutParams(-1, 0, 1));
+    }
+
+    private static void detach(View v) { if (v.getParent() instanceof android.view.ViewGroup) ((android.view.ViewGroup) v.getParent()).removeView(v); }
+
+    /** Con un juego de DS: Ficha, Partidas y Acerca se juntan a la izquierda (en pestañas) y el centro es la pantalla de abajo. */
+    private void setDs(boolean ds) {
+        dsMode = ds;
+        removeAllViews();
+        for (View v : new View[]{infoC, abC, svC, btC, leftCol, dsBox}) detach(v);
+        if (!ds) {
+            dsStop();
+            addView(infoC, col(1.05f)); addView(abC, col(1.25f)); addView(svC, col(1.3f)); addView(btC, col(1f));
+            for (View v : new View[]{infoC, abC, svC}) v.setVisibility(VISIBLE);
+            return;
+        }
+        for (View v : new View[]{infoC, svC, abC}) stack.addView(v, new android.widget.FrameLayout.LayoutParams(-1, -1));
+        tab(0);
+        addView(leftCol, col(1.1f));
+        addView(dsBox, col(2.5f));
+        addView(btC, col(0.9f));
+        dsView.msg = "Toca aquí para ver la pantalla de abajo del DS.\nEn RetroArch usa el diseño de pantallas «Híbrido» (opciones del núcleo).";
+        dsView.invalidate();
+    }
+
+    private void tab(int k) {
+        View[] vs = {infoC, svC, abC};
+        for (int i = 0; i < 3; i++) {
+            vs[i].setVisibility(i == k ? VISIBLE : GONE);
+            tabs[i].setBackground(round(i == k ? RED : 0xFF34343E, 12));
+        }
+    }
+
+    private void dsStart() {
+        if (!hub.connected()) return;
+        dsAsked = true;
+        hub.send("dsOn");
+        dsView.msg = "Acepta en el principal el permiso para grabar la pantalla…";
+        dsView.invalidate();
+    }
+
+    private void dsStop() {
+        if (dsAsked && hub.connected()) hub.send("dsOff");
+        dsAsked = false;
+        dsActive = false;
+        if (dsView != null) { dsView.frame = null; dsView.full = false; dsView.msg = "Toca aquí para ver la pantalla de abajo del DS."; dsView.invalidate(); }
+    }
+
+    private void calibrate(boolean on) {
+        if (!dsActive) { dsStart(); return; }
+        dsView.full = on;
+        if (on) dsView.sel = null;
+        zoneB.setText(on ? "✓ Listo" : "⛶ Zona");
+        if (!on && dsView.sel != null) {
+            RectF s = dsView.sel;
+            hub.send("dsRect", "l", (double) s.left, "t", (double) s.top, "r", (double) s.right, "b", (double) s.bottom);
+            prefs.edit().putBoolean("dsRectSet", true).apply();
+        }
+        hub.send("dsFull", "on", on);
+        dsView.invalidate();
+    }
+
+    /** Mensajes del principal: cuadros de la pantalla y estado de la grabación. */
+    void onDs(JSONObject m) {
+        if (dsView == null) return;
+        if ("dsState".equals(m.optString("t"))) {
+            dsActive = m.optBoolean("on");
+            if (!dsActive) { dsView.frame = null; dsView.msg = m.optString("msg", "Toca aquí para ver la pantalla de abajo del DS."); }
+            else if (!prefs.getBoolean("dsRectSet", false)) calibrate(true);   // la primera vez: marcar dónde está
+            dsView.invalidate();
+            return;
+        }
+        try {
+            byte[] d = Base64.decode(m.optString("img"), Base64.DEFAULT);
+            Bitmap b = BitmapFactory.decodeByteArray(d, 0, d.length);
+            if (b == null) return;
+            dsActive = true;
+            if (m.optBoolean("full") != dsView.full) return;   // cuadro viejo del otro modo
+            dsView.frame = b;
+            dsView.invalidate();
+        } catch (Exception ignored) { }
+    }
+
+    private final class DsView extends View {
+        Bitmap frame;
+        boolean full;
+        RectF sel;
+        String msg = "";
+        private final android.graphics.Paint p = new android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG | android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final RectF dst = new RectF();
+        private float sx, sy;
+        private long lastMove;
+
+        DsView() { super(a); }
+
+        @Override protected void onDraw(android.graphics.Canvas c) {
+            float W = getWidth(), H = getHeight();
+            if (frame == null) {
+                p.setColor(TXT);
+                p.setTextSize(14 * dp);
+                p.setTextAlign(android.graphics.Paint.Align.CENTER);
+                String[] ls = msg.split("\n");
+                for (int i = 0; i < ls.length; i++) c.drawText(ls[i], W / 2, H / 2 + (i - (ls.length - 1) / 2f) * 20 * dp, p);
+                return;
+            }
+            float fw = frame.getWidth(), fh = frame.getHeight(), sc = Math.min(W / fw, H / fh);
+            dst.set((W - fw * sc) / 2, (H - fh * sc) / 2, (W + fw * sc) / 2, (H + fh * sc) / 2);
+            c.drawBitmap(frame, null, dst, p);
+            if (full) {
+                p.setColor(0xCC000000);
+                c.drawRect(0, 0, W, 34 * dp, p);
+                p.setColor(Color.WHITE);
+                p.setTextSize(13 * dp);
+                p.setTextAlign(android.graphics.Paint.Align.LEFT);
+                c.drawText("Arrastra el dedo sobre la pantalla de abajo del DS y toca ✓ Listo", 12 * dp, 22 * dp, p);
+                if (sel != null) {
+                    RectF r = new RectF(dst.left + sel.left * dst.width(), dst.top + sel.top * dst.height(), dst.left + sel.right * dst.width(), dst.top + sel.bottom * dst.height());
+                    p.setStyle(android.graphics.Paint.Style.STROKE);
+                    p.setStrokeWidth(3 * dp);
+                    p.setColor(RED);
+                    c.drawRect(r, p);
+                    p.setStyle(android.graphics.Paint.Style.FILL);
+                }
+            }
+        }
+
+        private float u(float x) { return Math.max(0, Math.min(1, (x - dst.left) / Math.max(1, dst.width()))); }
+        private float v(float y) { return Math.max(0, Math.min(1, (y - dst.top) / Math.max(1, dst.height()))); }
+
+        @Override public boolean onTouchEvent(android.view.MotionEvent e) {
+            int ac = e.getActionMasked();
+            if (frame == null) {
+                if (ac == android.view.MotionEvent.ACTION_UP && !dsActive) dsStart();
+                return true;
+            }
+            float x = e.getX(), y = e.getY();
+            if (full) {   // marcar la zona de la pantalla de abajo
+                if (ac == android.view.MotionEvent.ACTION_DOWN) { sx = u(x); sy = v(y); sel = null; }
+                else if (ac == android.view.MotionEvent.ACTION_MOVE || ac == android.view.MotionEvent.ACTION_UP) {
+                    float ux = u(x), vy = v(y);
+                    if (Math.abs(ux - sx) > 0.02f && Math.abs(vy - sy) > 0.02f) sel = new RectF(Math.min(sx, ux), Math.min(sy, vy), Math.max(sx, ux), Math.max(sy, vy));
+                    invalidate();
+                }
+                return true;
+            }
+            // tocar la pantalla de abajo: el principal lo repite en la ventanita del DS
+            if (!dst.contains(x, y) && ac == android.view.MotionEvent.ACTION_DOWN) return true;
+            long now = android.os.SystemClock.uptimeMillis();
+            int ph = ac == android.view.MotionEvent.ACTION_DOWN ? 0 : ac == android.view.MotionEvent.ACTION_MOVE ? 1
+                    : ac == android.view.MotionEvent.ACTION_UP || ac == android.view.MotionEvent.ACTION_CANCEL ? 2 : -1;
+            if (ph < 0 || (ph == 1 && now - lastMove < 16)) return true;
+            if (ph == 1) lastMove = now;
+            if (hub.connected()) hub.send("dsTouch", "ph", ph, "u", (double) u(x), "v", (double) v(y));
+            return true;
+        }
     }
 }

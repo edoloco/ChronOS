@@ -109,6 +109,16 @@
             android:name=".CaptureService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
+        <!-- segunda pantalla de la DS: graba la pantalla de abajo del DS y la manda al extendido (Game-Asist) -->
+        <service
+            android:name=".DsMirror"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+        <activity
+            android:name=".DsMirror$Ask"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <activity
             android:name=".CaptureActivity"
             android:exported="false"

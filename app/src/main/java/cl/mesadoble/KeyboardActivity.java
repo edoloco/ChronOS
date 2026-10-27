@@ -699,6 +699,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         if ("navAck".equals(t) && !m.optBoolean("ok"))
             android.widget.Toast.makeText(this, "Recientes necesita la versión completa en el principal", android.widget.Toast.LENGTH_SHORT).show();
         if ("raSt".equals(t) || "raStList".equals(t)) { h.post(() -> retro.onMessage(m)); return; }
+        if ("dsFrame".equals(t) || "dsState".equals(t)) { h.post(() -> retro.onDs(m)); return; }
         if ("gpImg".equals(t)) h.post(() -> {
             if (m.has("err")) { gamepad.setNote(m.optString("err"), 6000); return; }
             try {
