@@ -118,8 +118,9 @@ public class DsMirror extends Service {
         if (projection == null) { hub.send("dsState", "on", false, "msg", "Android no dio el permiso de grabar"); stopSelf(); return START_NOT_STICKY; }
         Point sc = new Point();
         ((WindowManager) getSystemService(WINDOW_SERVICE)).getDefaultDisplay().getRealSize(sc);
-        // a la mitad de resolución: sobra para la pantalla del DS (256 × 192) y gasta menos
-        sw = Math.max(2, sc.x / 2); sh = Math.max(2, sc.y / 2);
+        // resolución completa: así la pantallita del DS en el principal puede ser bien chica (diseño Híbrido, proporción 3)
+        // y aun así llega nítida (más que los 256 × 192 del DS)
+        sw = Math.max(2, sc.x); sh = Math.max(2, sc.y);
         thread = new HandlerThread("ds");
         thread.start();
         Handler th = new Handler(thread.getLooper());
@@ -127,7 +128,7 @@ public class DsMirror extends Service {
         reader.setOnImageAvailableListener(this::frame, th);
         try {
             projection.registerCallback(new MediaProjection.Callback() { @Override public void onStop() { stopSelf(); } }, th);
-            vd = projection.createVirtualDisplay("chronos-ds", sw, sh, getResources().getDisplayMetrics().densityDpi / 2,
+            vd = projection.createVirtualDisplay("chronos-ds", sw, sh, getResources().getDisplayMetrics().densityDpi,
                     DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, reader.getSurface(), null, th);
         } catch (Exception e) { hub.send("dsState", "on", false, "msg", "No se pudo grabar la pantalla"); stopSelf(); return START_NOT_STICKY; }
         running = true;
@@ -155,7 +156,7 @@ public class DsMirror extends Service {
             img.close();
             img = null;
             Bitmap out;
-            if (f) out = Bitmap.createScaledBitmap(Bitmap.createBitmap(buf, 0, 0, w, h), 480, Math.max(1, 480 * h / w), true);
+            if (f) out = Bitmap.createScaledBitmap(Bitmap.createBitmap(buf, 0, 0, w, h), 640, Math.max(1, 640 * h / w), true);
             else {
                 int x0 = clamp(Math.round(L * w), w - 2), y0 = clamp(Math.round(T * h), h - 2);
                 int x1 = Math.max(x0 + 2, clamp(Math.round(R * w), w)), y1 = Math.max(y0 + 2, clamp(Math.round(B * h), h));

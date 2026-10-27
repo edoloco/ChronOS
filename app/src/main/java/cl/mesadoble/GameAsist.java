@@ -695,7 +695,7 @@ final class GameAsist extends LinearLayout {
                 p.setColor(Color.WHITE);
                 p.setTextSize(13 * dp);
                 p.setTextAlign(android.graphics.Paint.Align.LEFT);
-                c.drawText("Arrastra el dedo sobre la pantalla de abajo del DS y toca ✓ Listo", 12 * dp, 22 * dp, p);
+                c.drawText("Esta es la pantalla del principal: arrastra el dedo sobre la pantallita de abajo del DS y toca ✓ Listo", 12 * dp, 22 * dp, p);
                 if (sel != null) {
                     RectF r = new RectF(dst.left + sel.left * dst.width(), dst.top + sel.top * dst.height(), dst.left + sel.right * dst.width(), dst.top + sel.bottom * dst.height());
                     p.setStyle(android.graphics.Paint.Style.STROKE);
