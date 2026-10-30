@@ -47,7 +47,7 @@ final class ColorWheel extends View {
     @Override protected void onSizeChanged(int w, int h, int ow, int oh) {
         float g = 12 * d;
         float barW = 34 * d, prevW = 56 * d;
-        sq = new RectF(0, 0, w - barW - prevW - 2 * g, h);
+        sq = new RectF(0, 0, Math.min(w - barW - prevW - 2 * g, h * 1.25f), h);   // el cuadro de color no se estira de más
         bar = new RectF(sq.right + g, 0, sq.right + g + barW, h);
         prev = new RectF(bar.right + g, 0, w, prevW);
     }

@@ -90,7 +90,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
     private ValueBar valueBar;          // "Valor de trazo": grosor en vivo con la otra mano
     private float valueLevel;
     private LinearLayout penBar, fillBar;   // pluma (formas vectoriales) y balde (tolerancia, huecos, qué mira)
-    private TextView penStrokeL, penFillL, fillTolL, fillGapL, fillAllL;
+    private TextView penHint, penStrokeL, penFillL, fillTolL, fillGapL, fillAllL;
     private int fillTol, fillGap;
     private boolean fillAll;
     private LinearLayout selBar;        // selección: borrar, invertir, quitar, tolerancia
@@ -385,8 +385,14 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         f.addView(leftPanel, ll);
         // mantener presionado el panel (su borde o el título) y arrastrar: cambia ancho y alto; la rueda crece con él
         leftPanel.resizable("dwColorP", false, true, () -> {
+            // nada se deforma: la rueda queda proporcionada y los colores se reacomodan en más o menos columnas
+            int ww = leftPanel.getLayoutParams().width > 0 ? leftPanel.getLayoutParams().width : leftPanel.getWidth();
+            int inner = ww - leftPanel.getPaddingLeft() - leftPanel.getPaddingRight();
+            layoutPalette(Math.max(3, inner / dp(30)));
+            int rows = (PALETTE.length + paletteCols - 1) / paletteCols;
             int hh = leftPanel.getLayoutParams().height;
-            if (hh > 0) { wheel.setFixedHeight(Math.max(dp(60), hh - dp(196))); wheel.requestLayout(); }
+            int wh = hh > 0 ? hh - dp(104) - rows * dp(30) : Math.round(inner * 0.55f);
+            wheel.setFixedHeight(Math.max(dp(60), Math.min(wh, Math.round(inner * 0.75f))));
         });
         leftPanel.applySaved();
 
@@ -450,26 +456,35 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         if (rightPanel != null) rightPanel.animate().alpha(panelsOn ? 1 : 0).translationX(panelsOn ? 0 : rightPanel.getWidth() + dp(30)).setDuration(260).start();
     }
 
+    private static final int[] PALETTE = {0xFF000000, 0xFF424242, 0xFF9E9E9E, 0xFFFFFFFF, 0xFF6D4C41, 0xFFFFCCBC,
+            0xFFE53935, 0xFFFB8C00, 0xFFFDD835, 0xFF7CB342, 0xFF43A047, 0xFF00897B,
+            0xFF00ACC1, 0xFF1E88E5, 0xFF3949AB, 0xFF8E24AA, 0xFFD81B60, 0xFFF48FB1};
+    private LinearLayout paletteBox;
+    private int paletteCols;
+
+    /** Colores fijos: círculos siempre redondos y del mismo tamaño; la grilla se acomoda al ancho del panel. */
     private View palette() {
-        int[] cols = {0xFF000000, 0xFF424242, 0xFF9E9E9E, 0xFFFFFFFF, 0xFF6D4C41, 0xFFFFCCBC,
-                0xFFE53935, 0xFFFB8C00, 0xFFFDD835, 0xFF7CB342, 0xFF43A047, 0xFF00897B,
-                0xFF00ACC1, 0xFF1E88E5, 0xFF3949AB, 0xFF8E24AA, 0xFFD81B60, 0xFFF48FB1};
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(0, dp(8), 0, dp(4));
-        for (int r = 0; r < 3; r++) {
-            LinearLayout row = new LinearLayout(this);
-            for (int c = 0; c < 6; c++) {
-                final int col = cols[r * 6 + c];
-                View v = dot(col);
-                v.setOnClickListener(x -> set("color", col));
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(24), 1);
-                lp.setMargins(dp(2), dp(2), dp(2), dp(2));
-                row.addView(v, lp);
-            }
-            box.addView(row);
+        paletteBox = new LinearLayout(this);
+        paletteBox.setOrientation(LinearLayout.VERTICAL);
+        paletteBox.setPadding(0, dp(8), 0, dp(4));
+        layoutPalette(6);
+        return paletteBox;
+    }
+
+    private void layoutPalette(int cols) {
+        if (paletteBox == null || cols == paletteCols) return;
+        paletteCols = cols;
+        paletteBox.removeAllViews();
+        LinearLayout row = null;
+        for (int i = 0; i < PALETTE.length; i++) {
+            if (i % cols == 0) { row = new LinearLayout(this); paletteBox.addView(row); }
+            final int col = PALETTE[i];
+            View v = dot(col);
+            v.setOnClickListener(x -> set("color", col));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(24), dp(24));
+            lp.setMargins(dp(3), dp(3), dp(3), dp(3));
+            row.addView(v, lp);
         }
-        return box;
     }
 
     private View dot(int col) {
@@ -590,7 +605,8 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         boardBox.addView(xfBar, new FrameLayout.LayoutParams(sbl));
         // pluma (como FreeHand): toca = punto recto · mantén y arrastra = curva · toca el primer punto = cerrar
         penBar = floatBar();
-        penBar.addView(label("Toca: recto · Arrastra: curva · 1er punto: cerrar", 11));
+        penHint = label("", 11);
+        penBar.addView(penHint);
         penBar.addView(pill("✓ Terminar", v -> editor.penFinish()));
         penStrokeL = pill("", v -> editor.penEdit(sh -> sh.strokeOn = !sh.strokeOn));
         penBar.addView(penStrokeL);
@@ -952,6 +968,10 @@ public class DualDrawActivity extends Activity implements Link.Listener {
             fillGapL.setText("  Huecos " + fillGap + " px");
             fillAllL.setText(fillAll ? "Mira: todas las capas" : "Mira: solo esta capa");
         }
+        if (penHint != null && editor != null)
+            penHint.setText(!penOff ? "Toca: recto · Arrastra: curva · 1er punto: cerrar"
+                    : editor.awaitNode >= 0 ? "Ahora toca rápido = recto · desliza = curvo"
+                    : "Elige dónde y suelta · 1er punto: cerrar");
         if (penStrokeL != null && editor != null) {
             DrawDoc.VShape v = editor.pv;
             penStrokeL.setText("Contorno: " + (v == null || v.strokeOn ? "sí" : "no"));
@@ -2005,7 +2025,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         /** Suelta la forma (ya quedó guardada). */
         void penFinish() {
             if (pv == null) return;
-            pv = null; pvI = -1; pvSel = -1; pDrag = 0;
+            pv = null; pvI = -1; pvSel = -1; pDrag = 0; awaitNode = -1;
             invalidate();
             refreshTools();
         }
@@ -2220,7 +2240,10 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         private float offSX, offSY, offFX, offFY;
         private final Paint offP = new Paint(Paint.ANTI_ALIAS_FLAG);
 
-        private float offPx() { return 30f / 25.4f * getResources().getDisplayMetrics().ydpi; }
+        private float offPx() { return 10f / 25.4f * getResources().getDisplayMetrics().ydpi; }   // ~1 cm sobre el dedo
+
+        /** Vector distanciado: punto recién puesto que espera el siguiente toque (rápido = recto, deslizar = curvo). */
+        int awaitNode = -1;
 
         private boolean penTouchOff(MotionEvent e) {
             int act = e.getActionMasked();
@@ -2241,6 +2264,11 @@ public class DualDrawActivity extends Activity implements Link.Listener {
                     pBakI = pvI; pBakSel = pvSel;
                     pDrag = 0;
                     if (pv != null && pvL != doc.cur) penFinish();
+                    if (pv != null && awaitNode >= 0 && awaitNode < pv.nodes()) {   // segundo toque: define si el punto es recto o curvo
+                        pDrag = 20; pNode = awaitNode;
+                        invalidate();
+                        return true;
+                    }
                     if (pv != null) {   // el dedo SOBRE un punto (o manilla): espera a que muevas el dedo para reubicarlo
                         int a = nodeAt(x, y, hr);
                         if (a >= 0) { pDrag = 12; pNode = a; pvSel = a; }
@@ -2262,8 +2290,18 @@ public class DualDrawActivity extends Activity implements Link.Listener {
                 }
                 case MotionEvent.ACTION_MOVE: {
                     if (pDrag == 0) return true;
-                    offSX = sx; offSY = sy; offFX = fx; offFY = fy;
                     if (!pMoved && Math.hypot(fx - pdx, fy - pdy) > 6 * dp) pMoved = true;
+                    if (pDrag == 20) {   // deslizar: el punto se vuelve curvo y las manillas siguen al dedo
+                        if (pMoved && pv != null) {
+                            float[] P = pv.pts;
+                            int k = pNode * 6;
+                            float dx = (fx - pdx) / zoom * (flip ? -1 : 1), dy = (fy - pdy) / zoom;
+                            P[k + 4] = P[k] + dx; P[k + 5] = P[k + 1] + dy; P[k + 2] = P[k] - dx; P[k + 3] = P[k + 1] - dy;
+                        }
+                        invalidate();
+                        return true;
+                    }
+                    offSX = sx; offSY = sy; offFX = fx; offFY = fy;
                     if (pMoved && pv != null && pDrag >= 12) {
                         float[] P = pv.pts;
                         int k = pNode * 6;
@@ -2286,6 +2324,14 @@ public class DualDrawActivity extends Activity implements Link.Listener {
                     offShow = false;
                     int d = pDrag;
                     pDrag = 0;
+                    if (d == 20) {   // toque rápido: recto; deslizado: curvo (ya quedó). Luego, el siguiente punto
+                        if (!pMoved && pv != null) { int k = pNode * 6; pv.pts[k + 2] = pv.pts[k + 4] = pv.pts[k]; pv.pts[k + 3] = pv.pts[k + 5] = pv.pts[k + 1]; }
+                        awaitNode = -1;
+                        penSave();
+                        refreshTools();
+                        invalidate();
+                        return true;
+                    }
                     if (d == 11) placeAt(cx, cy, hr);
                     else if (d >= 12 && pv != null) {
                         if (pMoved) penSave();
@@ -2309,10 +2355,11 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         private void placeAt(float x, float y, float hr) {
             if (pv != null && !pv.closed) {
                 int a = nodeAt(x, y, hr);
-                if (a == 0 && pv.nodes() >= 2) { pv.closed = true; pvSel = 0; penSave(); return; }
+                if (a == 0 && pv.nodes() >= 2) { pv.closed = true; pvSel = 0; awaitNode = 0; penSave(); return; }
                 if (a >= 0 && a == pv.nodes() - 1 && pv.nodes() >= 2) { penFinish(); return; }
                 pv.addNode(x, y);
                 pvSel = pv.nodes() - 1;
+                awaitNode = pvSel;
                 penSave();
                 return;
             }
@@ -2328,6 +2375,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
             pv.stroke = color; pv.fill = color; pv.width = size; pv.strokeOn = true; pv.fillOn = false;
             pv.addNode(x, y);
             pvL = doc.cur; pvI = -1; pvSel = 0;
+            awaitNode = 0;
         }
 
         private void drawOffCursor(Canvas c) {
@@ -2385,6 +2433,12 @@ public class DualDrawActivity extends Activity implements Link.Listener {
                     penUi.setStyle(Paint.Style.STROKE);
                     penUi.setColor(0xFF33A0FF);
                     c.drawCircle(hx, hy, 3.5f * dp, penUi);
+                }
+                if (i == awaitNode && penOff) {   // espera el toque: rápido = recto, deslizar = curvo
+                    penUi.setStyle(Paint.Style.STROKE);
+                    penUi.setStrokeWidth(2.5f * dp);
+                    penUi.setColor(ORANGE);
+                    c.drawCircle(ax, ay, 13 * dp, penUi);
                 }
                 float q = (i == 0 && !pv.closed && pv.nodes() >= 2) ? hs * 1.5f : hs;   // el primero, más grande: ahí se cierra
                 penUi.setStyle(Paint.Style.FILL);
