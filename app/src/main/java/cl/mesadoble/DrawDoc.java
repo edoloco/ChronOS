@@ -69,10 +69,38 @@ final class DrawDoc {
 
         int nodes() { return pts.length / 6; }
 
+        // ---- texto (herramienta Texto): un VShape con texto va en su propia capa y siempre se puede editar.
+        // Posición = primer punto (esquina de arriba a la izquierda); color = fill.
+        String text, font = "sans-serif";
+        float tsize = 60;
+        boolean bold, italic;
+
+        boolean isText() { return text != null; }
+
+        Paint textPaint(Paint p) {
+            p.setStyle(Paint.Style.FILL);
+            p.setTextAlign(Paint.Align.LEFT);
+            p.setTypeface(android.graphics.Typeface.create(font, (bold ? android.graphics.Typeface.BOLD : 0) | (italic ? android.graphics.Typeface.ITALIC : 0)));
+            p.setTextSize(Math.max(4, tsize));
+            p.setColor(fill);
+            return p;
+        }
+
+        /** Rectángulo que ocupa el texto (en píxeles del dibujo). */
+        RectF textBounds(Paint p) {
+            textPaint(p);
+            String[] ls = text.split("\n", -1);
+            float w = 0;
+            for (String l : ls) w = Math.max(w, p.measureText(l));
+            float x = pts.length >= 2 ? pts[0] : 0, y = pts.length >= 2 ? pts[1] : 0;
+            return new RectF(x, y, x + Math.max(w, tsize * 0.3f), y + ls.length * tsize * 1.25f);
+        }
+
         VShape copy() {
             VShape v = new VShape();
             v.pts = pts.clone(); v.closed = closed; v.strokeOn = strokeOn; v.fillOn = fillOn;
             v.stroke = stroke; v.fill = fill; v.width = width;
+            v.text = text; v.font = font; v.tsize = tsize; v.bold = bold; v.italic = italic;
             return v;
         }
 
@@ -101,6 +129,13 @@ final class DrawDoc {
         }
 
         void draw(Canvas c, Paint paint) {
+            if (text != null) {   // texto: renglón por renglón
+                textPaint(paint);
+                String[] ls = text.split("\n", -1);
+                float x = pts.length >= 2 ? pts[0] : 0, y = pts.length >= 2 ? pts[1] : 0;
+                for (int i = 0; i < ls.length; i++) c.drawText(ls[i], x, y + tsize * 0.95f + i * tsize * 1.25f, paint);
+                return;
+            }
             android.graphics.Path p = path();
             if (fillOn && closed) {
                 paint.setStyle(Paint.Style.FILL);
@@ -124,6 +159,7 @@ final class DrawDoc {
                 for (float f : pts) a.put(Math.round(f * 10) / 10.0);
                 o.put("p", a); o.put("cl", closed); o.put("so", strokeOn); o.put("fo", fillOn);
                 o.put("sc", stroke); o.put("fc", fill); o.put("w", (double) width);
+                if (text != null) { o.put("tx", text); o.put("tf", font); o.put("ts", (double) tsize); o.put("tb", bold); o.put("ti", italic); }
             } catch (Exception ignored) { }
             return o;
         }
@@ -137,6 +173,10 @@ final class DrawDoc {
             for (int i = 0; i < n; i++) v.pts[i] = (float) a.optDouble(i);
             v.closed = o.optBoolean("cl"); v.strokeOn = o.optBoolean("so", true); v.fillOn = o.optBoolean("fo");
             v.stroke = o.optInt("sc", 0xFF000000); v.fill = o.optInt("fc", 0xFF2FA866); v.width = (float) o.optDouble("w", 6);
+            if (o.has("tx")) {
+                v.text = o.optString("tx"); v.font = o.optString("tf", "sans-serif"); v.tsize = (float) o.optDouble("ts", 60);
+                v.bold = o.optBoolean("tb"); v.italic = o.optBoolean("ti");
+            }
             return v;
         }
     }
@@ -197,11 +237,12 @@ final class DrawDoc {
         if ("del".equals(a)) { if (i >= 0 && i < l.shapes.size()) l.shapes.remove(i); else return; }
         else {
             VShape v = VShape.fromJson(m.optJSONObject("s"));
-            if (v.nodes() < 2) return;
+            if (v.nodes() < (v.isText() ? 1 : 2)) return;
             if (i >= 0 && i < l.shapes.size()) l.shapes.set(i, v); else l.shapes.add(v);
         }
         st.va = shapesJson(l);
         push(st);
+        renameLayers();   // una capa de texto se llama como su texto
     }
 
     final List<Layer> layers = new ArrayList<>();
@@ -251,12 +292,26 @@ final class DrawDoc {
         Layer l = new Layer();
         l.bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);
         l.name = "Capa " + (layers.size() + 1);
-        layers.add(cur + (layers.isEmpty() ? 0 : 1), l);
+        int at = cur + (layers.isEmpty() ? 0 : 1);
+        shiftSteps(at);
+        layers.add(at, l);
         cur = layers.indexOf(l);
         renameLayers();
     }
 
-    private void renameLayers() { for (int i = 0; i < layers.size(); i++) layers.get(i).name = "Capa " + (i + 1); }
+    private void renameLayers() {
+        for (int i = 0; i < layers.size(); i++) {
+            Layer l = layers.get(i);
+            String t = l.shapes.size() == 1 && l.shapes.get(0).isText() ? l.shapes.get(0).text.replace('\n', ' ').trim() : null;
+            l.name = t != null ? "T  " + (t.length() > 14 ? t.substring(0, 14) + "…" : t) : "Capa " + (i + 1);
+        }
+    }
+
+    /** Al meter una capa en la posición idx, los pasos de deshacer de las capas de arriba se corren uno. */
+    private void shiftSteps(int idx) {
+        for (Step s : undo) if (s.layer >= idx) s.layer++;
+        for (Step s : redo) if (s.layer >= idx) s.layer++;
+    }
 
     void deleteLayer(int i) {
         if (layers.size() <= 1 || i < 0 || i >= layers.size()) return;
@@ -942,7 +997,10 @@ final class DrawDoc {
         new Canvas(l.bmp).drawBitmap(f, 0, 0, null);
         f.recycle();
         st.vb = shapesJson(l);
-        for (VShape v : l.shapes) for (int k = 0; k < v.pts.length; k += 2) v.pts[k] = W - v.pts[k];   // las formas también se voltean
+        for (VShape v : l.shapes) {   // las formas también se voltean (el texto cambia de lado, pero se sigue leyendo)
+            if (v.isText()) { RectF tb = v.textBounds(vecP); float w = tb.width(); v.pts[0] = W - v.pts[0] - w; for (int k = 2; k < v.pts.length; k += 2) v.pts[k] = v.pts[0]; continue; }
+            for (int k = 0; k < v.pts.length; k += 2) v.pts[k] = W - v.pts[k];
+        }
         st.va = shapesJson(l);
         st.after = l.bmp.copy(Bitmap.Config.ARGB_8888, false);
         push(st);
@@ -970,7 +1028,7 @@ final class DrawDoc {
         new Canvas(l.bmp).drawBitmap(nb, 0, 0, null);
         nb.recycle();
         st.vb = shapesJson(l);
-        for (VShape v : l.shapes) { mx.mapPoints(v.pts); v.width *= mx.mapRadius(1f); }   // las formas se transforman igual
+        for (VShape v : l.shapes) { mx.mapPoints(v.pts); v.width *= mx.mapRadius(1f); v.tsize *= mx.mapRadius(1f); }   // las formas se transforman igual
         st.va = shapesJson(l);
         st.after = l.bmp.copy(Bitmap.Config.ARGB_8888, false);
         push(st);

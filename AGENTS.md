@@ -81,6 +81,9 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   manteniendo presionado su borde/título (`Glass2.resizable`, prefs `dwToolsP*`, `dwColorP*`, `dwLayersP*`).
   Hasta 30 capas (`maxLayers`). "Guardar PSD" (`DrawDoc.writePsd`, RLE, con capas) en Descargas › DUAL-Draw.
   El balde dentro de una forma cerrada cambia su relleno; en la pintura REEMPLAZA el color (se puede repintar).
+  Texto (T_TEXT): un `VShape` con `text` (fuente, tamaño `tsize`, color = fill, negrita/cursiva) en su propia capa;
+  tocar = editar (`textDialog`), arrastrar = mover, siempre con `vec set` (deshacer). Palma (toque > 20 mm) no dibuja.
+  Envíos del extendido por una sola fila (`dwSend`/`outQ`) para que `dwFull` no pise órdenes más nuevas.
   DUAL-Draw también es "app" (`PKG = dd:draw`, ícono `DualDrawActivity.icon`) en la lista de apps y en la mesa.
   Pluma (T_PEN, como FreeHand MX): formas vectoriales `DrawDoc.VShape` en `Layer.shapes` (nodos x,y + 2 manillas), orden
   `vec {a:set|del, l, i, s}` con deshacer (`Step.vb/va`). Toca = punto recto, arrastra = curva, primer punto = cerrar,

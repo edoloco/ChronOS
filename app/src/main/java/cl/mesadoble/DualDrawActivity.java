@@ -56,7 +56,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
     static final int ORANGE = 0xFFF57C1F, BG = 0xFF5F6369;   // fondo gris de trabajo
     static final int GREEN = 0xFF2FA866, INK_DARK = 0xFF24342B;   // paneles blancos con verde
     static final int WHITE_PANEL = 0xEBFFFFFF, ORANGE_PANEL = 0xF0F57C1F;
-    static final int T_DRAW = 0, T_LINE = 1, T_RECT = 2, T_OVAL = 3, T_FILL = 4, T_PICK = 5, T_WAND = 6, T_LASSO = 7, T_XFORM = 8, T_PEN = 9;
+    static final int T_DRAW = 0, T_LINE = 1, T_RECT = 2, T_OVAL = 3, T_FILL = 4, T_PICK = 5, T_WAND = 6, T_LASSO = 7, T_XFORM = 8, T_PEN = 9, T_TEXT = 10;
 
     private final Handler h = new Handler(Looper.getMainLooper());
     private Hub hub;
@@ -677,7 +677,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
             {"b" + DrawDoc.MARKER, "▮", "Rotulador"}, {"b" + DrawDoc.BRUSH, "🖌", "Pincel"}, {"b" + DrawDoc.MIX, "◐", "Mezcla"},
             {"b" + DrawDoc.SMUDGE, "☝", "Difuminar"}, {"b" + DrawDoc.AIR, "☁", "Aerógrafo"}, {"b" + DrawDoc.CHALK, "▒", "Tiza"},
             {"b" + DrawDoc.CALLI, "∕", "Caligrafía"}, {"b" + DrawDoc.ERASER, "⌫", "Borrador"}, {"b" + DrawDoc.SOFT_ERASER, "◌", "Borr. suave"},
-            {"shape", "▭", "Formas (mantén para elegir)"}, {"pen", "✑", "Pluma (mantén para elegir)"}, {"fill", "◧", "Balde"},
+            {"shape", "▭", "Formas (mantén para elegir)"}, {"pen", "✑", "Pluma (mantén para elegir)"}, {"text", "T", "Texto"}, {"fill", "◧", "Balde"},
             {"pick", "⊙", "Gotero"}, {"wand", "✦", "Varita"}, {"lasso", "➰", "Lazo"}, {"xform", "⤧", "Transformar"},
             {"import", "＋", "Importar imagen"}, {"sym", "⇹", "Simetría"}, {"steady", "〰", "Trazo estable"}, {"fit", "⤢", "Ver todo"},
             {"flip", "⇋", "Voltear vista"}};
@@ -748,8 +748,8 @@ public class DualDrawActivity extends Activity implements Link.Listener {
                     return true;
                 });
                 break;
-            case "fill": case "pick": case "wand": case "lasso": case "xform": {
-                final int t = "fill".equals(id) ? T_FILL : "pick".equals(id) ? T_PICK : "wand".equals(id) ? T_WAND : "lasso".equals(id) ? T_LASSO : T_XFORM;
+            case "text": case "fill": case "pick": case "wand": case "lasso": case "xform": {
+                final int t = "text".equals(id) ? T_TEXT : "fill".equals(id) ? T_FILL : "pick".equals(id) ? T_PICK : "wand".equals(id) ? T_WAND : "lasso".equals(id) ? T_LASSO : T_XFORM;
                 b.tag = t; toolBtns.add(b);
                 b.setOnClickListener(v -> set("tool", tool == t ? T_DRAW : t));
                 break;
@@ -774,6 +774,109 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         prefs.edit().putBoolean("dwPenOff", off).apply();
         if (penBtn != null) { penBtn.glyph = off ? "⌖" : "✑"; penBtn.invalidate(); }
         set("tool", T_PEN);
+    }
+
+    private static final String[][] FONTS = {{"sans-serif", "Normal"}, {"sans-serif-light", "Fina"}, {"sans-serif-black", "Gruesa"},
+            {"sans-serif-condensed", "Angosta"}, {"serif", "Con serifa"}, {"monospace", "Máquina"}, {"casual", "Casual"},
+            {"cursive", "Manuscrita"}, {"sans-serif-smallcaps", "Versalitas"}};
+
+    /**
+     * Texto: escribir y elegir fuente, tamaño, color, negrita y cursiva. Uno nuevo va en su propia capa; uno existente
+     * se cambia en su lugar (siempre se puede volver a editar, con deshacer).
+     */
+    private void textDialog(int layer, int idx, DrawDoc.VShape cur, float x, float y) {
+        final DrawDoc.VShape v = cur != null ? cur : new DrawDoc.VShape();
+        if (cur == null) {
+            v.text = ""; v.fill = color; v.tsize = Math.max(24, Math.round(doc.H / 18f));
+            v.pts = new float[]{x, y, x, y, x, y};
+            v.strokeOn = false;
+        }
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        android.widget.EditText et = new android.widget.EditText(this);
+        et.setText(v.text);
+        et.setHint("Escribe aquí…");
+        et.setMinLines(2);
+        et.setTextSize(18);
+        et.setSelection(et.getText().length());
+        box.addView(et, new LinearLayout.LayoutParams(-1, -2));
+        // fuente
+        LinearLayout fonts = new LinearLayout(this);
+        android.widget.HorizontalScrollView fs = new android.widget.HorizontalScrollView(this);
+        fs.setHorizontalScrollBarEnabled(false);
+        fs.addView(fonts);
+        final List<TextView> fbs = new ArrayList<>();
+        Runnable paintFonts = () -> {
+            for (int i = 0; i < FONTS.length; i++) {
+                android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
+                g.setCornerRadius(dp(14));
+                boolean on = FONTS[i][0].equals(v.font);
+                g.setColor(on ? GREEN : 0x1F2FA866);
+                fbs.get(i).setBackground(g);
+                fbs.get(i).setTextColor(on ? Color.WHITE : INK_DARK);
+            }
+        };
+        for (String[] f : FONTS) {
+            TextView b = new TextView(this);
+            b.setText("Aa  " + f[1]);
+            b.setTypeface(android.graphics.Typeface.create(f[0], android.graphics.Typeface.NORMAL));
+            b.setTextSize(15);
+            b.setPadding(dp(12), dp(6), dp(12), dp(6));
+            b.setOnClickListener(w -> { v.font = f[0]; paintFonts.run(); });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+            lp.setMargins(dp(3), dp(8), dp(3), dp(4));
+            fonts.addView(b, lp);
+            fbs.add(b);
+        }
+        paintFonts.run();
+        box.addView(fs);
+        // tamaño, color, negrita y cursiva
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        TextView sz = label("", 14);
+        Runnable showSize = () -> sz.setText("Tamaño " + Math.round(v.tsize));
+        showSize.run();
+        row.addView(pill("−", w -> { v.tsize = Math.max(6, v.tsize * 0.85f); showSize.run(); }));
+        row.addView(sz);
+        row.addView(pill("+", w -> { v.tsize = Math.min(doc.H, v.tsize / 0.85f); showSize.run(); }));
+        View sw = new View(this);
+        Runnable showColor = () -> {
+            android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
+            g.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+            g.setColor(v.fill);
+            g.setStroke(dp(2), 0x33000000);
+            sw.setBackground(g);
+        };
+        showColor.run();
+        sw.setOnClickListener(w -> ColorWheel.pick(this, v.fill, c -> { v.fill = c | 0xFF000000; showColor.run(); }));
+        LinearLayout.LayoutParams swl = new LinearLayout.LayoutParams(dp(30), dp(30));
+        swl.setMargins(dp(10), 0, dp(4), 0);
+        row.addView(sw, swl);
+        TextView bB = pill("B", null), iB = pill("I", null);
+        bB.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        iB.setTypeface(android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.ITALIC));
+        Runnable showStyle = () -> { bB.setAlpha(v.bold ? 1f : 0.45f); iB.setAlpha(v.italic ? 1f : 0.45f); };
+        bB.setOnClickListener(w -> { v.bold = !v.bold; showStyle.run(); });
+        iB.setOnClickListener(w -> { v.italic = !v.italic; showStyle.run(); });
+        showStyle.run();
+        row.addView(bB);
+        row.addView(iB);
+        android.widget.HorizontalScrollView rs = new android.widget.HorizontalScrollView(this);
+        rs.setHorizontalScrollBarEnabled(false);
+        rs.addView(row);
+        box.addView(rs);
+        Ui.Sheet sh = new Ui.Sheet(this).title(cur == null ? "Texto nuevo" : "Editar texto").view(box).button("Cancelar", false, null);
+        if (cur != null) sh.button("Borrar", false, () -> op(opj("vec", "a", "del", "l", layer, "i", idx)));
+        sh.button("Listo", true, () -> {
+            v.text = et.getText().toString();
+            if (v.text.trim().isEmpty()) { if (cur != null) op(opj("vec", "a", "del", "l", layer, "i", idx)); return; }
+            if (cur == null) {   // texto nuevo: en una capa propia, arriba de la actual
+                if (doc.layers.size() >= doc.maxLayers()) { Toast.makeText(this, "Máximo " + doc.maxLayers() + " capas", Toast.LENGTH_SHORT).show(); return; }
+                op(opj("layer", "a", "add"));
+                op(opj("vec", "a", "set", "l", doc.cur, "i", -1, "s", v.toJson()));
+            } else op(opj("vec", "a", "set", "l", layer, "i", idx, "s", v.toJson()));
+        }).show();
+        et.requestFocus();
     }
 
     /** Editar: qué herramientas aparecen en el panel. */
@@ -1774,9 +1877,11 @@ public class DualDrawActivity extends Activity implements Link.Listener {
             }
             c.drawRect(dst.left + 2 * dp, dst.top + 6 * dp, dst.right - 2 * dp, dst.bottom + 9 * dp, sheetShadow);
             if (edit && pv != null && pvI >= 0) { doc.hideL = pvL; doc.hideI = pvI; }
+            if (edit && tDrag != null) { doc.hideL = tL; doc.hideI = tI; }
             doc.draw(c, dst);
             doc.hideL = doc.hideI = -1;
             if (edit && pv != null) drawPen(c);
+            if (edit && tool == T_TEXT) drawTextBoxes(c);
             if (sym) c.drawLine(dst.centerX(), dst.top, dst.centerX(), dst.bottom, axis);
             if (doc.hasSel && doc.sel != null) c.drawBitmap(doc.sel, null, dst, selP);
             if (doc.xfM != null) {   // marco de la capa que se está transformando
@@ -2092,6 +2197,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
             Paint t = new Paint();
             for (int i = sh.size() - 1; i >= 0; i--) {
                 DrawDoc.VShape v = sh.get(i);
+                if (v.isText()) continue;   // los textos se editan con la herramienta Texto
                 android.graphics.Path p = v.path();
                 android.graphics.Path hit = new android.graphics.Path();
                 if (v.closed) hit.addPath(p);
@@ -2211,6 +2317,98 @@ public class DualDrawActivity extends Activity implements Link.Listener {
                     return true;
             }
             return true;
+        }
+
+        // ---- texto: tocar un texto lo edita; arrastrarlo lo mueve; tocar en otro lado crea uno nuevo (en su propia capa)
+        private boolean palm;
+        private DrawDoc.VShape tDrag;
+        private int tL = -1, tI = -1;
+        private float tdx, tdy, tsx, tsy;
+        private boolean tMoved;
+        private final Paint tBox = new Paint(Paint.ANTI_ALIAS_FLAG), tP = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        /** {capa, índice} del texto bajo el punto: primero la capa actual, después las demás (de arriba hacia abajo). */
+        private int[] textAt(float x, float y) {
+            float pad = 12 * dp / zoom;
+            for (int pass = 0; pass < 2; pass++)
+                for (int li = doc.layers.size() - 1; li >= 0; li--) {
+                    if ((pass == 0) != (li == doc.cur) || !doc.layers.get(li).visible) continue;
+                    List<DrawDoc.VShape> sh = doc.layers.get(li).shapes;
+                    for (int k = sh.size() - 1; k >= 0; k--) {
+                        if (!sh.get(k).isText()) continue;
+                        RectF b = sh.get(k).textBounds(tP);
+                        b.inset(-pad, -pad);
+                        if (b.contains(x, y)) return new int[]{li, k};
+                    }
+                }
+            return null;
+        }
+
+        private boolean textTouch(MotionEvent e) {
+            int act = e.getActionMasked();
+            if (act == MotionEvent.ACTION_POINTER_DOWN) { tDrag = null; invalidate(); return false; }
+            if (two) return false;
+            float x = toX(e.getX()), y = toY(e.getY());
+            switch (act) {
+                case MotionEvent.ACTION_DOWN: {
+                    two = false;
+                    tMoved = false;
+                    tsx = e.getX(); tsy = e.getY();
+                    int[] hit = textAt(x, y);
+                    tDrag = null;
+                    if (hit != null) {
+                        tL = hit[0]; tI = hit[1];
+                        tDrag = doc.layers.get(tL).shapes.get(tI).copy();
+                        tdx = x - tDrag.pts[0]; tdy = y - tDrag.pts[1];
+                    }
+                    return true;
+                }
+                case MotionEvent.ACTION_MOVE:
+                    if (tDrag == null) return true;
+                    if (!tMoved && Math.hypot(e.getX() - tsx, e.getY() - tsy) > 8 * dp) tMoved = true;
+                    if (tMoved) {
+                        float nx = x - tdx, ny = y - tdy;
+                        for (int k = 0; k < tDrag.pts.length; k += 2) { tDrag.pts[k] = nx; tDrag.pts[k + 1] = ny; }
+                        invalidate();
+                    }
+                    return true;
+                case MotionEvent.ACTION_UP: {
+                    DrawDoc.VShape d = tDrag;
+                    tDrag = null;
+                    if (d != null && tMoved) op(opj("vec", "a", "set", "l", tL, "i", tI, "s", d.toJson()));   // movido
+                    else if (d != null) {   // tocado: se edita (y su capa queda elegida)
+                        if (tL != doc.cur) op(opj("layer", "a", "sel", "i", tL));
+                        textDialog(tL, tI, doc.layers.get(tL).shapes.get(tI).copy(), x, y);
+                    } else textDialog(-1, -1, null, x, y);   // en otro lado: texto nuevo
+                    invalidate();
+                    return true;
+                }
+                case MotionEvent.ACTION_CANCEL: tDrag = null; invalidate(); return true;
+            }
+            return true;
+        }
+
+        /** Con la herramienta Texto: un marco punteado alrededor de cada texto (y el que se arrastra). */
+        private void drawTextBoxes(Canvas c) {
+            tBox.setStyle(Paint.Style.STROKE);
+            tBox.setStrokeWidth(1.3f * dp);
+            tBox.setColor(0xCC33A0FF);
+            tBox.setPathEffect(new android.graphics.DashPathEffect(new float[]{5 * dp, 4 * dp}, 0));
+            for (int li = 0; li < doc.layers.size(); li++) {
+                if (!doc.layers.get(li).visible) continue;
+                for (DrawDoc.VShape v : doc.layers.get(li).shapes) {
+                    if (!v.isText()) continue;
+                    RectF b = v.textBounds(tP);
+                    c.drawRect(dst.left + b.left * zoom - 4 * dp, dst.top + b.top * zoom - 4 * dp, dst.left + b.right * zoom + 4 * dp, dst.top + b.bottom * zoom + 4 * dp, tBox);
+                }
+            }
+            if (tDrag != null) {
+                c.save();
+                c.translate(dst.left, dst.top);
+                c.scale(zoom, zoom);
+                tDrag.draw(c, tP);
+                c.restore();
+            }
         }
 
         /** Forma cerrada de la capa actual que tiene adentro el punto (la de más arriba), o -1. */
@@ -2466,6 +2664,11 @@ public class DualDrawActivity extends Activity implements Link.Listener {
             if (!edit) return true;
             if (tool == T_XFORM) return xformTouch(e);
             if (tool == T_PEN && (penOff ? penTouchOff(e) : penTouch(e))) return true;
+            if (tool == T_TEXT && textTouch(e)) return true;
+            // la palma o el canto de la mano (toque muy ancho) no dibuja: suele ser el origen de toques "fantasma"
+            if (e.getActionMasked() == MotionEvent.ACTION_DOWN && e.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER
+                    && e.getTouchMajor() > 20f / 25.4f * getResources().getDisplayMetrics().xdpi) { palm = true; return true; }
+            if (palm) { if (e.getActionMasked() == MotionEvent.ACTION_UP || e.getActionMasked() == MotionEvent.ACTION_CANCEL) palm = false; return true; }
             switch (e.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN: {
                     two = false;
