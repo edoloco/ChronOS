@@ -18,7 +18,7 @@ public class Knob extends View {
 
     private final float dp;
     private int min, max, value, home;
-    private String label = "";
+    private String label = "", suffix = "%";
     private Change change;
     private int ink = 0xFF1D2733, track = 0x33000000, accent = 0xFFF57C1F, face = 0xFFFFFFFF;
     private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG), t = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -33,6 +33,7 @@ public class Knob extends View {
     }
 
     public Knob label(String l) { label = l; invalidate(); return this; }
+    public Knob suffix(String s) { suffix = s; invalidate(); return this; }
     public Knob colors(int ink, int track, int face) { this.ink = ink; this.track = track; this.face = face; invalidate(); return this; }
     public void setChange(Change c) { change = c; }
     public int value() { return value; }
@@ -75,8 +76,8 @@ public class Knob extends View {
         c.drawLine(cx + (float) Math.cos(a) * kr * 0.45f, cy + (float) Math.sin(a) * kr * 0.45f,
                 cx + (float) Math.cos(a) * kr * 0.85f, cy + (float) Math.sin(a) * kr * 0.85f, p);
         t.setColor(ink);
-        t.setTextSize(20 * dp);
-        c.drawText(value + "%", cx, cy + 7 * dp, t);
+        t.setTextSize(Math.min(20 * dp, kr * 0.62f));
+        c.drawText(value + suffix, cx, cy + t.getTextSize() * 0.35f, t);
         t.setTextSize(14 * dp);
         c.drawText(label, cx, getHeight() - 6 * dp, t);
     }

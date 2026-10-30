@@ -78,7 +78,9 @@ public class DualDrawActivity extends Activity implements Link.Listener {
     private android.widget.ScrollView toolScroll;
     private int toolCell, toolCols;
     private int shapeVar = T_LINE;     // qué forma hace el botón de formas (línea, rectángulo u óvalo)
-    boolean penOff;                    // pluma: "vector distanciado" (el punto aparece unos 30 mm sobre el dedo)
+    boolean penOff;                    // pluma: "vector distanciado" (el punto aparece separado del dedo)
+    int offDir, offMm = 10;            // vector distanciado: dirección (grados, 0 = arriba) y distancia (mm) del circulito
+    private View offPanel;
     private Fader sizeF, opacF;
     private View swatch;
     private ColorWheel wheel;
@@ -189,6 +191,8 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         fillAll = prefs.getBoolean("dwFillAll", false);
         shapeVar = prefs.getInt("dwShapeVar", T_LINE);
         penOff = prefs.getBoolean("dwPenOff", false);
+        offDir = prefs.getInt("dwOffDir", 0);
+        offMm = prefs.getInt("dwOffMm", 10);
         boolean fresh = false;
         if (doc == null) { doc = new DrawDoc(); if (editing()) fresh = !load(); }
 
@@ -624,6 +628,20 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         penBar.addView(pill("Borrar punto", v -> editor.penDelNode()));
         penBar.addView(pill("Borrar forma", v -> editor.penDelShape()));
         boardBox.addView(scrollBar(penBar), new FrameLayout.LayoutParams(sbl));
+        // vector distanciado: perilla de dirección y perilla de distancia del circulito
+        Glass2 op = new Glass2(null, WHITE_PANEL);
+        op.setOrientation(LinearLayout.HORIZONTAL);
+        op.setGravity(Gravity.CENTER_VERTICAL);
+        op.setPadding(dp(8), dp(6), dp(8), dp(4));
+        DirDial dial = new DirDial();
+        op.addView(dial, new LinearLayout.LayoutParams(dp(92), dp(112)));
+        Knob dk = new Knob(this, 3, 40, offMm).label("Distancia").suffix(" mm").colors(INK_DARK, 0x22000000, Color.WHITE);
+        dk.setChange((v, done) -> { offMm = v; if (done) prefs.edit().putInt("dwOffMm", v).apply(); });
+        op.addView(dk, new LinearLayout.LayoutParams(dp(92), dp(112)));
+        offPanel = op;
+        FrameLayout.LayoutParams opl = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.START);
+        opl.setMargins(dp(8), 0, 0, dp(8));
+        boardBox.addView(op, opl);
         // balde
         fillBar = floatBar();
         fillBar.addView(pill("−", v -> setFill(fillTol - 8, fillGap, fillAll)));
@@ -918,6 +936,52 @@ public class DualDrawActivity extends Activity implements Link.Listener {
 
     private interface Each { void on(int i, Tool b); }
 
+    /** Perilla de dirección (vector distanciado): la flecha apunta hacia donde aparece el circulito; se gira con el dedo. */
+    private final class DirDial extends View {
+        final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        DirDial() { super(DualDrawActivity.this); }
+        @Override protected void onDraw(Canvas c) {
+            float w = getWidth(), cy = (getHeight() - 22 * dp) / 2f, cx = w / 2f, r = Math.min(cx, cy) - 4 * dp;
+            p.setStyle(Paint.Style.FILL);
+            p.setShadowLayer(4 * dp, 0, 1.5f * dp, 0x44000000);
+            p.setColor(Color.WHITE);
+            c.drawCircle(cx, cy, r, p);
+            p.clearShadowLayer();
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(1.5f * dp);
+            p.setColor(0x33000000);
+            for (int i = 0; i < 8; i++) {   // marcas cada 45°
+                double a = Math.toRadians(i * 45);
+                c.drawLine(cx + (float) Math.sin(a) * (r - 5 * dp), cy - (float) Math.cos(a) * (r - 5 * dp),
+                        cx + (float) Math.sin(a) * (r - 1 * dp), cy - (float) Math.cos(a) * (r - 1 * dp), p);
+            }
+            double a = Math.toRadians(offDir);
+            float ex = cx + (float) Math.sin(a) * (r - 8 * dp), ey = cy - (float) Math.cos(a) * (r - 8 * dp);
+            p.setStrokeWidth(3.5f * dp);
+            p.setStrokeCap(Paint.Cap.ROUND);
+            p.setColor(ORANGE);
+            c.drawLine(cx, cy, ex, ey, p);
+            p.setStyle(Paint.Style.FILL);
+            c.drawCircle(ex, ey, 5 * dp, p);
+            p.setColor(INK_DARK);
+            c.drawCircle(cx, cy, 3.5f * dp, p);
+            p.setTextAlign(Paint.Align.CENTER);
+            p.setTextSize(11 * dp);
+            c.drawText("Dirección " + offDir + "°", cx, getHeight() - 6 * dp, p);
+        }
+        @Override public boolean onTouchEvent(android.view.MotionEvent e) {
+            getParent().requestDisallowInterceptTouchEvent(true);
+            float cx = getWidth() / 2f, cy = (getHeight() - 22 * dp) / 2f;
+            int deg = (int) Math.round(Math.toDegrees(Math.atan2(e.getX() - cx, -(e.getY() - cy))));
+            deg = ((deg % 360) + 360) % 360;
+            deg = Math.round(deg / 5f) * 5 % 360;   // de a 5°
+            offDir = deg;
+            invalidate();
+            if (e.getActionMasked() == android.view.MotionEvent.ACTION_UP) prefs.edit().putInt("dwOffDir", offDir).apply();
+            return true;
+        }
+    }
+
     /** Barrita flotante blanca sobre el lienzo (como la de selección). */
     private LinearLayout floatBar() {
         LinearLayout b = new LinearLayout(this);
@@ -1071,6 +1135,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         if (selBar != null) selBar.setVisibility((tool == T_WAND || tool == T_LASSO || doc.hasSel) && tool != T_XFORM && tool != T_PEN && tool != T_FILL ? View.VISIBLE : View.GONE);
         if (xfBar != null) xfBar.setVisibility(tool == T_XFORM ? View.VISIBLE : View.GONE);
         show(penBar, tool == T_PEN);
+        if (offPanel != null) offPanel.setVisibility(tool == T_PEN && penOff ? View.VISIBLE : View.GONE);
         show(fillBar, tool == T_FILL);
         if (fillTolL != null) {
             fillTolL.setText("Tolerancia " + fillTol);
@@ -2485,7 +2550,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         private float offSX, offSY, offFX, offFY;
         private final Paint offP = new Paint(Paint.ANTI_ALIAS_FLAG);
 
-        private float offPx() { return 10f / 25.4f * getResources().getDisplayMetrics().ydpi; }   // ~1 cm sobre el dedo
+        private float offPx() { return offMm / 25.4f * getResources().getDisplayMetrics().ydpi; }   // distancia elegida con la perilla
 
         /** Vector distanciado: punto recién puesto que espera el siguiente toque (rápido = recto, deslizar = curvo). */
         int awaitNode = -1;
@@ -2498,7 +2563,9 @@ public class DualDrawActivity extends Activity implements Link.Listener {
                 return false;
             }
             if (two) return false;
-            float fx = e.getX(), fy = e.getY(), sx = fx, sy = fy - offPx();
+            // el circulito va a la distancia y en la dirección de las perillas (0° = arriba, en el sentido del reloj)
+            double ang = Math.toRadians(offDir);
+            float fx = e.getX(), fy = e.getY(), sx = fx + (float) (Math.sin(ang) * offPx()), sy = fy - (float) (Math.cos(ang) * offPx());
             float cx = toX(sx), cy = toY(sy), x = toX(fx), y = toY(fy), hr = 16 * dp / zoom;
             switch (act) {
                 case MotionEvent.ACTION_DOWN: {
@@ -2628,7 +2695,8 @@ public class DualDrawActivity extends Activity implements Link.Listener {
             offP.setStrokeWidth(1.2f * dp);
             offP.setColor(0x9933A0FF);
             offP.setPathEffect(new android.graphics.DashPathEffect(new float[]{4 * dp, 4 * dp}, 0));
-            c.drawLine(offFX, offFY, offSX, offSY + 9 * dp, offP);
+            float ll = (float) Math.hypot(offSX - offFX, offSY - offFY);
+            if (ll > 10 * dp) c.drawLine(offFX, offFY, offSX - (offSX - offFX) / ll * 9 * dp, offSY - (offSY - offFY) / ll * 9 * dp, offP);
             offP.setPathEffect(null);
             offP.setStrokeWidth(2.5f * dp);
             offP.setColor(0xCC000000);
