@@ -1010,7 +1010,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         if ("new".equals(m.optString("op")) && online()) h.postDelayed(this::sendFull, 300);
         if (online()) {
             try { m.put("t", "dw"); } catch (Exception ignored) { }
-            hub.send(m);
+            dwSend(m);
         }
         changed();
     }
@@ -1264,13 +1264,24 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         }, "dualdraw-guardar").start();
     }
 
+    /**
+     * Todo lo que el extendido manda del dibujo sale por UNA fila, en orden: así el dibujo completo (que tarda en
+     * armarse) nunca llega después de una orden más nueva y la pisa (pasaba al importar una imagen: se perdía la capa).
+     */
+    private static final java.util.concurrent.ExecutorService outQ = java.util.concurrent.Executors.newSingleThreadExecutor();
+
+    private void dwSend(JSONObject m) {
+        try { if (!m.has("t")) m.put("t", "dw"); } catch (Exception ignored) { }
+        outQ.execute(() -> hub.send(m));
+    }
+
     private void sendFull() {
         final DrawDoc.Snap snap = doc.snapshot();
-        new Thread(() -> {
+        outQ.execute(() -> {
             JSONObject o = DrawDoc.toJson(snap);
             try { o.put("t", "dwFull"); } catch (Exception ignored) { }
             hub.send(o);
-        }, "dualdraw-enviar").start();
+        });
     }
 
     private void exportPng() {
@@ -1933,7 +1944,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
                     for (Float f : pend) a.put(Math.round(f * 100) / 100.0);
                     m.put("p", a);
                 } catch (Exception ignored) { }
-                hub.send(m);
+                dwSend(m);
             }
             pend.clear();
             pendStart = false;
@@ -1944,7 +1955,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
             drawing = false;
             pend.clear();
             doc.cancel();
-            if (online() && !pendStart) hub.send("dw", "op", "cancel");
+            if (online() && !pendStart) dwSend(opj("cancel"));
         }
 
         /** Transformar la capa: un dedo la mueve; dos dedos la escalan y giran (alrededor del punto medio). */
@@ -2563,7 +2574,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
                     drawing = false;
                     flush();
                     doc.end();
-                    if (online()) hub.send("dw", "op", "end");
+                    if (online()) dwSend(opj("end"));
                     if (++strokes % 8 == 0) save();
                     changed();
                     return true;
