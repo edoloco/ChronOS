@@ -695,8 +695,10 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         List<String[]> items = new ArrayList<>();
         for (String[] t : CATALOG) if (on.contains(t[0])) items.add(t);
         String[][] arr = items.toArray(new String[0][]);
+        String[][] shown = new String[arr.length][];   // la grilla recibe {símbolo, nombre}; el id queda aparte
+        for (int i = 0; i < arr.length; i++) shown[i] = new String[]{arr[i][1], arr[i][2]};
         toolScroll.removeAllViews();
-        toolScroll.addView(grid(arr, toolCell, toolCols, (i, b) -> wireTool(arr[i][0], b)));
+        toolScroll.addView(grid(shown, toolCell, toolCols, (i, b) -> wireTool(arr[i][0], b)));
         refreshTools();
     }
 
