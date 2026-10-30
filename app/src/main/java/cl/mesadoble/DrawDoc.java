@@ -1164,6 +1164,188 @@ final class DrawDoc {
     // ---------------- PSD (Photoshop) con capas ----------------
 
     private static final String[] PSD_BLEND = {"norm", "mul ", "scrn", "over", "lddg"};
+    private static final int PSD_RES = 4242;   // recurso propio: textos y formas editables
+
+    /**
+     * Abre un .psd (RGB de 8 bits) con sus capas: nombre, visibilidad, opacidad y mezcla. Lee capas sin comprimir y
+     * RLE (lo normal); los grupos se aplanan en capas sueltas; efectos, máscaras y ajustes de Photoshop no se leen.
+     * Si el PSD lo hizo DUAL-Draw, los textos y formas vuelven a ser editables.
+     */
+    static DrawDoc readPsd(java.io.InputStream is, int maxSide) throws java.io.IOException {
+        java.io.DataInputStream in = new java.io.DataInputStream(new java.io.BufferedInputStream(is, 1 << 16));
+        byte[] sig = new byte[4];
+        in.readFully(sig);
+        if (!"8BPS".equals(new String(sig, java.nio.charset.StandardCharsets.US_ASCII))) throw new java.io.IOException("No es un PSD");
+        if (in.readUnsignedShort() != 1) throw new java.io.IOException("PSB (archivo grande) no soportado");
+        in.skipBytes(6);
+        int nch = in.readUnsignedShort(), h = in.readInt(), w = in.readInt(), depth = in.readUnsignedShort(), mode = in.readUnsignedShort();
+        if (depth != 8) throw new java.io.IOException("Solo PSD de 8 bits");
+        if (mode != 3) throw new java.io.IOException("Solo PSD en RGB");
+        if (w <= 0 || h <= 0 || w > maxSide || h > maxSide) throw new java.io.IOException("Imagen demasiado grande (" + w + " × " + h + ")");
+        skipFully(in, in.readInt() & 0xFFFFFFFFL);   // modo de color
+        // recursos: buscar el nuestro
+        JSONObject dd = null;
+        long rl = in.readInt() & 0xFFFFFFFFL, rread = 0;
+        while (rread + 12 <= rl) {
+            in.readFully(sig); int id = in.readUnsignedShort(); rread += 6;
+            int nl = in.readUnsignedByte(); int np = (nl + 1) % 2 == 0 ? nl : nl + 1; skipFully(in, np); rread += 1 + np;
+            long sz = in.readInt() & 0xFFFFFFFFL; rread += 4;
+            long padded = sz + (sz % 2);
+            if (id == PSD_RES && sz < 400_000_000L) {
+                byte[] d = new byte[(int) sz]; in.readFully(d); skipFully(in, padded - sz);
+                try { dd = new JSONObject(new String(d, java.nio.charset.StandardCharsets.UTF_8)); } catch (Exception ignored) { }
+            } else skipFully(in, padded);
+            rread += padded;
+        }
+        if (rread < rl) skipFully(in, rl - rread);
+        DrawDoc doc = new DrawDoc();
+        doc.dispose();
+        doc.W = w; doc.H = h;
+        int max = doc.maxLayers();
+        long lmLen = in.readInt() & 0xFFFFFFFFL;
+        boolean layered = false;
+        if (lmLen > 0) {
+            long liLen = in.readInt() & 0xFFFFFFFFL;
+            if (liLen > 0) {
+                int count = Math.abs(in.readShort());
+                int[][] rect = new int[count][4];
+                int[][] chId = new int[count][];
+                long[][] chLen = new long[count][];
+                Layer[] ls = new Layer[count];
+                boolean[] skip = new boolean[count];
+                for (int i = 0; i < count; i++) {
+                    for (int k = 0; k < 4; k++) rect[i][k] = in.readInt();
+                    int cn = in.readUnsignedShort();
+                    chId[i] = new int[cn]; chLen[i] = new long[cn];
+                    for (int c = 0; c < cn; c++) { chId[i][c] = in.readShort(); chLen[i][c] = in.readInt() & 0xFFFFFFFFL; }
+                    in.readFully(sig);
+                    byte[] key = new byte[4]; in.readFully(key);
+                    String k = new String(key, java.nio.charset.StandardCharsets.US_ASCII);
+                    int opacity = in.readUnsignedByte(); in.readUnsignedByte(); int flags = in.readUnsignedByte(); in.readUnsignedByte();
+                    long extra = in.readInt() & 0xFFFFFFFFL, er = 0;
+                    long mk = in.readInt() & 0xFFFFFFFFL; skipFully(in, mk); er += 4 + mk;
+                    long br = in.readInt() & 0xFFFFFFFFL; skipFully(in, br); er += 4 + br;
+                    int nl = in.readUnsignedByte(); byte[] nb = new byte[nl]; in.readFully(nb);
+                    int np = ((nl + 1 + 3) / 4) * 4 - (nl + 1); skipFully(in, np); er += 1 + nl + np;
+                    while (er + 12 <= extra) {   // información adicional: grupos (lsct) se saltan
+                        in.readFully(sig); byte[] kk = new byte[4]; in.readFully(kk);
+                        long bl = in.readInt() & 0xFFFFFFFFL; er += 12;
+                        String kn = new String(kk, java.nio.charset.StandardCharsets.US_ASCII);
+                        if ("lsct".equals(kn) && bl >= 4) { int t = in.readInt(); skipFully(in, bl - 4); if (t == 1 || t == 2 || t == 3) skip[i] = true; }
+                        else skipFully(in, bl);
+                        er += bl;
+                    }
+                    if (er < extra) skipFully(in, extra - er);
+                    Layer l = new Layer();
+                    l.visible = (flags & 2) == 0;
+                    l.alpha = opacity / 255f;
+                    int bi = 0;
+                    for (int b = 0; b < PSD_BLEND.length; b++) if (PSD_BLEND[b].equals(k)) bi = b;
+                    l.blend = bi;
+                    l.name = new String(nb, java.nio.charset.StandardCharsets.ISO_8859_1);
+                    ls[i] = l;
+                }
+                // los pixeles de cada canal, capa por capa
+                for (int i = 0; i < count; i++) {
+                    int top = rect[i][0], left = rect[i][1], lw = rect[i][3] - left, lh = rect[i][2] - top;
+                    byte[][] planes = new byte[4][];   // A R G B
+                    for (int c = 0; c < chId[i].length; c++) {
+                        long len = chLen[i][c];
+                        int comp = in.readUnsignedShort();
+                        long data = len - 2;
+                        int idc = chId[i][c];
+                        boolean want = idc >= -1 && idc <= 2 && lw > 0 && lh > 0 && !skip[i];
+                        if (!want || (comp != 0 && comp != 1)) { skipFully(in, data); continue; }
+                        byte[] plane = new byte[lw * lh];
+                        if (comp == 0) in.readFully(plane);
+                        else {
+                            int[] rows = new int[lh];
+                            for (int r = 0; r < lh; r++) rows[r] = in.readUnsignedShort();
+                            for (int r = 0; r < lh; r++) {
+                                byte[] packed = new byte[rows[r]];
+                                in.readFully(packed);
+                                unpack(packed, plane, r * lw, lw);
+                            }
+                        }
+                        planes[idc + 1] = plane;
+                    }
+                    if (skip[i] || ls[i] == null) continue;
+                    if (lw <= 0 || lh <= 0) { ls[i].bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888); continue; }   // capa vacía
+                    int[] px = new int[lw * lh];
+                    for (int p = 0; p < px.length; p++) {
+                        int a = planes[0] == null ? 255 : planes[0][p] & 255;
+                        int r = planes[1] == null ? 0 : planes[1][p] & 255, g = planes[2] == null ? 0 : planes[2][p] & 255, b = planes[3] == null ? 0 : planes[3][p] & 255;
+                        px[p] = (a << 24) | (r << 16) | (g << 8) | b;
+                    }
+                    Bitmap part = Bitmap.createBitmap(px, lw, lh, Bitmap.Config.ARGB_8888);
+                    Bitmap full = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                    new Canvas(full).drawBitmap(part, left, top, null);
+                    part.recycle();
+                    ls[i].bmp = full;
+                }
+                for (int i = 0; i < count && doc.layers.size() < max; i++) if (!skip[i] && ls[i] != null && ls[i].bmp != null) doc.layers.add(ls[i]);
+                layered = !doc.layers.isEmpty();
+            }
+        }
+        if (!layered) {   // PSD sin capas: la imagen combinada, como una sola capa
+            if (lmLen > 0) { /* ya se leyó lo que había */ }
+            Layer l = new Layer();
+            l.bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            l.name = "Capa 1";
+            try {
+                int comp = in.readUnsignedShort();
+                byte[][] planes = new byte[Math.max(3, nch)][];
+                if (comp == 1) {
+                    int[] rows = new int[h * nch];
+                    for (int r = 0; r < rows.length; r++) rows[r] = in.readUnsignedShort();
+                    for (int c = 0; c < nch; c++) {
+                        planes[c] = new byte[w * h];
+                        for (int r = 0; r < h; r++) { byte[] pk = new byte[rows[c * h + r]]; in.readFully(pk); unpack(pk, planes[c], r * w, w); }
+                    }
+                } else if (comp == 0) for (int c = 0; c < nch; c++) { planes[c] = new byte[w * h]; in.readFully(planes[c]); }
+                if (planes[0] != null && planes[1] != null && planes[2] != null) {
+                    int[] row = new int[w];
+                    for (int y = 0; y < h; y++) {
+                        for (int x = 0; x < w; x++) { int p = y * w + x; row[x] = 0xFF000000 | ((planes[0][p] & 255) << 16) | ((planes[1][p] & 255) << 8) | (planes[2][p] & 255); }
+                        l.bmp.setPixels(row, 0, w, 0, y, w, 1);
+                    }
+                }
+            } catch (java.io.EOFException ignored) { }
+            doc.layers.add(l);
+        }
+        // hecho por DUAL-Draw: la pintura sin los textos/formas y los textos/formas aparte (editables)
+        if (dd != null && dd.optInt("n") == doc.layers.size()) {
+            JSONArray dl = dd.optJSONArray("layers");
+            for (int k = 0; dl != null && k < dl.length(); k++) {
+                JSONObject j = dl.optJSONObject(k);
+                int i = j == null ? -1 : j.optInt("i", -1);
+                if (i < 0 || i >= doc.layers.size()) continue;
+                Layer l = doc.layers.get(i);
+                try {
+                    byte[] d = android.util.Base64.decode(j.optString("png"), android.util.Base64.DEFAULT);
+                    Bitmap b = BitmapFactory.decodeByteArray(d, 0, d.length);
+                    if (b != null) { l.bmp.eraseColor(Color.TRANSPARENT); new Canvas(l.bmp).drawBitmap(b, 0, 0, null); b.recycle(); }
+                } catch (Exception ignored) { }
+                shapesFrom(l, j.optString("vec", ""));
+            }
+        }
+        doc.cur = doc.layers.size() - 1;
+        return doc;
+    }
+
+    private static void skipFully(java.io.DataInputStream in, long n) throws java.io.IOException {
+        while (n > 0) { long s = in.skip(n); if (s <= 0) { if (in.read() < 0) throw new java.io.EOFException(); s = 1; } n -= s; }
+    }
+
+    /** PackBits → bytes (una fila). */
+    private static void unpack(byte[] src, byte[] dst, int off, int len) {
+        int i = 0, o = off, end = off + len;
+        while (i < src.length && o < end) {
+            int n = src[i++];
+            if (n >= 0) { int c = Math.min(n + 1, end - o); System.arraycopy(src, i, dst, o, Math.min(c, src.length - i)); i += n + 1; o += c; }
+            else if (n != -128) { int c = Math.min(1 - n, end - o); byte v = i < src.length ? src[i] : 0; i++; for (int k = 0; k < c; k++) dst[o++] = v; }
+        }
+    }
 
     /**
      * Escribe el dibujo como .psd con sus capas (nombre, visibilidad, opacidad y mezcla); las formas de la pluma van
@@ -1174,7 +1356,29 @@ final class DrawDoc {
         o.writeBytes("8BPS"); o.writeShort(1); o.write(new byte[6]);
         o.writeShort(3); o.writeInt(H); o.writeInt(W); o.writeShort(8); o.writeShort(3);
         o.writeInt(0);   // modo de color
-        o.writeInt(0);   // recursos
+        // recursos: una copia de los textos y formas de la pluma (con la pintura de su capa sin ellos), que solo lee
+        // DUAL-Draw: así al reabrir el PSD siguen siendo editables; para los demás programas es un dato que ignoran
+        java.io.ByteArrayOutputStream res = new java.io.ByteArrayOutputStream();
+        try {
+            JSONArray dl = new JSONArray();
+            for (int li = 0; li < layers.size(); li++) {
+                Layer l = layers.get(li);
+                if (l.shapes.isEmpty()) continue;
+                ByteArrayOutputStream pb = new ByteArrayOutputStream();
+                l.bmp.compress(Bitmap.CompressFormat.PNG, 100, pb);
+                dl.put(new JSONObject().put("i", li).put("vec", shapesJson(l))
+                        .put("png", android.util.Base64.encodeToString(pb.toByteArray(), android.util.Base64.NO_WRAP)));
+            }
+            if (dl.length() > 0) {
+                byte[] data = new JSONObject().put("v", 1).put("n", layers.size()).put("layers", dl).toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                java.io.DataOutputStream ro = new java.io.DataOutputStream(res);
+                ro.writeBytes("8BIM"); ro.writeShort(PSD_RES); ro.writeShort(0);
+                ro.writeInt(data.length); ro.write(data);
+                if (data.length % 2 != 0) ro.writeByte(0);
+            }
+        } catch (org.json.JSONException ignored) { }
+        o.writeInt(res.size());
+        res.writeTo(o);
         // capas: primero se comprimen (los registros llevan el largo de cada canal)
         int n = layers.size();
         byte[][][] ch = new byte[n][4][];

@@ -361,6 +361,12 @@ public class DualDrawActivity extends Activity implements Link.Listener {
                 .button("Cancelar", false, null).button("Nuevo", true, this::askSize).show()));
         top.addView(pill("Guardar PNG", v -> exportPng()));
         top.addView(pill("Guardar PSD", v -> exportPsd()));
+        top.addView(pill("Abrir PSD", v -> new Ui.Sheet(this).title("¿Abrir un PSD?").message("Reemplaza el dibujo actual (guárdalo antes si lo quieres).")
+                .button("Cancelar", false, null).button("Elegir archivo", true, () -> {
+                    try { startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+                            .putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"image/vnd.adobe.photoshop", "application/x-photoshop", "image/psd", "application/octet-stream"}), 52); }
+                    catch (Exception e) { Toast.makeText(this, "No hay explorador de archivos", Toast.LENGTH_SHORT).show(); }
+                }).show()));
         top.addView(pill("✕", v -> closeBoth()));
         FrameLayout.LayoutParams tl = new FrameLayout.LayoutParams(-2, dp(46), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
         tl.topMargin = dp(8);
@@ -1314,6 +1320,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
             case "dwPen": if (editing() && editor != null) h.post(() -> editor.pen(m)); break;
             case "dw": h.post(() -> { doc.apply(m); changed(); }); break;
             case "dwFull": h.post(() -> { doc.fromJson(m); changed(); }); break;
+            case "dwLoad": if (editing()) h.post(() -> applyLoaded(m)); break;
             case "dwHello": if (editing()) h.post(() -> { sendFull(); sendState(); }); break;
             case "dwReq": if (editing()) h.post(() -> op(m)); break;
             case "dwSet": if (editing()) h.post(() -> applySet(m.optString("k"), m.opt("v"))); break;
@@ -1413,6 +1420,34 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         }, "dualdraw-png").start();
     }
 
+    /** Abre un .psd con sus capas; el dibujo nuevo queda en los dos teléfonos (lo aplica el extendido). */
+    private void openPsd(Uri u) {
+        Toast.makeText(this, "Abriendo el PSD…", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            try (InputStream in = getContentResolver().openInputStream(u)) {
+                DrawDoc d = DrawDoc.readPsd(in, 6000);
+                JSONObject j = DrawDoc.toJson(d.snapshot());
+                d.dispose();
+                h.post(() -> {
+                    if (editing()) applyLoaded(j);
+                    else if (online()) { try { j.put("t", "dwLoad"); } catch (Exception ignored) { } hub.send(j); }
+                    else Toast.makeText(this, "El extendido no está conectado", Toast.LENGTH_SHORT).show();
+                });
+            } catch (Throwable e) {
+                String why = e.getMessage() == null ? "no se pudo leer" : e.getMessage();
+                h.post(() -> Toast.makeText(this, "No se pudo abrir: " + why, Toast.LENGTH_LONG).show());
+            }
+        }, "dualdraw-psd-abrir").start();
+    }
+
+    private void applyLoaded(JSONObject j) {
+        doc.fromJson(j);
+        changed();
+        save();
+        if (online()) sendFull();
+        Toast.makeText(this, "PSD abierto: " + doc.layers.size() + " capas", Toast.LENGTH_SHORT).show();
+    }
+
     /** Guarda con capas (.psd: lo abren Photoshop, Krita, GIMP, Photopea, Procreate…). */
     private void exportPsd() {
         if (doc.stroking) { Toast.makeText(this, "Termina el trazo y vuelve a intentar", Toast.LENGTH_SHORT).show(); return; }
@@ -1453,6 +1488,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
 
     @Override protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
+        if (req == 52 && res == RESULT_OK && data != null && data.getData() != null) { openPsd(data.getData()); return; }
         if (req != 51 || res != RESULT_OK || data == null || data.getData() == null) return;
         final Uri u = data.getData();
         new Thread(() -> {

@@ -81,6 +81,8 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   manteniendo presionado su borde/título (`Glass2.resizable`, prefs `dwToolsP*`, `dwColorP*`, `dwLayersP*`).
   Hasta 30 capas (`maxLayers`). "Guardar PSD" (`DrawDoc.writePsd`, RLE, con capas) en Descargas › DUAL-Draw.
   El balde dentro de una forma cerrada cambia su relleno; en la pintura REEMPLAZA el color (se puede repintar).
+  "Abrir PSD" (`DrawDoc.readPsd`: RGB 8 bits, capas raw/RLE, grupos aplanados) → `dwLoad` al extendido → `applyLoaded`.
+  El PSD guarda en el recurso 4242 los textos/formas y la pintura de su capa sin ellos: al reabrirlo siguen editables.
   Texto (T_TEXT): un `VShape` con `text` (fuente, tamaño `tsize`, color = fill, negrita/cursiva) en su propia capa;
   tocar = editar (`textDialog`), arrastrar = mover, siempre con `vec set` (deshacer). Palma (toque > 20 mm) no dibuja.
   Envíos del extendido por una sola fila (`dwSend`/`outQ`) para que `dwFull` no pise órdenes más nuevas.
