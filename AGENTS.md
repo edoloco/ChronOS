@@ -75,6 +75,13 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   capturan (no toca los paneles del principal) y la mandan como `dwPen {a, pts:[x,y,p…], er}`; el extendido la repite
   en su lienzo (lo que se ve, con su zoom) con presión real y circulito al flotar (del porte real de la punta:
   `DrawDoc.radiusFor`). La lista de capas se desliza.
+  Panel de herramientas (extendido): `CATALOG` → grilla de 2 o 3 columnas que se desliza; "✎" elige cuáles se ven
+  (`dwTools`); botones agrupados con variantes al mantener: Formas (`shapeVar`) y Pluma (normal / vector distanciado
+  `penOff`: el punto va ~30 mm sobre el dedo, `penTouchOff`). Paneles de herramientas, color y capas cambian de tamaño
+  manteniendo presionado su borde/título (`Glass2.resizable`, prefs `dwToolsP*`, `dwColorP*`, `dwLayersP*`).
+  Hasta 30 capas (`maxLayers`). "Guardar PSD" (`DrawDoc.writePsd`, RLE, con capas) en Descargas › DUAL-Draw.
+  El balde dentro de una forma cerrada cambia su relleno; en la pintura REEMPLAZA el color (se puede repintar).
+  DUAL-Draw también es "app" (`PKG = dd:draw`, ícono `DualDrawActivity.icon`) en la lista de apps y en la mesa.
   Pluma (T_PEN, como FreeHand MX): formas vectoriales `DrawDoc.VShape` en `Layer.shapes` (nodos x,y + 2 manillas), orden
   `vec {a:set|del, l, i, s}` con deshacer (`Step.vb/va`). Toca = punto recto, arrastra = curva, primer punto = cerrar,
   último punto = terminar. Las formas se pasan a pintura solo al combinar capas. Balde: `fill {tol, gap, all}` (mira solo

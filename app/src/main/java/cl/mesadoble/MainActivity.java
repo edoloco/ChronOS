@@ -3536,6 +3536,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     private void openApp(String pkg, String label) {
+        if (DualDrawActivity.PKG.equals(pkg)) { openDualDraw(); return; }
         if (Pals.isPal(pkg)) { hub.launchHere(pkg, label); return; }
         if (solo && !pkg.equals(getPackageName())) { soloLaunch(pkg, label); return; }
         int r = hub.launchHere(pkg, label);
@@ -3566,6 +3567,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     /** Las apps corren en el principal: desde el extendido se le pide que la abra. */
     private void openOnPrincipal(String pkg, String label) {
+        if (DualDrawActivity.PKG.equals(pkg)) { openDualDraw(); return; }   // DUAL-Draw se abre desde cualquiera de los dos
         if (hub.isPrincipal()) { openApp(pkg, label); return; }
         if (!hub.connected()) { Toast.makeText(this, "El principal no está conectado", Toast.LENGTH_SHORT).show(); return; }
         hub.send("launch", "pkg", pkg, "label", label);

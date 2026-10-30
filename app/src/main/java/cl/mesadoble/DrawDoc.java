@@ -42,7 +42,8 @@ final class DrawDoc {
             "Mezcla", "Difuminar", "Valor de trazo"};
 
     /** Cuántas capas caben según el tamaño (unos 100 MB para las capas). */
-    int maxLayers() { return Math.max(3, Math.min(10, (int) (100L * 1024 * 1024 / ((long) W * H * 4)))); }
+    /** Hasta 30 capas (menos si el dibujo es enorme: cada capa ocupa ancho × alto × 4 bytes). */
+    int maxLayers() { return Math.max(3, Math.min(30, (int) (420L * 1024 * 1024 / ((long) W * H * 4)))); }
 
     /** Pinceles que pintan directo en la capa (para poder tomar los colores que tocan). */
     static boolean direct(int t) { return t == MIX || t == SMUDGE; }
@@ -797,25 +798,28 @@ final class DrawDoc {
         if (maxX < 0) return;
         Rect r = new Rect(Math.max(0, minX - 1), Math.max(0, minY - 1), Math.min(W, maxX + 2), Math.min(H, maxY + 2));
         int rw = r.width(), rh = r.height();
-        int[] out = new int[rw * rh];
+        int[] out = new int[rw * rh], ring = new int[rw * rh];
         int col = color | 0xFF000000;
         for (int yy = 0; yy < rh; yy++) for (int xx = 0; xx < rw; xx++) {
             int gx = r.left + xx, gy = r.top + yy;
-            // también el borde de 1 px, para que no quede una línea blanca contra el trazo
-            boolean in = mark[gy * W + gx] || (gx > 0 && mark[gy * W + gx - 1]) || (gx < W - 1 && mark[gy * W + gx + 1])
+            if (mark[gy * W + gx]) { out[yy * rw + xx] = col; continue; }   // la zona: se REEMPLAZA (así se puede volver a pintar de otro color)
+            // el borde de 1 px va por debajo del trazo, para que no quede una línea blanca contra él
+            boolean in = (gx > 0 && mark[gy * W + gx - 1]) || (gx < W - 1 && mark[gy * W + gx + 1])
                     || (gy > 0 && mark[(gy - 1) * W + gx]) || (gy < H - 1 && mark[(gy + 1) * W + gx]);
-            out[yy * rw + xx] = in ? col : 0;
+            ring[yy * rw + xx] = in ? col : 0;
         }
-        Bitmap patch = Bitmap.createBitmap(out, rw, rh, Bitmap.Config.ARGB_8888);
+        Bitmap patch = Bitmap.createBitmap(out, rw, rh, Bitmap.Config.ARGB_8888), edge = Bitmap.createBitmap(ring, rw, rh, Bitmap.Config.ARGB_8888);
         Layer l = layers.get(layer);
         Step st = new Step();
         st.layer = layer; st.r = r;
         st.before = Bitmap.createBitmap(l.bmp, r.left, r.top, rw, rh);
-        // el relleno va DEBAJO de lo que ya está pintado en la capa (las líneas quedan nítidas encima)
+        Canvas lc = new Canvas(l.bmp);
+        lc.drawBitmap(patch, r.left, r.top, null);
         Paint under = new Paint();
         under.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_OVER));
-        new Canvas(l.bmp).drawBitmap(patch, r.left, r.top, under);
+        lc.drawBitmap(edge, r.left, r.top, under);
         patch.recycle();
+        edge.recycle();
         st.after = Bitmap.createBitmap(l.bmp, r.left, r.top, rw, rh);
         push(st);
     }
@@ -1099,6 +1103,110 @@ final class DrawDoc {
     }
 
     /** Imagen plana (fondo blanco) para exportar. */
+    // ---------------- PSD (Photoshop) con capas ----------------
+
+    private static final String[] PSD_BLEND = {"norm", "mul ", "scrn", "over", "lddg"};
+
+    /**
+     * Escribe el dibujo como .psd con sus capas (nombre, visibilidad, opacidad y mezcla); las formas de la pluma van
+     * pintadas en su capa. Compresión RLE (PackBits), que deja chicas las capas casi vacías.
+     */
+    void writePsd(java.io.OutputStream os) throws java.io.IOException {
+        java.io.DataOutputStream o = new java.io.DataOutputStream(new java.io.BufferedOutputStream(os, 1 << 16));
+        o.writeBytes("8BPS"); o.writeShort(1); o.write(new byte[6]);
+        o.writeShort(3); o.writeInt(H); o.writeInt(W); o.writeShort(8); o.writeShort(3);
+        o.writeInt(0);   // modo de color
+        o.writeInt(0);   // recursos
+        // capas: primero se comprimen (los registros llevan el largo de cada canal)
+        int n = layers.size();
+        byte[][][] ch = new byte[n][4][];
+        int[] row = new int[W];
+        for (int li = 0; li < n; li++) {
+            Bitmap b = layerImage(li);
+            for (int c = 0; c < 4; c++) ch[li][c] = rleChannel(b, c, row);
+            b.recycle();
+        }
+        java.io.ByteArrayOutputStream info = new java.io.ByteArrayOutputStream();
+        java.io.DataOutputStream io = new java.io.DataOutputStream(info);
+        io.writeShort(n);
+        for (int li = 0; li < n; li++) {   // de la capa de más abajo a la de más arriba
+            Layer l = layers.get(li);
+            io.writeInt(0); io.writeInt(0); io.writeInt(H); io.writeInt(W);
+            io.writeShort(4);
+            int[] ids = {-1, 0, 1, 2};
+            for (int c = 0; c < 4; c++) { io.writeShort(ids[c]); io.writeInt(2 + ch[li][c].length); }
+            io.writeBytes("8BIM");
+            io.writeBytes(PSD_BLEND[Math.max(0, Math.min(PSD_BLEND.length - 1, l.blend))]);
+            io.writeByte(Math.round(255 * l.alpha));
+            io.writeByte(0);
+            io.writeByte(l.visible ? 0 : 2);
+            io.writeByte(0);
+            byte[] nm = (l.name == null ? "Capa " + (li + 1) : l.name).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            int nl = Math.min(255, nm.length), padded = ((nl + 1 + 3) / 4) * 4;
+            io.writeInt(4 + 4 + padded);
+            io.writeInt(0); io.writeInt(0);
+            io.writeByte(nl); io.write(nm, 0, nl);
+            for (int k = nl + 1; k < padded; k++) io.writeByte(0);
+        }
+        for (int li = 0; li < n; li++) for (int c = 0; c < 4; c++) { io.writeShort(1); io.write(ch[li][c]); }
+        if (info.size() % 2 != 0) io.writeByte(0);
+        o.writeInt(4 + info.size() + 4);
+        o.writeInt(info.size());
+        info.writeTo(o);
+        o.writeInt(0);   // máscara global
+        // imagen combinada (para los programas que no leen capas)
+        Bitmap flat = flatten();
+        byte[][] fc = new byte[3][];
+        for (int c = 0; c < 3; c++) fc[c] = rleChannel(flat, c + 1, row);
+        flat.recycle();
+        o.writeShort(1);
+        for (int c = 0; c < 3; c++) o.write(fc[c], 0, H * 2);   // primero todos los largos de fila…
+        for (int c = 0; c < 3; c++) o.write(fc[c], H * 2, fc[c].length - H * 2);   // …después los datos
+        o.flush();
+        ch = null;
+    }
+
+    /** Un canal (0 = alfa, 1 R, 2 G, 3 B) en PackBits: largos de fila (2 bytes cada uno) y luego los datos. */
+    private byte[] rleChannel(Bitmap b, int c, int[] row) {
+        java.io.ByteArrayOutputStream counts = new java.io.ByteArrayOutputStream(H * 2), data = new java.io.ByteArrayOutputStream();
+        byte[] line = new byte[W];
+        int shift = c == 0 ? 24 : c == 1 ? 16 : c == 2 ? 8 : 0;
+        for (int y = 0; y < H; y++) {
+            b.getPixels(row, 0, W, 0, y, W, 1);
+            for (int x = 0; x < W; x++) {
+                int p = row[x];
+                if (c != 0) {   // getPixels da colores sin premultiplicar: se guardan tal cual
+                    line[x] = (byte) ((p >>> shift) & 0xFF);
+                } else line[x] = (byte) (p >>> 24);
+            }
+            int before = data.size();
+            packBits(line, data);
+            int len = data.size() - before;
+            counts.write(len >> 8); counts.write(len);
+        }
+        byte[] cb = counts.toByteArray(), db = data.toByteArray();
+        byte[] outB = new byte[cb.length + db.length];
+        System.arraycopy(cb, 0, outB, 0, cb.length);
+        System.arraycopy(db, 0, outB, cb.length, db.length);
+        return outB;
+    }
+
+    private static void packBits(byte[] in, java.io.ByteArrayOutputStream out) {
+        int i = 0, n = in.length;
+        while (i < n) {
+            int run = 1;
+            while (i + run < n && run < 128 && in[i + run] == in[i]) run++;
+            if (run >= 3) { out.write(257 - run); out.write(in[i]); i += run; continue; }
+            int start = i, lit = 0;
+            while (i < n && lit < 128) {
+                if (i + 2 < n && in[i] == in[i + 1] && in[i] == in[i + 2]) break;
+                i++; lit++;
+            }
+            out.write(lit - 1);
+            out.write(in, start, lit);
+        }
+    }
+
     Bitmap flatten() {
         end();
         Bitmap out = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);
@@ -1109,15 +1217,33 @@ final class DrawDoc {
     // ---------------- todo el dibujo (para guardar y para el otro teléfono) ----------------
 
     /** Copia del dibujo (en el hilo de la pantalla); se convierte a texto después, en otro hilo. */
-    static final class Snap { final List<Bitmap> bmps = new ArrayList<>(); final List<Boolean> vis = new ArrayList<>(); final List<float[]> ab = new ArrayList<>(); final List<String> vec = new ArrayList<>(); int cur, w, h; }
+    static final class Snap { final List<Bitmap> bmps = new ArrayList<>(); final List<Boolean> vis = new ArrayList<>(); final List<float[]> ab = new ArrayList<>(); final List<String> vec = new ArrayList<>(), names = new ArrayList<>(); int cur, w, h; }
 
     Snap snapshot() {
         Snap s = new Snap();
-        for (Layer l : layers) { s.bmps.add(l.bmp.copy(Bitmap.Config.ARGB_8888, false)); s.vis.add(l.visible); s.ab.add(new float[]{l.alpha, l.blend}); s.vec.add(shapesJson(l)); }
+        for (Layer l : layers) { s.bmps.add(l.bmp.copy(Bitmap.Config.ARGB_8888, false)); s.vis.add(l.visible); s.ab.add(new float[]{l.alpha, l.blend}); s.vec.add(shapesJson(l)); s.names.add(l.name); }
         s.cur = cur;
         s.w = W; s.h = H;
         return s;
     }
+
+    /** Un dibujo armado desde una copia (para guardar el PSD en otro hilo sin tocar el que se está dibujando). */
+    void restore(Snap s) {
+        W = s.w; H = s.h;
+        layers.clear();
+        for (int i = 0; i < s.bmps.size(); i++) {
+            Layer l = new Layer();
+            l.bmp = s.bmps.get(i);
+            l.visible = s.vis.get(i);
+            l.alpha = s.ab.get(i)[0]; l.blend = (int) s.ab.get(i)[1];
+            l.name = i < s.names.size() ? s.names.get(i) : "Capa " + (i + 1);
+            if (i < s.vec.size()) shapesFrom(l, s.vec.get(i));
+            layers.add(l);
+        }
+        cur = Math.max(0, Math.min(layers.size() - 1, s.cur));
+    }
+
+    void dispose() { for (Layer l : layers) if (l.bmp != null) l.bmp.recycle(); layers.clear(); }
 
     static JSONObject toJson(Snap s) {
         JSONObject o = new JSONObject();

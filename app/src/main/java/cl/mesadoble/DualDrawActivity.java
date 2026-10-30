@@ -73,7 +73,12 @@ public class DualDrawActivity extends Activity implements Link.Listener {
 
     // controles que se pintan según el estado
     private final List<Tool> brushBtns = new ArrayList<>(), toolBtns = new ArrayList<>();
-    private Tool symBtn, steadyBtn, flipBtn;
+    private Tool symBtn, steadyBtn, flipBtn, shapeBtn, penBtn;
+    private Glass2 toolPanel;
+    private android.widget.ScrollView toolScroll;
+    private int toolCell, toolCols;
+    private int shapeVar = T_LINE;     // qué forma hace el botón de formas (línea, rectángulo u óvalo)
+    boolean penOff;                    // pluma: "vector distanciado" (el punto aparece unos 30 mm sobre el dedo)
     private Fader sizeF, opacF;
     private View swatch;
     private ColorWheel wheel;
@@ -100,6 +105,63 @@ public class DualDrawActivity extends Activity implements Link.Listener {
     private boolean linked() { return !"solo".equals(mode); }
     private boolean online() { return linked() && hub.connected(); }
 
+    /** DUAL-Draw como "app" en la lista de apps y en la mesa (paquete propio de ChronOS, como los PALS). */
+    static final String PKG = "dd:draw";
+
+    static AppsDialog.App asApp(android.content.Context c) {
+        return new AppsDialog.App(PKG, "DUAL-Draw", new android.graphics.drawable.BitmapDrawable(c.getResources(), icon(192)));
+    }
+
+    /** Ícono: las dos pantallas (una sobre la otra) y la punta de un lápiz asomando. Diseño propio. */
+    static Bitmap icon(int s) {
+        Bitmap b = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(b);
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        float u = s / 100f;
+        p.setShader(new android.graphics.LinearGradient(0, 0, 0, s, 0xFF39414D, 0xFF1D232C, android.graphics.Shader.TileMode.CLAMP));
+        c.drawRoundRect(new RectF(0, 0, s, s), 22 * u, 22 * u, p);
+        p.setShader(null);
+        // las dos pantallas (con su borde de teléfono) y el espacio entre ellas
+        RectF top = new RectF(16 * u, 13 * u, 76 * u, 46 * u), bot = new RectF(16 * u, 51 * u, 76 * u, 84 * u);
+        p.setColor(0xFF0E1116);
+        c.drawRoundRect(new RectF(top.left - 3 * u, top.top - 3 * u, top.right + 3 * u, top.bottom + 3 * u), 7 * u, 7 * u, p);
+        c.drawRoundRect(new RectF(bot.left - 3 * u, bot.top - 3 * u, bot.right + 3 * u, bot.bottom + 3 * u), 7 * u, 7 * u, p);
+        p.setShader(new android.graphics.LinearGradient(0, top.top, 0, top.bottom, 0xFF4FD08F, GREEN, android.graphics.Shader.TileMode.CLAMP));
+        c.drawRoundRect(top, 5 * u, 5 * u, p);
+        p.setShader(new android.graphics.LinearGradient(0, bot.top, 0, bot.bottom, 0xFFFFA14D, ORANGE, android.graphics.Shader.TileMode.CLAMP));
+        c.drawRoundRect(bot, 5 * u, 5 * u, p);
+        p.setShader(null);
+        // un trazo en la pantalla de arriba (la obra) y otro en la de abajo (donde se dibuja)
+        p.setStyle(Paint.Style.STROKE);
+        p.setStrokeCap(Paint.Cap.ROUND);
+        p.setStrokeWidth(3.2f * u);
+        p.setColor(0xE6FFFFFF);
+        android.graphics.Path w = new android.graphics.Path();
+        w.moveTo(24 * u, 38 * u); w.cubicTo(34 * u, 18 * u, 46 * u, 44 * u, 66 * u, 22 * u);
+        c.drawPath(w, p);
+        android.graphics.Path w2 = new android.graphics.Path();
+        w2.moveTo(24 * u, 76 * u); w2.cubicTo(32 * u, 60 * u, 42 * u, 78 * u, 54 * u, 66 * u);
+        c.drawPath(w2, p);
+        p.setStyle(Paint.Style.FILL);
+        // el lápiz asomando por la esquina de abajo, con la punta sobre la pantalla
+        c.save();
+        c.rotate(45, 58 * u, 66 * u);
+        p.setColor(0xFFFFC93C);   // cuerpo
+        c.drawRect(58 * u, 61 * u, 98 * u, 71 * u, p);
+        p.setColor(0xFFE0A82A);
+        c.drawRect(58 * u, 66 * u, 98 * u, 71 * u, p);
+        p.setColor(0xFFF2D3A2);   // madera
+        android.graphics.Path tip = new android.graphics.Path();
+        tip.moveTo(58 * u, 61 * u); tip.lineTo(45 * u, 66 * u); tip.lineTo(58 * u, 71 * u); tip.close();
+        c.drawPath(tip, p);
+        p.setColor(0xFF2B2B2B);   // mina
+        android.graphics.Path lead = new android.graphics.Path();
+        lead.moveTo(49.5f * u, 64.3f * u); lead.lineTo(45 * u, 66 * u); lead.lineTo(49.5f * u, 67.7f * u); lead.close();
+        c.drawPath(lead, p);
+        c.restore();
+        return b;
+    }
+
     static Intent intent(android.content.Context c, String mode) {
         return new Intent(c, DualDrawActivity.class).putExtra("mode", mode).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
     }
@@ -125,6 +187,8 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         fillTol = prefs.getInt("dwFillTol", 40);
         fillGap = prefs.getInt("dwFillGap", 0);
         fillAll = prefs.getBoolean("dwFillAll", false);
+        shapeVar = prefs.getInt("dwShapeVar", T_LINE);
+        penOff = prefs.getBoolean("dwPenOff", false);
         boolean fresh = false;
         if (doc == null) { doc = new DrawDoc(); if (editing()) fresh = !load(); }
 
@@ -296,6 +360,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         top.addView(pill("Nuevo", v -> new Ui.Sheet(this).title("¿Empezar un dibujo nuevo?").message("Se borra el dibujo actual (guarda antes un PNG si lo quieres).")
                 .button("Cancelar", false, null).button("Nuevo", true, this::askSize).show()));
         top.addView(pill("Guardar PNG", v -> exportPng()));
+        top.addView(pill("Guardar PSD", v -> exportPsd()));
         top.addView(pill("✕", v -> closeBoth()));
         FrameLayout.LayoutParams tl = new FrameLayout.LayoutParams(-2, dp(46), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
         tl.topMargin = dp(8);
@@ -318,6 +383,12 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         FrameLayout.LayoutParams ll = new FrameLayout.LayoutParams(dp(214), -2, Gravity.START | Gravity.CENTER_VERTICAL);
         ll.leftMargin = dp(10);
         f.addView(leftPanel, ll);
+        // mantener presionado el panel (su borde o el título) y arrastrar: cambia ancho y alto; la rueda crece con él
+        leftPanel.resizable("dwColorP", false, true, () -> {
+            int hh = leftPanel.getLayoutParams().height;
+            if (hh > 0) { wheel.setFixedHeight(Math.max(dp(60), hh - dp(196))); wheel.requestLayout(); }
+        });
+        leftPanel.applySaved();
 
         // derecha: capas
         rightPanel = new Glass2(viewer, WHITE_PANEL);
@@ -364,12 +435,19 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         FrameLayout.LayoutParams rl = new FrameLayout.LayoutParams(dp(226), -2, Gravity.END | Gravity.CENTER_VERTICAL);
         rl.rightMargin = dp(10);
         f.addView(rightPanel, rl);
+        // capas: ancho y alto a gusto (la lista se desliza dentro)
+        final android.widget.ScrollView ls = layerScroll;
+        rightPanel.resizable("dwLayersP", true, true, () -> {
+            if (rightPanel.getLayoutParams().height > 0 && ((LinearLayout.LayoutParams) ls.getLayoutParams()).weight == 0)
+                ls.setLayoutParams(new LinearLayout.LayoutParams(-1, 0, 1));
+        });
+        rightPanel.applySaved();
         return f;
     }
 
     private void applyPanels() {
-        if (leftPanel != null) leftPanel.animate().alpha(panelsOn ? 1 : 0).translationX(panelsOn ? 0 : -dp(240)).setDuration(260).start();
-        if (rightPanel != null) rightPanel.animate().alpha(panelsOn ? 1 : 0).translationX(panelsOn ? 0 : dp(240)).setDuration(260).start();
+        if (leftPanel != null) leftPanel.animate().alpha(panelsOn ? 1 : 0).translationX(panelsOn ? 0 : -(leftPanel.getWidth() + dp(30))).setDuration(260).start();
+        if (rightPanel != null) rightPanel.animate().alpha(panelsOn ? 1 : 0).translationX(panelsOn ? 0 : rightPanel.getWidth() + dp(30)).setDuration(260).start();
     }
 
     private View palette() {
@@ -435,40 +513,32 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         boolean compact = "solo".equals(mode);
         int cell = compact ? 32 : 38;
 
+        // herramientas: grilla de 2 o 3 columnas que se desliza; se eligen con "Editar" y el panel cambia de tamaño
+        // manteniendo presionado su borde o su título
+        toolCell = cell;
         Glass2 left = new Glass2(null, WHITE_PANEL);
+        toolPanel = left;
         left.setPadding(dp(6), dp(6), dp(6), dp(6));
-        String[][] br = {{"✎", "Lápiz"}, {"✒", "Tinta"}, {"✐", "Valor"}, {"▮", "Rotulador"}, {"🖌", "Pincel"}, {"◐", "Mezcla"},
-                {"☝", "Difuminar"}, {"☁", "Aerógrafo"}, {"▒", "Tiza"}, {"∕", "Caligrafía"}, {"⌫", "Borrador"}, {"◌", "Borr. suave"}};
-        int[] brIds = {DrawDoc.PENCIL, DrawDoc.INK, DrawDoc.VALUE, DrawDoc.MARKER, DrawDoc.BRUSH, DrawDoc.MIX, DrawDoc.SMUDGE, DrawDoc.AIR,
-                DrawDoc.CHALK, DrawDoc.CALLI, DrawDoc.ERASER, DrawDoc.SOFT_ERASER};
-        left.addView(grid(br, cell, 4, (i, b) -> { b.tag = brIds[i]; brushBtns.add(b); b.setOnClickListener(v -> { set("brush", brIds[i]); set("tool", T_DRAW); }); }));
-        View sep = new View(this);
-        sep.setBackgroundColor(0x262FA866);
-        // ancho fijo (4 botones): con "todo el ancho" el panel se estiraba hasta tapar el lienzo
-        LinearLayout.LayoutParams sepl = new LinearLayout.LayoutParams(dp((cell + 4) * 4 - 8), dp(1));
-        sepl.setMargins(dp(4), dp(2), dp(4), dp(4));
-        left.addView(sep, sepl);
-        String[][] tl = {{"╱", "Línea"}, {"▭", "Rectángulo"}, {"◯", "Óvalo"}, {"◧", "Balde"}, {"⊙", "Gotero"}, {"✦", "Varita"},
-                {"➰", "Lazo"}, {"⤧", "Transformar"}, {"＋", "Importar imagen"}, {"⇹", "Simetría"}, {"〰", "Trazo estable"}, {"⤢", "Ver todo"},
-                {"⇋", "Voltear vista"}, {"✑", "Pluma"}};
-        left.addView(grid(tl, cell, 4, (i, b) -> {
-            switch (i) {
-                case 0: case 1: case 2: case 3: case 4: case 5: case 6: case 7: {
-                    final int t = new int[]{T_LINE, T_RECT, T_OVAL, T_FILL, T_PICK, T_WAND, T_LASSO, T_XFORM}[i];
-                    b.tag = t;
-                    toolBtns.add(b);
-                    b.setOnClickListener(v -> set("tool", tool == t ? T_DRAW : t));
-                    break;
-                }
-                case 8: b.setOnClickListener(v -> pickImage()); break;
-                case 9: symBtn = b; b.setOnClickListener(v -> set("sym", !sym)); break;
-                case 10: steadyBtn = b; b.setOnClickListener(v -> set("steady", !steady)); break;
-                case 11: b.setOnClickListener(v -> editor.fit()); break;
-                case 13: b.tag = T_PEN; toolBtns.add(b); b.setOnClickListener(v -> set("tool", tool == T_PEN ? T_DRAW : T_PEN)); break;
-                case 12: flipBtn = b; b.setOnClickListener(v -> { editor.flip = !editor.flip; if (viewer != null) viewer.flip = editor.flip; flipBtn.on = editor.flip; flipBtn.invalidate(); editor.invalidate(); if (viewer != null) viewer.invalidate(); }); break;
-            }
-        }));
-        row.addView(left, new LinearLayout.LayoutParams(-2, -1));
+        LinearLayout head = new LinearLayout(this);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        TextView ht = label("Herram.", 11);
+        head.addView(ht, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView edit = label("✎", 15);
+        edit.setPadding(dp(8), dp(2), dp(6), dp(2));
+        edit.setOnClickListener(v -> editTools());
+        head.addView(edit);
+        left.addView(head);
+        toolScroll = new android.widget.ScrollView(this);
+        toolScroll.setVerticalScrollBarEnabled(false);
+        toolScroll.setFadingEdgeLength(dp(18));
+        toolScroll.setVerticalFadingEdgeEnabled(true);
+        left.addView(toolScroll, new LinearLayout.LayoutParams(-2, 0, 1));
+        fillTools();
+        left.resizable("dwToolsP", false, false, () -> { int c = toolColsFor(left.getWidth()); if (c != toolCols) { toolCols = c; fillTools(); } });
+        LinearLayout.LayoutParams leftLp = new LinearLayout.LayoutParams(-2, -1);
+        leftLp.gravity = Gravity.CENTER_VERTICAL;
+        row.addView(left, leftLp);
+        left.applySaved();
 
         // el lienzo, con la barra de "Valor de trazo" a un costado y la barra de selección arriba
         FrameLayout boardBox = new FrameLayout(this);
@@ -528,6 +598,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         penBar.addView(penFillL);
         penBar.addView(pill("🎨→Contorno", v -> editor.penEdit(sh -> { sh.stroke = color; sh.width = size; sh.strokeOn = true; })));
         penBar.addView(pill("🎨→Relleno", v -> editor.penEdit(sh -> { sh.fill = color; sh.fillOn = true; })));
+        penBar.addView(pill("◠ Curvar punto", v -> editor.penSmooth()));
         penBar.addView(pill("Borrar punto", v -> editor.penDelNode()));
         penBar.addView(pill("Borrar forma", v -> editor.penDelShape()));
         boardBox.addView(scrollBar(penBar), new FrameLayout.LayoutParams(sbl));
@@ -580,6 +651,142 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         }
         row.addView(right, new LinearLayout.LayoutParams(-2, -1));
         return row;
+    }
+
+    // ---------------- panel de herramientas ----------------
+
+    /** Todas las herramientas: {id, símbolo, nombre}. "Editar" elige cuáles se ven en el panel. */
+    private static final String[][] CATALOG = {
+            {"b" + DrawDoc.PENCIL, "✎", "Lápiz"}, {"b" + DrawDoc.INK, "✒", "Tinta"}, {"b" + DrawDoc.VALUE, "✐", "Valor"},
+            {"b" + DrawDoc.MARKER, "▮", "Rotulador"}, {"b" + DrawDoc.BRUSH, "🖌", "Pincel"}, {"b" + DrawDoc.MIX, "◐", "Mezcla"},
+            {"b" + DrawDoc.SMUDGE, "☝", "Difuminar"}, {"b" + DrawDoc.AIR, "☁", "Aerógrafo"}, {"b" + DrawDoc.CHALK, "▒", "Tiza"},
+            {"b" + DrawDoc.CALLI, "∕", "Caligrafía"}, {"b" + DrawDoc.ERASER, "⌫", "Borrador"}, {"b" + DrawDoc.SOFT_ERASER, "◌", "Borr. suave"},
+            {"shape", "▭", "Formas (mantén para elegir)"}, {"pen", "✑", "Pluma (mantén para elegir)"}, {"fill", "◧", "Balde"},
+            {"pick", "⊙", "Gotero"}, {"wand", "✦", "Varita"}, {"lasso", "➰", "Lazo"}, {"xform", "⤧", "Transformar"},
+            {"import", "＋", "Importar imagen"}, {"sym", "⇹", "Simetría"}, {"steady", "〰", "Trazo estable"}, {"fit", "⤢", "Ver todo"},
+            {"flip", "⇋", "Voltear vista"}};
+
+    private java.util.Set<String> shownTools() {
+        String saved = prefs.getString("dwTools", "");
+        java.util.Set<String> s = new java.util.LinkedHashSet<>();
+        if (saved.isEmpty()) { for (String[] t : CATALOG) s.add(t[0]); return s; }
+        java.util.Collections.addAll(s, saved.split(","));
+        return s;
+    }
+
+    private int toolColsFor(int widthPx) {
+        int one = dp(toolCell + 4);
+        return widthPx > 0 && widthPx - dp(12) < one * 3 - dp(6) ? 2 : 3;
+    }
+
+    private static String shapeGlyph(int t) { return t == T_RECT ? "▭" : t == T_OVAL ? "◯" : "╱"; }
+
+    /** Arma la grilla con las herramientas elegidas (2 o 3 columnas; lo que no cabe se ve deslizando). */
+    private void fillTools() {
+        if (toolScroll == null) return;
+        if (toolCols == 0) {
+            int sw = prefs.getInt("dwToolsPW", 0);
+            toolCols = sw > 0 ? toolColsFor(sw) : 3;
+        }
+        brushBtns.clear();
+        toolBtns.clear();
+        symBtn = steadyBtn = flipBtn = shapeBtn = penBtn = null;
+        java.util.Set<String> on = shownTools();
+        List<String[]> items = new ArrayList<>();
+        for (String[] t : CATALOG) if (on.contains(t[0])) items.add(t);
+        String[][] arr = items.toArray(new String[0][]);
+        toolScroll.removeAllViews();
+        toolScroll.addView(grid(arr, toolCell, toolCols, (i, b) -> wireTool(arr[i][0], b)));
+        refreshTools();
+    }
+
+    private void wireTool(String id, Tool b) {
+        if (id.startsWith("b")) {
+            int br = Integer.parseInt(id.substring(1));
+            b.tag = br; brushBtns.add(b);
+            b.setOnClickListener(v -> { set("brush", br); set("tool", T_DRAW); });
+            return;
+        }
+        switch (id) {
+            case "shape":   // formas agrupadas: tocar usa la elegida; mantener elige otra
+                shapeBtn = b; b.glyph = shapeGlyph(shapeVar); b.tag = shapeVar; toolBtns.add(b);
+                b.setOnClickListener(v -> set("tool", tool == shapeVar ? T_DRAW : shapeVar));
+                b.setOnLongClickListener(v -> {
+                    new Ui.Sheet(this).title("Formas")
+                            .option(0, "╱  Línea", null, () -> pickShape(T_LINE))
+                            .option(0, "▭  Rectángulo", null, () -> pickShape(T_RECT))
+                            .option(0, "◯  Óvalo", null, () -> pickShape(T_OVAL)).show();
+                    return true;
+                });
+                break;
+            case "pen":
+                penBtn = b; b.glyph = penOff ? "⌖" : "✑"; b.tag = T_PEN; toolBtns.add(b);
+                b.setOnClickListener(v -> set("tool", tool == T_PEN ? T_DRAW : T_PEN));
+                b.setOnLongClickListener(v -> {
+                    new Ui.Sheet(this).title("Pluma")
+                            .option(0, -1, "✑  Pluma", "Toca: punto recto · arrastra: curva · toca el 1er punto: cerrar", !penOff, () -> pickPen(false))
+                            .option(0, -1, "⌖  Vector distanciado", "El punto aparece unos 3 cm sobre el dedo; al soltar queda ahí. "
+                                    + "Apoya el dedo sobre un punto para moverlo", penOff, () -> pickPen(true)).show();
+                    return true;
+                });
+                break;
+            case "fill": case "pick": case "wand": case "lasso": case "xform": {
+                final int t = "fill".equals(id) ? T_FILL : "pick".equals(id) ? T_PICK : "wand".equals(id) ? T_WAND : "lasso".equals(id) ? T_LASSO : T_XFORM;
+                b.tag = t; toolBtns.add(b);
+                b.setOnClickListener(v -> set("tool", tool == t ? T_DRAW : t));
+                break;
+            }
+            case "import": b.setOnClickListener(v -> pickImage()); break;
+            case "sym": symBtn = b; b.setOnClickListener(v -> set("sym", !sym)); break;
+            case "steady": steadyBtn = b; b.setOnClickListener(v -> set("steady", !steady)); break;
+            case "fit": b.setOnClickListener(v -> editor.fit()); break;
+            case "flip": flipBtn = b; b.setOnClickListener(v -> { editor.flip = !editor.flip; if (viewer != null) viewer.flip = editor.flip; flipBtn.on = editor.flip; flipBtn.invalidate(); editor.invalidate(); if (viewer != null) viewer.invalidate(); }); break;
+        }
+    }
+
+    private void pickShape(int t) {
+        shapeVar = t;
+        prefs.edit().putInt("dwShapeVar", t).apply();
+        if (shapeBtn != null) { shapeBtn.glyph = shapeGlyph(t); shapeBtn.tag = t; shapeBtn.invalidate(); }
+        set("tool", t);
+    }
+
+    private void pickPen(boolean off) {
+        penOff = off;
+        prefs.edit().putBoolean("dwPenOff", off).apply();
+        if (penBtn != null) { penBtn.glyph = off ? "⌖" : "✑"; penBtn.invalidate(); }
+        set("tool", T_PEN);
+    }
+
+    /** Editar: qué herramientas aparecen en el panel. */
+    private void editTools() {
+        java.util.Set<String> on = shownTools();
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        List<android.widget.CheckBox> cbs = new ArrayList<>();
+        for (String[] t : CATALOG) {
+            android.widget.CheckBox cb = new android.widget.CheckBox(this);
+            cb.setText(t[1] + "   " + t[2].replace(" (mantén para elegir)", ""));
+            cb.setTextSize(15);
+            cb.setChecked(on.contains(t[0]));
+            cb.setTag(t[0]);
+            cbs.add(cb);
+            box.addView(cb);
+        }
+        android.widget.ScrollView sv = new android.widget.ScrollView(this);
+        sv.addView(box);
+        LinearLayout wrap = new LinearLayout(this);
+        wrap.addView(sv, new LinearLayout.LayoutParams(-1, Math.min(dp(300), getResources().getDisplayMetrics().heightPixels / 2)));
+        new Ui.Sheet(this).title("Herramientas del panel").message("Marca las que quieres ver. Mantén presionado el borde del panel para cambiar su tamaño.")
+                .view(wrap)
+                .button("Todas", false, () -> { prefs.edit().remove("dwTools").apply(); fillTools(); })
+                .button("Listo", true, () -> {
+                    StringBuilder sb = new StringBuilder();
+                    for (android.widget.CheckBox cb : cbs) if (cb.isChecked()) sb.append(sb.length() > 0 ? "," : "").append(cb.getTag());
+                    if (sb.length() == 0) { Toast.makeText(this, "Deja al menos una herramienta", Toast.LENGTH_SHORT).show(); return; }
+                    prefs.edit().putString("dwTools", sb.toString()).apply();
+                    fillTools();
+                }).show();
     }
 
     private interface Each { void on(int i, Tool b); }
@@ -1070,6 +1277,38 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         }, "dualdraw-png").start();
     }
 
+    /** Guarda con capas (.psd: lo abren Photoshop, Krita, GIMP, Photopea, Procreate…). */
+    private void exportPsd() {
+        if (doc.stroking) { Toast.makeText(this, "Termina el trazo y vuelve a intentar", Toast.LENGTH_SHORT).show(); return; }
+        Toast.makeText(this, "Guardando con capas…", Toast.LENGTH_SHORT).show();
+        final DrawDoc.Snap snap = doc.snapshot();
+        new Thread(() -> {
+            String name = "DUAL-Draw " + new java.text.SimpleDateFormat("yyyy-MM-dd HH.mm.ss", java.util.Locale.ROOT).format(new java.util.Date()) + ".psd";
+            boolean ok = false;
+            String where = "Descargas › DUAL-Draw";
+            try {
+                DrawDoc copy = new DrawDoc();
+                copy.restore(snap);
+                if (android.os.Build.VERSION.SDK_INT >= 29) {
+                    ContentValues cv = new ContentValues();
+                    cv.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
+                    cv.put(MediaStore.MediaColumns.MIME_TYPE, "image/vnd.adobe.photoshop");
+                    cv.put("relative_path", "Download/DUAL-Draw");
+                    Uri u = getContentResolver().insert(Uri.parse("content://media/external/downloads"), cv);
+                    if (u != null) try (OutputStream out = getContentResolver().openOutputStream(u)) { if (out != null) { copy.writePsd(out); ok = true; } }
+                } else {
+                    File dir = new File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "DUAL-Draw");
+                    //noinspection ResultOfMethodCallIgnored
+                    dir.mkdirs();
+                    try (FileOutputStream out = new FileOutputStream(new File(dir, name))) { copy.writePsd(out); ok = true; }
+                }
+                copy.dispose();
+            } catch (Throwable ignored) { }
+            final boolean fok = ok;
+            h.post(() -> Toast.makeText(this, fok ? "Guardado con capas en " + where : "No se pudo guardar el PSD", Toast.LENGTH_LONG).show());
+        }, "dualdraw-psd").start();
+    }
+
     private void pickImage() {
         if (doc.layers.size() >= doc.maxLayers()) { Toast.makeText(this, "Máximo " + doc.maxLayers() + " capas", Toast.LENGTH_SHORT).show(); return; }
         try { startActivityForResult(new Intent(Intent.ACTION_GET_CONTENT).setType("image/*"), 51); }
@@ -1110,6 +1349,66 @@ public class DualDrawActivity extends Activity implements Link.Listener {
             setWillNotDraw(false);
             setClickable(true);
         }
+
+        // ---- cambiar el tamaño: mantener presionado el borde o el título del panel y arrastrar
+        String sizeKey;
+        boolean anchorEnd, vCenter, resizing;
+        Runnable onResized;
+        private float rx, ry;
+        private int w0, h0;
+        private final Runnable startResize = () -> {
+            resizing = true;
+            performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+            Toast.makeText(getContext(), "Arrastra para cambiar el tamaño del panel", Toast.LENGTH_SHORT).show();
+            invalidate();
+        };
+
+        void resizable(String key, boolean anchorEnd, boolean vCenter, Runnable onResized) {
+            sizeKey = key; this.anchorEnd = anchorEnd; this.vCenter = vCenter; this.onResized = onResized;
+        }
+
+        void applySaved() {
+            if (sizeKey == null) return;
+            int w = prefs.getInt(sizeKey + "W", 0), hh = prefs.getInt(sizeKey + "H", 0);
+            android.view.ViewGroup.LayoutParams lp = getLayoutParams();
+            if (lp == null) return;
+            if (w > 0) lp.width = w;
+            if (hh > 0) lp.height = hh;
+            setLayoutParams(lp);
+            if (onResized != null && (w > 0 || hh > 0)) post(onResized);
+        }
+
+        @Override public boolean onTouchEvent(android.view.MotionEvent e) {
+            if (sizeKey == null) return super.onTouchEvent(e);
+            switch (e.getActionMasked()) {
+                case android.view.MotionEvent.ACTION_DOWN:
+                    rx = e.getRawX(); ry = e.getRawY(); w0 = getWidth(); h0 = getHeight();
+                    postDelayed(startResize, 550);
+                    return true;
+                case android.view.MotionEvent.ACTION_MOVE: {
+                    float dx = e.getRawX() - rx, dy = e.getRawY() - ry;
+                    if (!resizing) { if (Math.hypot(dx, dy) > 12 * dp) removeCallbacks(startResize); return true; }
+                    android.view.ViewGroup.LayoutParams lp = getLayoutParams();
+                    View parent = (View) getParent();
+                    int maxW = parent == null ? 4000 : parent.getWidth() * 2 / 3, maxH = parent == null ? 4000 : parent.getHeight();
+                    lp.width = Math.max(dp(90), Math.min(maxW, Math.round(w0 + (anchorEnd ? -dx : dx))));
+                    lp.height = Math.max(dp(120), Math.min(maxH, Math.round(h0 + (vCenter ? 2 * dy : dy))));
+                    setLayoutParams(lp);
+                    if (onResized != null) onResized.run();
+                    return true;
+                }
+                case android.view.MotionEvent.ACTION_UP: case android.view.MotionEvent.ACTION_CANCEL:
+                    removeCallbacks(startResize);
+                    if (resizing) {
+                        resizing = false;
+                        prefs.edit().putInt(sizeKey + "W", getLayoutParams().width).putInt(sizeKey + "H", getLayoutParams().height).apply();
+                        invalidate();
+                    }
+                    return true;
+            }
+            return true;
+        }
+
         @Override protected void onDraw(Canvas c) {
             RectF r = new RectF(0, 0, getWidth(), getHeight());
             float rad = 20 * dp;
@@ -1128,12 +1427,20 @@ public class DualDrawActivity extends Activity implements Link.Listener {
             });
             // color del panel: blanco (con verde) o naranjo, sobre el vidrio
             c.drawRoundRect(r, rad, rad, tintP);
+            if (resizing) {   // cambiando el tamaño: borde naranjo y esquina para arrastrar
+                Paint e = new Paint(Paint.ANTI_ALIAS_FLAG);
+                e.setStyle(Paint.Style.STROKE);
+                e.setStrokeWidth(3 * dp);
+                e.setColor(ORANGE);
+                c.drawRoundRect(new RectF(1.5f * dp, 1.5f * dp, getWidth() - 1.5f * dp, getHeight() - 1.5f * dp), rad, rad, e);
+            }
         }
     }
 
     /** Botón de herramienta: símbolo grande y nombre chico; encendido = naranja. */
     private final class Tool extends View {
-        final String glyph, name;
+        String glyph;
+        final String name;
         final boolean small;
         boolean on, orange;
         int tag = -1;
@@ -1471,6 +1778,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
             }
             c.restore();
             if (edit) drawPenRing(c);
+            if (edit && offShow) drawOffCursor(c);
             if (edit) {   // tamaño del dibujo y versión, abajo a la izquierda
                 if (info == null) { info = new Paint(Paint.ANTI_ALIAS_FLAG); info.setColor(0xCCFFFFFF); info.setTextSize(11 * dp); info.setShadowLayer(2 * dp, 0, dp / 2, 0x99000000); }
                 c.drawText(doc.W + " × " + doc.H + " px · " + Updater.installedVersion(getContext()), 8 * dp, getHeight() - 8 * dp, info);
@@ -1872,6 +2180,175 @@ public class DualDrawActivity extends Activity implements Link.Listener {
             return true;
         }
 
+        /** Forma cerrada de la capa actual que tiene adentro el punto (la de más arriba), o -1. */
+        private int shapeInside(float x, float y) {
+            List<DrawDoc.VShape> sh = doc.layers.get(doc.cur).shapes;
+            for (int i = sh.size() - 1; i >= 0; i--) {
+                DrawDoc.VShape v = sh.get(i);
+                if (!v.closed) continue;
+                android.graphics.Path p = v.path();
+                RectF b = new RectF();
+                p.computeBounds(b, true);
+                if (!b.contains(x, y)) continue;
+                android.graphics.Region rg = new android.graphics.Region();
+                rg.setPath(p, new android.graphics.Region((int) b.left - 1, (int) b.top - 1, (int) b.right + 1, (int) b.bottom + 1));
+                if (rg.contains((int) x, (int) y)) return i;
+            }
+            return -1;
+        }
+
+        /** Punto elegido: curvo ↔ recto (las manillas salen según los puntos vecinos). */
+        void penSmooth() {
+            if (pv == null || pvSel < 0 || pvSel >= pv.nodes()) { Toast.makeText(DualDrawActivity.this, "Toca un punto para elegirlo", Toast.LENGTH_SHORT).show(); return; }
+            float[] P = pv.pts;
+            int n = pv.nodes(), k = pvSel * 6;
+            boolean curved = Math.hypot(P[k + 4] - P[k], P[k + 5] - P[k + 1]) > 1 || Math.hypot(P[k + 2] - P[k], P[k + 3] - P[k + 1]) > 1;
+            if (curved) { P[k + 2] = P[k + 4] = P[k]; P[k + 3] = P[k + 5] = P[k + 1]; }
+            else {
+                int pi = pvSel > 0 ? pvSel - 1 : pv.closed ? n - 1 : pvSel, ni = pvSel < n - 1 ? pvSel + 1 : pv.closed ? 0 : pvSel;
+                float tx = (P[ni * 6] - P[pi * 6]) / 4f, ty = (P[ni * 6 + 1] - P[pi * 6 + 1]) / 4f;
+                if (Math.hypot(tx, ty) < 1) { tx = 30; ty = 0; }
+                P[k + 2] = P[k] - tx; P[k + 3] = P[k + 1] - ty; P[k + 4] = P[k] + tx; P[k + 5] = P[k + 1] + ty;
+            }
+            penSave();
+        }
+
+        // ---- vector distanciado: el punto aparece unos 30 mm sobre el dedo; al soltar queda ahí
+        private boolean offShow;
+        private float offSX, offSY, offFX, offFY;
+        private final Paint offP = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        private float offPx() { return 30f / 25.4f * getResources().getDisplayMetrics().ydpi; }
+
+        private boolean penTouchOff(MotionEvent e) {
+            int act = e.getActionMasked();
+            if (act == MotionEvent.ACTION_POINTER_DOWN) {
+                if (pDrag != 0) { pv = pBak; pvI = pBakI; pvSel = pBakSel; pDrag = 0; }
+                offShow = false;
+                return false;
+            }
+            if (two) return false;
+            float fx = e.getX(), fy = e.getY(), sx = fx, sy = fy - offPx();
+            float cx = toX(sx), cy = toY(sy), x = toX(fx), y = toY(fy), hr = 16 * dp / zoom;
+            switch (act) {
+                case MotionEvent.ACTION_DOWN: {
+                    two = false;
+                    pMoved = false;
+                    pdx = fx; pdy = fy;
+                    pBak = pv == null ? null : pv.copy();
+                    pBakI = pvI; pBakSel = pvSel;
+                    pDrag = 0;
+                    if (pv != null && pvL != doc.cur) penFinish();
+                    if (pv != null) {   // el dedo SOBRE un punto (o manilla): espera a que muevas el dedo para reubicarlo
+                        int a = nodeAt(x, y, hr);
+                        if (a >= 0) { pDrag = 12; pNode = a; pvSel = a; }
+                        else {
+                            int[] hd = handleAt(x, y, hr);
+                            if (hd != null) {
+                                pDrag = hd[1] == 0 ? 13 : 14; pNode = hd[0]; pvSel = hd[0];
+                                int k = pNode * 6;
+                                float ix = pv.pts[k + 2] - pv.pts[k], iy = pv.pts[k + 3] - pv.pts[k + 1], qx = pv.pts[k + 4] - pv.pts[k], qy = pv.pts[k + 5] - pv.pts[k + 1];
+                                float li = (float) Math.hypot(ix, iy), lo = (float) Math.hypot(qx, qy);
+                                pSmooth = li > 1 && lo > 1 && (ix * qx + iy * qy) / (li * lo) < -0.97f;
+                            }
+                        }
+                    }
+                    if (pDrag == 0) pDrag = 11;   // poner un punto donde quede el circulito al soltar
+                    offShow = true; offSX = sx; offSY = sy; offFX = fx; offFY = fy;
+                    invalidate();
+                    return true;
+                }
+                case MotionEvent.ACTION_MOVE: {
+                    if (pDrag == 0) return true;
+                    offSX = sx; offSY = sy; offFX = fx; offFY = fy;
+                    if (!pMoved && Math.hypot(fx - pdx, fy - pdy) > 6 * dp) pMoved = true;
+                    if (pMoved && pv != null && pDrag >= 12) {
+                        float[] P = pv.pts;
+                        int k = pNode * 6;
+                        if (pDrag == 12) {
+                            float dx = cx - P[k], dy = cy - P[k + 1];
+                            for (int j = 0; j < 6; j += 2) { P[k + j] += dx; P[k + j + 1] += dy; }
+                        } else {
+                            int me = pDrag == 13 ? 2 : 4, other = pDrag == 13 ? 4 : 2;
+                            P[k + me] = cx; P[k + me + 1] = cy;
+                            if (pSmooth) {
+                                float ol = (float) Math.hypot(P[k + other] - P[k], P[k + other + 1] - P[k + 1]), ml = Math.max(0.01f, (float) Math.hypot(cx - P[k], cy - P[k + 1]));
+                                P[k + other] = P[k] - (cx - P[k]) / ml * ol; P[k + other + 1] = P[k + 1] - (cy - P[k + 1]) / ml * ol;
+                            }
+                        }
+                    }
+                    invalidate();
+                    return true;
+                }
+                case MotionEvent.ACTION_UP: {
+                    offShow = false;
+                    int d = pDrag;
+                    pDrag = 0;
+                    if (d == 11) placeAt(cx, cy, hr);
+                    else if (d >= 12 && pv != null) {
+                        if (pMoved) penSave();
+                        else if (d == 12 && !pv.closed && pNode == 0 && pv.nodes() >= 2) { pv.closed = true; penSave(); }   // tocar el 1er punto: cerrar
+                        else if (d == 12 && !pv.closed && pNode == pv.nodes() - 1 && pv.nodes() >= 2) penFinish();   // el último: terminar
+                    }
+                    refreshTools();
+                    invalidate();
+                    return true;
+                }
+                case MotionEvent.ACTION_CANCEL:
+                    if (pDrag != 0) { pv = pBak; pvI = pBakI; pvSel = pBakSel; pDrag = 0; }
+                    offShow = false;
+                    invalidate();
+                    return true;
+            }
+            return true;
+        }
+
+        /** Vector distanciado: el punto nuevo va donde quedó el circulito. */
+        private void placeAt(float x, float y, float hr) {
+            if (pv != null && !pv.closed) {
+                int a = nodeAt(x, y, hr);
+                if (a == 0 && pv.nodes() >= 2) { pv.closed = true; pvSel = 0; penSave(); return; }
+                if (a >= 0 && a == pv.nodes() - 1 && pv.nodes() >= 2) { penFinish(); return; }
+                pv.addNode(x, y);
+                pvSel = pv.nodes() - 1;
+                penSave();
+                return;
+            }
+            int si = shapeAt(x, y, hr);
+            if (si >= 0) {
+                if (pv != null) penFinish();
+                pv = doc.layers.get(doc.cur).shapes.get(si).copy();
+                pvL = doc.cur; pvI = si; pvSel = -1;
+                return;
+            }
+            if (pv != null) penFinish();
+            pv = new DrawDoc.VShape();
+            pv.stroke = color; pv.fill = color; pv.width = size; pv.strokeOn = true; pv.fillOn = false;
+            pv.addNode(x, y);
+            pvL = doc.cur; pvI = -1; pvSel = 0;
+        }
+
+        private void drawOffCursor(Canvas c) {
+            offP.setStyle(Paint.Style.STROKE);
+            offP.setStrokeWidth(1.2f * dp);
+            offP.setColor(0x9933A0FF);
+            offP.setPathEffect(new android.graphics.DashPathEffect(new float[]{4 * dp, 4 * dp}, 0));
+            c.drawLine(offFX, offFY, offSX, offSY + 9 * dp, offP);
+            offP.setPathEffect(null);
+            offP.setStrokeWidth(2.5f * dp);
+            offP.setColor(0xCC000000);
+            c.drawCircle(offSX, offSY, 9 * dp, offP);
+            offP.setStrokeWidth(1.4f * dp);
+            offP.setColor(0xFF33A0FF);
+            c.drawCircle(offSX, offSY, 9 * dp, offP);
+            c.drawLine(offSX - 14 * dp, offSY, offSX - 4 * dp, offSY, offP);
+            c.drawLine(offSX + 4 * dp, offSY, offSX + 14 * dp, offSY, offP);
+            c.drawLine(offSX, offSY - 14 * dp, offSX, offSY - 4 * dp, offP);
+            c.drawLine(offSX, offSY + 4 * dp, offSX, offSY + 14 * dp, offP);
+            offP.setStyle(Paint.Style.FILL);
+            c.drawCircle(offSX, offSY, 1.8f * dp, offP);
+        }
+
         /** La forma en edición, con sus puntos (cuadrados) y manillas (círculos). */
         private void drawPen(Canvas c) {
             c.save();
@@ -1921,7 +2398,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         @Override public boolean onTouchEvent(MotionEvent e) {
             if (!edit) return true;
             if (tool == T_XFORM) return xformTouch(e);
-            if (tool == T_PEN && penTouch(e)) return true;
+            if (tool == T_PEN && (penOff ? penTouchOff(e) : penTouch(e))) return true;
             switch (e.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN: {
                     two = false;
@@ -2003,6 +2480,14 @@ public class DualDrawActivity extends Activity implements Link.Listener {
                     }
                     if (tool == T_FILL) {
                         if (DrawDoc.eraser(brush)) set("brush", DrawDoc.INK);
+                        // dentro de una forma de la pluma (cerrada): se cambia el color de su relleno (siempre se puede)
+                        int vi = shapeInside(x, y);
+                        if (vi >= 0) {
+                            DrawDoc.VShape vs = doc.layers.get(doc.cur).shapes.get(vi).copy();
+                            vs.fill = color; vs.fillOn = true;
+                            op(opj("vec", "a", "set", "l", doc.cur, "i", vi, "s", vs.toJson()));
+                            return true;
+                        }
                         op(opj("fill", "x", (int) x, "y", (int) y, "c", color, "l", doc.cur, "tol", fillTol, "gap", fillGap, "all", fillAll));
                         return true;
                     }
