@@ -431,6 +431,8 @@ public class Hub implements Link.Listener {
         }
         if ("ytChatPref".equals(t)) { prefs.edit().putBoolean("ytChat", m.optBoolean("on", true)).apply(); LiveChat.refresh(); return; }
         // separar al alejarlos: ajuste compartido; la calibración del imán se hace en el principal
+        // el extendido cerró ChronOS: el principal ofrece pasar a teléfono normal
+        if ("extClosed".equals(t)) { if (isPrincipal()) main.post(() -> PhoneMode.offer(app, this, "El extendido cerró ChronOS")); return; }
         if ("sepPref".equals(t)) {
             prefs.edit().putInt("sepMode", m.optInt("m")).putBoolean("sepAsk", m.optBoolean("ask", true)).apply();
             Proximity.update(app, this);

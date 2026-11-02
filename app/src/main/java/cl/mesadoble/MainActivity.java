@@ -289,7 +289,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         main.postDelayed(offlineTick, 600);
         resumed = true;
         main.postDelayed(this::reportHome, 1200);
-        if (side == 1) PhoneMode.exit(this, hub);   // se volvió a ChronOS: deja el modo teléfono normal
+        PhoneMode.exit(this, hub);   // se volvió a ChronOS: deja el modo teléfono normal (principal, o extendido que se cerró)
         // Xiaomi a veces detiene el lector de notificaciones: se le pide a Android que lo vuelva a conectar
         if (side == 1 && NotifService.instance == null && NotifService.enabled(this))
             try { android.service.notification.NotificationListenerService.requestRebind(new android.content.ComponentName(this, NotifService.class)); } catch (Exception ignored) { }
@@ -827,7 +827,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         startPanel.addView(head);
         // orden: lo más usado arriba
         SquareButton[] order = {byKind(SquareButton.APPS), settingsBtn, byKind(SquareButton.DESKS), statusBtn,
-                byKind(SquareButton.TOOLS), phoneSettingsBtn(), phoneBtn(), soloBtn(), powerBtn(), null, null, aboutBtn()};   // Archivos está en Herramientas
+                byKind(SquareButton.TOOLS), phoneSettingsBtn(), phoneBtn(), soloBtn(), powerBtn(), side != 1 && !solo ? exitBtn() : null, null, aboutBtn()};   // Archivos está en Herramientas
         LinearLayout row = null;
         for (int i = 0; i < order.length; i++) {
             if (i % 4 == 0) {
@@ -862,6 +862,39 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     private SquareButton filesBtn, aboutSq;
 
     private SquareButton powerSq;
+
+    private SquareButton exitSq;
+
+    /** Menú inicio (en el extendido): cerrar ChronOS y volver a usar este teléfono como uno normal. */
+    private SquareButton exitBtn() {
+        if (exitSq == null) {
+            exitSq = new SquareButton(this, SquareButton.EXIT, "Cerrar ChronOS", false, night);
+            exitSq.setOnClickListener(v -> { showStart(false); closeExtended(); });
+            squares.add(exitSq);
+        }
+        if (exitSq.getParent() instanceof android.view.ViewGroup) ((android.view.ViewGroup) exitSq.getParent()).removeView(exitSq);
+        return exitSq;
+    }
+
+    /**
+     * Cerrar ChronOS en el extendido: deja de ser la pantalla de inicio, se corta la conexión y queda como teléfono
+     * normal (su inicio y su teclado de siempre). El principal pregunta si pasa también a teléfono normal.
+     * Al volver a abrir ChronOS todo regresa.
+     */
+    private void closeExtended() {
+        new Ui.Sheet(this).title("¿Cerrar ChronOS en este teléfono?")
+                .message("El extendido vuelve a ser un teléfono normal y se desconecta del principal. Para volver, abre ChronOS de nuevo.")
+                .button("Cancelar", false, null)
+                .button("Cerrar", true, () -> {
+                    if (hub.connected()) hub.send("extClosed");
+                    PhoneMode.enter(this, hub);
+                    main.postDelayed(() -> {
+                        stopService(new Intent(this, LinkService.class));
+                        finishAffinity();
+                        main.postDelayed(() -> android.os.Process.killProcess(android.os.Process.myPid()), 600);
+                    }, 900);
+                }).show();
+    }
 
     /** Menú inicio: centro de apagado. */
     private SquareButton powerBtn() {

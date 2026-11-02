@@ -83,7 +83,7 @@ final class PhoneMode {
         boolean imePending = false;
         if (MesaAccess.instance != null) MesaAccess.instance.restorePrevious();
         if (Hub.imeSelected(a)) imePending = true;
-        if (hub.connected()) hub.send("boostMsg", "msg", "El principal volvió al modo teléfono normal");
+        if (hub.connected()) hub.send("boostMsg", "msg", hub.isPrincipal() ? "El principal volvió al modo teléfono normal" : "El extendido cerró ChronOS");
         // la pantalla de inicio del teléfono (no la de ChronOS)
         Intent home = homeOfPhone(a);
         try { a.startActivity(home); } catch (Exception e) { a.moveTaskToBack(true); }
