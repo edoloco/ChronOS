@@ -650,8 +650,9 @@ public class DeskView extends View {
         else if (s == 0) { top = 84 * dp; bottom = 16 * dp; }
         else { top = 16 * dp; bottom = 156 * dp; right = 64 * dp; }
         squareApps(W);
+        // la celda es siempre la de una app normal (antes tomaba la app más grande de TODOS los escritorios y separaba
+        // de más a todas); una app grande ocupa más celdas
         float cellW = Math.min(W * 0.46f, APP_STD * dp);
-        for (Item it : items) if (Item.APP.equals(it.kind)) cellW = Math.max(cellW, appPx(it, W));
         // media celda de app: una app ocupa 2 × 2 y los widgets se acomodan con más precisión (en horizontal caben
         // pocas filas: con celdas enteras los widgets llenaban la pantalla y lo demás terminaba encimado)
         float step = (cellW + gap) / 2f;
