@@ -1789,15 +1789,11 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                     desk.arrangeAll(); Toast.makeText(this, "Escritorio ordenado", Toast.LENGTH_SHORT).show(); })
                 .option(Ui.GRID, "Ordenar solo las apps", "En cuadrícula, por nombre y del mismo tamaño", () -> {
                     desk.arrangeApps(); Toast.makeText(this, "Apps ordenadas", Toast.LENGTH_SHORT).show(); })
-                .option(Ui.ALIGN, "Alinear a los puntos", "Cada elemento se ajusta a la cuadrícula, sin cambiar el orden", () -> {
+                .option(Ui.ALIGN, "Acomodar en la tabla", "Cada elemento a su lugar de la tabla invisible, sin cambiar el orden", () -> {
                     desk.alignAll(); Toast.makeText(this, "Elementos alineados", Toast.LENGTH_SHORT).show(); })
                 .option(Ui.CHECK, "Enderezar todo", "Quita el giro de todos los elementos", () -> {
                     desk.straightenAll(); Toast.makeText(this, "Todo derecho", Toast.LENGTH_SHORT).show(); })
-                .option(Ui.PIN, -1, "Imán: " + (snap ? "sí" : "no"), "Al soltar un elemento, se ajusta solo a los puntos", snap, () -> {
-                    prefs.edit().putBoolean("snapGrid", !snap).apply();
-                    desk.setSnap(!snap);
-                    hub.send("snap", "on", !snap);
-                })
+
                 .option(Ui.AUTO, -1, "Orden automático de apps: " + (auto ? "sí" : "no"), "Las apps se acomodan solas al agregarlas o soltarlas", auto,
                         () -> setAppsMode(lock, !auto, false))
                 .option(lock ? Ui.LOCK : Ui.UNLOCK, -1, "Apps bloqueadas: " + (lock ? "sí" : "no"),
