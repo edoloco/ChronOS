@@ -103,6 +103,7 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   El botón de modo del teclado ignora toques justo después de escribir (`KeyboardView.lastTouchAt`).
 - Fondo de pantalla (`Wall`): una imagen repartida entre las dos pantallas (`wallImg`/`wallOff`); el teclado la usa
   si `kbWall`. Mesa en cuadrícula por defecto (`snapGrid`), lo nuevo va al primer lugar libre (`DeskView.freeSpot`).
+  Apps: grilla invisible de celdas iguales (`appGrid`, `snapApp`, `freeAppCell`, `alignApps`): nunca una encima de otra.
   App instalada → "¿ponerla en la mesa?" (principal/extendida, último escritorio, o uno nuevo). Íconos de la mesa se
   renuevan cuando la app se actualiza (`refreshDeskIcons`, `ic_<pkg>`). Lista de apps: "Elegir varias".
 - DUAL-Draw: un toque de menos de 45 ms sin moverse no dibuja (toque fantasma); al levantar el dedo se descarta el

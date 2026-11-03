@@ -291,6 +291,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         resumed = true;
         main.postDelayed(this::reportHome, 1200);
         main.postDelayed(() -> refreshDeskIcons(false), 2500);   // íconos de apps actualizadas
+        main.postDelayed(() -> desk.alignApps(), 1200);   // grilla invisible: las apps de esta pantalla, cada una en su celda
         String pend = prefs.getString("pendingDesk", "");   // se instaló una app mientras ChronOS no estaba a la vista
         if (!pend.isEmpty()) { prefs.edit().remove("pendingDesk").apply(); main.postDelayed(() -> askDeskShortcut(pend), 700); }
         PhoneMode.exit(this, hub);   // se volvió a ChronOS: deja el modo teléfono normal (principal, o extendido que se cerró)
@@ -2261,9 +2262,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         Item it = new Item();
         it.kind = Item.APP; it.pkg = pkg; it.title = label; it.w = sized(0.24);
         it.setImage(png);
-        double[] p = desk.freeSpot(it.w, 0, screen, last);
+        double[] p = desk.freeAppCell(screen, last);
         Runnable put = () -> {
-            double[] q = desk.freeSpot(it.w, 0, screen, it.page);
+            double[] q = desk.freeAppCell(screen, it.page);
             if (q == null) q = desk.spotOn(it.w, screen);
             it.x = q[0]; it.y = q[1];
             addItem(it);
@@ -2710,7 +2711,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
         ic.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, bos);
         it.setImage(android.util.Base64.encodeToString(bos.toByteArray(), android.util.Base64.NO_WRAP));
-        double[] pos = desk.spotOn(it.w, deskSide());
+        double[] pos = desk.freeAppCell(deskSide(), desk.page());
+        if (pos == null) pos = desk.spotOn(it.w, deskSide());
         it.x = pos[0]; it.y = pos[1];
         it.page = desk.page();
         addItem(it);
@@ -3690,7 +3692,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 Item it = new Item();
                 it.kind = Item.APP; it.pkg = pkg; it.title = label; it.w = sized(0.24);
                 it.setImage(iconPng);
-                double[] p = desk.spotOn(it.w, screen);
+                double[] p = desk.freeAppCell(screen, desk.page());   // app nueva: a la primera celda libre de la grilla
+                if (p == null) p = desk.spotOn(it.w, screen);
                 it.x = p[0]; it.y = p[1];
                 it.page = desk.page();
                 addItem(it);

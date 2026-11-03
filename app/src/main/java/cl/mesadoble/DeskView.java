@@ -641,8 +641,86 @@ public class DeskView extends View {
 
     private float gridStep() { return 22 * dp; }   // la misma separación que los puntos de la mesa
 
+    // ---------------- grilla invisible de apps: todas a la misma distancia, nunca una encima de otra ----------------
+
+    /** {margen izq., arriba, paso de celda, columnas, filas} de la grilla de apps en una pantalla. */
+    private float[] appGrid(int s) {
+        int W = getWidth(), H = getHeight();
+        float gap = 10 * dp, mx = 14 * dp, top, bottom, right = 0;
+        if (vertical) { top = s == 0 ? 86 * dp : 16 * dp; bottom = s == 0 ? 30 * dp : 150 * dp; }
+        else if (s == 0) { top = 84 * dp; bottom = 16 * dp; }
+        else { top = 16 * dp; bottom = 156 * dp; right = 64 * dp; }
+        squareApps(W);
+        float cellW = Math.min(W * 0.46f, APP_STD * dp);
+        for (Item it : items) if (Item.APP.equals(it.kind)) cellW = Math.max(cellW, appPx(it, W));
+        float step = cellW + gap;
+        int cols = Math.max(1, (int) ((W - 2 * mx - right + gap) / step)), rows = Math.max(1, (int) ((H - top - bottom + gap) / step));
+        return new float[]{mx, top, step, cols, rows};
+    }
+
+    private boolean cellTaken(Item self, int s, int pg, int col, int row, float[] g) {
+        int W = getWidth(), H = getHeight();
+        for (Item o : items) {
+            if (o == self || !Item.APP.equals(o.kind) || (o.page != pg && !o.pin) || screenOf(o) != s) continue;
+            double lx = (vertical ? o.x : o.x - s) * W, ly = (vertical ? o.y - s : o.y) * H;
+            int oc = (int) Math.round((lx - g[0]) / g[2]), orow = (int) Math.round((ly - g[1]) / g[2]);
+            if (oc == col && orow == row) return true;
+        }
+        return false;
+    }
+
+    /** Lleva la app a la celda libre más cercana de la grilla (si la suya está ocupada, a la vecina libre). */
+    public void snapApp(Item it) {
+        int W = getWidth(), H = getHeight();
+        if (W == 0 || H == 0) return;
+        int s = screenOf(it);
+        float[] g = appGrid(s);
+        int cols = (int) g[3], rows = (int) g[4];
+        double lx = (vertical ? it.x : it.x - s) * W, ly = (vertical ? it.y - s : it.y) * H;
+        int c0 = (int) Math.max(0, Math.min(cols - 1, Math.round((lx - g[0]) / g[2]))), r0 = (int) Math.max(0, Math.min(rows - 1, Math.round((ly - g[1]) / g[2])));
+        int bc = c0, br = r0;
+        double best = Double.MAX_VALUE;
+        for (int r = 0; r < rows; r++) for (int c = 0; c < cols; c++) {
+            if (cellTaken(it, s, it.page, c, r, g)) continue;
+            double d = Math.hypot(c - c0, r - r0);
+            if (d < best) { best = d; bc = c; br = r; }
+        }
+        double nx = (g[0] + bc * g[2]) / W, ny = (g[1] + br * g[2]) / H;
+        it.x = vertical ? nx : s + nx;
+        it.y = vertical ? s + ny : ny;
+        it.rot = 0;
+    }
+
+    /** Ordena en la grilla las apps de ESTA pantalla (escritorio actual) que hayan quedado fuera de su celda. */
+    public void alignApps() {
+        if (getWidth() == 0) return;
+        List<Item> mine = new ArrayList<>();
+        for (Item it : items) if (Item.APP.equals(it.kind) && it.page == page && screenOf(it) == side && it != dragging) mine.add(it);
+        // primero las que ya están más cerca de una celda, para que conserven su lugar
+        for (Item it : mine) {
+            double ox = it.x, oy = it.y;
+            snapApp(it);
+            if (Math.abs(ox - it.x) > 1e-4 || Math.abs(oy - it.y) > 1e-4) { it.touch(); if (host != null) host.onItemChanged(it); }
+        }
+        invalidate();
+    }
+
+    /** Primera celda libre de la grilla de apps (para una app nueva), o null si la pantalla está llena. */
+    public double[] freeAppCell(int s, int pg) {
+        int W = getWidth(), H = getHeight();
+        if (W == 0 || H == 0) return null;
+        float[] g = appGrid(s);
+        for (int r = 0; r < (int) g[4]; r++) for (int c = 0; c < (int) g[3]; c++)
+            if (!cellTaken(null, s, pg, c, r, g)) {
+                double nx = (g[0] + c * g[2]) / W, ny = (g[1] + r * g[2]) / H;
+                return new double[]{vertical ? nx : s + nx, vertical ? s + ny : ny};
+            }
+        return null;
+    }
+
     /** Ajusta la esquina del elemento al punto más cercano de la cuadrícula, en su pantalla. */
     private void snapItem(Item it) {
+        if (Item.APP.equals(it.kind)) { snapApp(it); return; }
         int W = getWidth(), H = getHeight();
         if (W == 0 || H == 0) return;
         int s = screenOf(it);
@@ -1876,7 +1954,7 @@ public class DeskView extends View {
                 b = clamp(b, -0.6 * szB, 1 - 0.4 * szB);
                 it.x = vertical ? b : a;
                 it.y = vertical ? a : b;
-                if (snapGrid) snapItem(it);
+                if (snapGrid || Item.APP.equals(it.kind)) snapItem(it);   // las apps siempre van a su celda
                 commit(it);
                 if (host != null) host.onDragEnd(it);
                 if (autoApps && Item.APP.equals(it.kind)) arrangeApps();
