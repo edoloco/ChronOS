@@ -616,9 +616,10 @@ public class DeskView extends View {
             for (Item it : apps) {
                 it.page = -(it.page + 1000);
                 double[] f = null;
+                int[] sp = span(it, g);
                 outer:
-                for (int r = 0; r < (int) g[4]; r++) for (int c = 0; c < (int) g[3]; c++)
-                    if (!blockTaken(it, s, it.page, c, r, 1, 1, g)) { place(it, s, c, r, g); f = new double[]{1}; break outer; }
+                for (int r = 0; r + sp[1] <= (int) g[4]; r++) for (int c = 0; c + sp[0] <= (int) g[3]; c++)
+                    if (!blockTaken(it, s, it.page, c, r, sp[0], sp[1], g)) { place(it, s, c, r, g); f = new double[]{1}; break outer; }
                 if (f == null) snapApp(it);
             }
             for (int i = 0; i < apps.size(); i++) {
@@ -651,8 +652,10 @@ public class DeskView extends View {
         squareApps(W);
         float cellW = Math.min(W * 0.46f, APP_STD * dp);
         for (Item it : items) if (Item.APP.equals(it.kind)) cellW = Math.max(cellW, appPx(it, W));
-        float step = cellW + gap;
-        int cols = Math.max(1, (int) ((W - 2 * mx - right + gap) / step)), rows = Math.max(1, (int) ((H - top - bottom + gap) / step));
+        // media celda de app: una app ocupa 2 × 2 y los widgets se acomodan con más precisión (en horizontal caben
+        // pocas filas: con celdas enteras los widgets llenaban la pantalla y lo demás terminaba encimado)
+        float step = (cellW + gap) / 2f;
+        int cols = Math.max(2, (int) ((W - 2 * mx - right + gap) / step)), rows = Math.max(2, (int) ((H - top - bottom + gap) / step));
         return new float[]{mx, top, step, cols, rows};
     }
 
@@ -660,8 +663,8 @@ public class DeskView extends View {
     private int[] span(Item it, float[] g) {
         int W = getWidth();
         float wpx = (float) (it.w * W), hpx = it.hPx > 0 ? it.hPx : wpx, gap = 10 * dp;
-        return new int[]{Math.max(1, Math.min((int) g[3], (int) Math.ceil((wpx + gap * 0.5f) / g[2]))),
-                Math.max(1, Math.min((int) g[4], (int) Math.ceil((hpx + gap * 0.5f) / g[2])))};
+        return new int[]{Math.max(1, Math.min((int) g[3], (int) Math.ceil((wpx + gap * 0.5f) / g[2] - 0.05f))),
+                Math.max(1, Math.min((int) g[4], (int) Math.ceil((hpx + gap * 0.5f) / g[2] - 0.05f)))};
     }
 
     /** Celda donde empieza el elemento {col, fila}. */
@@ -706,8 +709,23 @@ public class DeskView extends View {
             double d = Math.hypot(c - sc0, r - sr0);
             if (d < best) { best = d; bc = c; br = r; }
         }
-        if (bc < 0) { bc = sc0; br = sr0; }   // pantalla llena: queda en la celda más cercana
-        place(it, s, bc, br, g);
+        if (bc >= 0) { place(it, s, bc, br, g); return; }
+        // no cabe en este escritorio: pasa al siguiente que tenga lugar (o a uno nuevo). Nunca queda encimado.
+        for (int np = it.page + 1; np < 50; np++) {
+            int[] fr = firstFreeCell(sp, s, np, g);
+            if (fr == null) continue;
+            it.page = np;
+            if (np >= pages) { pages = np + 1; if (host != null) host.onPageChange(page, pages); }
+            place(it, s, fr[0], fr[1], g);
+            return;
+        }
+        place(it, s, sc0, sr0, g);
+    }
+
+    private int[] firstFreeCell(int[] sp, int s, int pg, float[] g) {
+        for (int r = 0; r + sp[1] <= (int) g[4]; r++) for (int c = 0; c + sp[0] <= (int) g[3]; c++)
+            if (!blockTaken(null, s, pg, c, r, sp[0], sp[1], g)) return new int[]{c, r};
+        return null;
     }
 
     /** Primer lugar libre para un bloque de este ancho/alto (normalizado), o null si no cabe. */
