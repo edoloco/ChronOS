@@ -106,7 +106,7 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
 - Fondo de pantalla (`Wall`): una imagen repartida entre las dos pantallas (`wallImg`/`wallOff`); el teclado la usa
   si `kbWall`. Mesa en cuadrícula por defecto (`snapGrid`), lo nuevo va al primer lugar libre (`DeskView.freeSpot`).
   La mesa es una TABLA invisible (`appGrid`): celdas iguales; cada elemento ocupa un bloque (`span`) que empieza en una
-  celda; nunca se superponen (`blockTaken`). Soltar/redimensionar → `snapItem` al lugar libre más cercano; al volver a la
+  casilla (media celda de app: app chica 2×2, grande 3×3, en cualquier casilla); nunca se superponen (`blockTaken`). Soltar/redimensionar → `snapItem` al lugar libre más cercano; al volver a la
   mesa `alignApps` acomoda lo de esa pantalla. Sin opción "Imán": siempre activa.
   App instalada → "¿ponerla en la mesa?" (principal/extendida, último escritorio, o uno nuevo). Íconos de la mesa se
   renuevan cuando la app se actualiza (`refreshDeskIcons`, `ic_<pkg>`). Lista de apps: "Elegir varias".

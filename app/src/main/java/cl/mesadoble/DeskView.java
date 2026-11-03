@@ -701,7 +701,7 @@ public class DeskView extends View {
         float[] g = appGrid(s);
         int cols = (int) g[3], rows = (int) g[4];
         int[] sp = span(it, g), c0 = cellOf(it, s, g);
-        int st = Item.APP.equals(it.kind) ? 2 : 1;   // las apps solo en celdas de app: todas a la misma distancia
+        int st = 1;   // cualquier casilla: app chica = 2 × 2 casillas, app grande = 3 × 3, siempre alineado y sin encimarse
         int maxC = Math.max(0, cols - sp[0]), maxR = Math.max(0, rows - sp[1]);
         int sc0 = Math.max(0, Math.min(maxC, c0[0])), sr0 = Math.max(0, Math.min(maxR, c0[1]));
         int bc = -1, br = -1;
@@ -1995,8 +1995,7 @@ public class DeskView extends View {
                 snapItem(it);   // la mesa es una tabla: todo va a su lugar
                 commit(it);
                 if (host != null) host.onDragEnd(it);
-                if (autoApps && Item.APP.equals(it.kind)) arrangeApps();
-                return true;
+                return true;   // queda en la casilla elegida (ordenar por nombre es aparte, en el menú)
             }
         }
         return true;
