@@ -244,6 +244,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (getIntent().getBooleanExtra("forceLink", false)) { getIntent().removeExtra("forceLink"); main.post(() -> { hub.forceLink(); Toast.makeText(this, "Buscando al extendido…", Toast.LENGTH_SHORT).show(); }); }
         if (getIntent().getBooleanExtra("phoneNow", false)) { getIntent().removeExtra("phoneNow"); main.post(this::goNormal); }
         if (getIntent().getBooleanExtra("sepPerm", false)) { getIntent().removeExtra("sepPerm"); askBtPerms(); }
+        if (getIntent().getBooleanExtra("wallPick", false)) { getIntent().removeExtra("wallPick"); main.post(this::pickWall); }
     }
 
     @Override protected void onNewIntent(Intent intent) {
@@ -263,6 +264,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (intent.getBooleanExtra("forceLink", false)) { intent.removeExtra("forceLink"); main.post(() -> { hub.forceLink(); Toast.makeText(this, "Buscando al extendido…", Toast.LENGTH_SHORT).show(); }); }
         if (intent.getBooleanExtra("phoneNow", false)) { intent.removeExtra("phoneNow"); main.post(this::goNormal); }
         if (intent.getBooleanExtra("sepPerm", false)) { intent.removeExtra("sepPerm"); askBtPerms(); }
+        if (intent.getBooleanExtra("wallPick", false)) { intent.removeExtra("wallPick"); main.post(this::pickWall); }
         handleShare(intent);
     }
 
@@ -2184,9 +2186,14 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         boolean kb = Wall.onKeyboard(this);
         Ui.Sheet sh = new Ui.Sheet(this).title("Fondo de pantalla")
                 .message("La imagen se reparte: la parte de arriba en el principal y la de abajo en el extendido.");
-        sh.option(Ui.IMAGE, "Elegir una imagen", "De la galería de este teléfono", () -> {
-            try { startActivityForResult(new Intent(Intent.ACTION_GET_CONTENT).setType("image/*"), REQ_WALL); }
-            catch (Exception e) { Toast.makeText(this, "No hay galería para elegir", Toast.LENGTH_SHORT).show(); }
+        sh.option(Ui.IMAGE, "Elegir una imagen", "De la galería del principal", () -> {
+            // ChronOS administra el principal: sus fotos están allá, así que la galería se abre en el principal
+            if (!hub.isPrincipal() && hub.connected()) {
+                hub.send("wallPick");
+                Toast.makeText(this, "Elige la imagen en el principal", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            pickWall();
         });
         if (Wall.file(this).exists()) sh.option(Ui.CROSS, "Quitar el fondo", "Vuelve el color de la mesa", () -> {
             Wall.clear(this);
@@ -2199,6 +2206,11 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             wallMenu();
         });
         sh.button("Volver", false, this::appearanceMenu).show();
+    }
+
+    private void pickWall() {
+        try { startActivityForResult(new Intent(Intent.ACTION_GET_CONTENT).setType("image/*"), REQ_WALL); }
+        catch (Exception e) { Toast.makeText(this, "No hay galería para elegir", Toast.LENGTH_SHORT).show(); }
     }
 
     private void setWallFrom(Uri u) {

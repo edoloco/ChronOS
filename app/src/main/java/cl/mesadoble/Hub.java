@@ -444,6 +444,12 @@ public class Hub implements Link.Listener {
         if ("ytChatPref".equals(t)) { prefs.edit().putBoolean("ytChat", m.optBoolean("on", true)).apply(); LiveChat.refresh(); return; }
         // separar al alejarlos: ajuste compartido; la calibración del imán se hace en el principal
         // el extendido cerró ChronOS: el principal ofrece pasar a teléfono normal
+        // fondo de pantalla elegido desde el extendido: la galería se abre en el principal (ahí están las fotos)
+        if ("wallPick".equals(t)) {
+            if (isPrincipal()) main.post(() -> startOwn(new Intent(app, MainActivity.class).putExtra("wallPick", true)
+                    .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), () -> false, 94, "Fondo de pantalla", "Toca para elegir la imagen"));
+            return;
+        }
         if ("extClosed".equals(t)) { if (isPrincipal()) main.post(() -> PhoneMode.offer(app, this, "El extendido cerró ChronOS")); return; }
         if ("sepPref".equals(t)) {
             prefs.edit().putInt("sepMode", m.optInt("m")).putBoolean("sepAsk", m.optBoolean("ask", true)).apply();

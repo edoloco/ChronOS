@@ -1386,6 +1386,7 @@ public class DualDrawActivity extends Activity implements Link.Listener {
             case "dw": h.post(() -> { doc.apply(m); changed(); }); break;
             case "dwFull": h.post(() -> { doc.fromJson(m); changed(); }); break;
             case "dwLoad": if (editing()) h.post(() -> applyLoaded(m)); break;
+            case "dwPick": if (!editing()) h.post(this::pickImageHere); break;
             case "dwHello": if (editing()) h.post(() -> { sendFull(); sendState(); }); break;
             case "dwReq": if (editing()) h.post(() -> op(m)); break;
             case "dwSet": if (editing()) h.post(() -> applySet(m.optString("k"), m.opt("v"))); break;
@@ -1545,7 +1546,17 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         }, "dualdraw-psd").start();
     }
 
+    /** Las imágenes están en el principal: si se pide desde el extendido, la galería se abre allá. */
     private void pickImage() {
+        if (editing() && online()) {
+            hub.send("dwPick");
+            Toast.makeText(this, "Elige la imagen en el principal", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        pickImageHere();
+    }
+
+    private void pickImageHere() {
         if (doc.layers.size() >= doc.maxLayers()) { Toast.makeText(this, "Máximo " + doc.maxLayers() + " capas", Toast.LENGTH_SHORT).show(); return; }
         try { startActivityForResult(new Intent(Intent.ACTION_GET_CONTENT).setType("image/*"), 51); }
         catch (Exception e) { Toast.makeText(this, "No hay galería para elegir", Toast.LENGTH_SHORT).show(); }
