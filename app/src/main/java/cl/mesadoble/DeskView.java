@@ -618,7 +618,7 @@ public class DeskView extends View {
                 double[] f = null;
                 int[] sp = span(it, g);
                 outer:
-                for (int r = 0; r + sp[1] <= (int) g[4]; r++) for (int c = 0; c + sp[0] <= (int) g[3]; c++)
+                for (int r = 0; r + sp[1] <= (int) g[4]; r += 2) for (int c = 0; c + sp[0] <= (int) g[3]; c += 2)
                     if (!blockTaken(it, s, it.page, c, r, sp[0], sp[1], g)) { place(it, s, c, r, g); f = new double[]{1}; break outer; }
                 if (f == null) snapApp(it);
             }
@@ -700,11 +700,12 @@ public class DeskView extends View {
         float[] g = appGrid(s);
         int cols = (int) g[3], rows = (int) g[4];
         int[] sp = span(it, g), c0 = cellOf(it, s, g);
+        int st = Item.APP.equals(it.kind) ? 2 : 1;   // las apps solo en celdas de app: todas a la misma distancia
         int maxC = Math.max(0, cols - sp[0]), maxR = Math.max(0, rows - sp[1]);
         int sc0 = Math.max(0, Math.min(maxC, c0[0])), sr0 = Math.max(0, Math.min(maxR, c0[1]));
         int bc = -1, br = -1;
         double best = Double.MAX_VALUE;
-        for (int r = 0; r <= maxR; r++) for (int c = 0; c <= maxC; c++) {
+        for (int r = 0; r <= maxR; r += st) for (int c = 0; c <= maxC; c += st) {
             if (blockTaken(it, s, it.page, c, r, sp[0], sp[1], g)) continue;
             double d = Math.hypot(c - sc0, r - sr0);
             if (d < best) { best = d; bc = c; br = r; }
@@ -712,7 +713,7 @@ public class DeskView extends View {
         if (bc >= 0) { place(it, s, bc, br, g); return; }
         // no cabe en este escritorio: pasa al siguiente que tenga lugar (o a uno nuevo). Nunca queda encimado.
         for (int np = it.page + 1; np < 50; np++) {
-            int[] fr = firstFreeCell(sp, s, np, g);
+            int[] fr = firstFreeCell(sp, s, np, g, st);
             if (fr == null) continue;
             it.page = np;
             if (np >= pages) { pages = np + 1; if (host != null) host.onPageChange(page, pages); }
@@ -722,21 +723,23 @@ public class DeskView extends View {
         place(it, s, sc0, sr0, g);
     }
 
-    private int[] firstFreeCell(int[] sp, int s, int pg, float[] g) {
-        for (int r = 0; r + sp[1] <= (int) g[4]; r++) for (int c = 0; c + sp[0] <= (int) g[3]; c++)
+    private int[] firstFreeCell(int[] sp, int s, int pg, float[] g, int st) {
+        for (int r = 0; r + sp[1] <= (int) g[4]; r += st) for (int c = 0; c + sp[0] <= (int) g[3]; c += st)
             if (!blockTaken(null, s, pg, c, r, sp[0], sp[1], g)) return new int[]{c, r};
         return null;
     }
 
     /** Primer lugar libre para un bloque de este ancho/alto (normalizado), o null si no cabe. */
-    private double[] firstFree(double w, float hPx, int s, int pg) {
+    private double[] firstFree(double w, float hPx, int s, int pg) { return firstFree(w, hPx, s, pg, 1); }
+
+    private double[] firstFree(double w, float hPx, int s, int pg, int st) {
         int W = getWidth(), H = getHeight();
         if (W == 0 || H == 0) return null;
         float[] g = appGrid(s);
         Item probe = new Item();
         probe.w = w; probe.hPx = hPx;
         int[] sp = span(probe, g);
-        for (int r = 0; r + sp[1] <= (int) g[4]; r++) for (int c = 0; c + sp[0] <= (int) g[3]; c++)
+        for (int r = 0; r + sp[1] <= (int) g[4]; r += st) for (int c = 0; c + sp[0] <= (int) g[3]; c += st)
             if (!blockTaken(null, s, pg, c, r, sp[0], sp[1], g)) {
                 double nx = (g[0] + c * g[2]) / W, ny = (g[1] + r * g[2]) / H;
                 return new double[]{vertical ? nx : s + nx, vertical ? s + ny : ny};
@@ -767,7 +770,7 @@ public class DeskView extends View {
     /** Primera celda libre de la grilla de apps (para una app nueva), o null si la pantalla está llena. */
     public double[] freeAppCell(int s, int pg) {
         int W = getWidth();
-        return firstFree(W == 0 ? 0.2 : Math.min(W * 0.46f, APP_STD * dp) / W, 0, s, pg);
+        return firstFree(W == 0 ? 0.2 : Math.min(W * 0.46f, APP_STD * dp) / W, 0, s, pg, 2);
     }
 
     /** Cualquier elemento va a la tabla (las apps y todo lo demás). */
@@ -817,8 +820,9 @@ public class DeskView extends View {
             for (Item it : list) {
                 it.page = -(it.page + 1000);
                 int[] sp = span(it, g);
+                int st = Item.APP.equals(it.kind) ? 2 : 1;
                 boolean done = false;
-                for (int r = 0; r + sp[1] <= (int) g[4] && !done; r++) for (int c = 0; c + sp[0] <= (int) g[3] && !done; c++)
+                for (int r = 0; r + sp[1] <= (int) g[4] && !done; r += st) for (int c = 0; c + sp[0] <= (int) g[3] && !done; c += st)
                     if (!blockTaken(it, s, it.page, c, r, sp[0], sp[1], g)) { place(it, s, c, r, g); done = true; }
                 if (!done) snapApp(it);
                 it.touch();
