@@ -2126,8 +2126,52 @@ public class DualDrawActivity extends Activity implements Link.Listener {
                 smX += (x - smX) * 0.28f; smY += (y - smY) * 0.28f;
                 x = smX; y = smY;
             }
-            doc.point(x, y, p);
-            pend.add(x); pend.add(y); pend.add(p);
+            // los 2 últimos puntos esperan un instante: al levantar el dedo rápido la pantalla suele reportar un
+            // "rebote" que dibujaba una colita (como una J); si se dobla de golpe, se descarta
+            hold.add(new float[]{x, y, p});
+            while (hold.size() > 2) emit(hold.remove(0));
+        }
+
+        private final List<float[]> hold = new ArrayList<>();
+        private float cx0, cy0, cx1, cy1;
+        private int emitted;
+
+        private void emit(float[] q) {
+            doc.point(q[0], q[1], q[2]);
+            pend.add(q[0]); pend.add(q[1]); pend.add(q[2]);
+            cx0 = cx1; cy0 = cy1; cx1 = q[0]; cy1 = q[1];
+            emitted++;
+        }
+
+        /** Fin del trazo: los puntos en espera van si siguen la dirección del trazo; la colita del final, no. */
+        private void finishTail() {
+            float dx = cx1 - cx0, dy = cy1 - cy0, dl = (float) Math.hypot(dx, dy);
+            for (float[] q : hold) {
+                float vx = q[0] - cx1, vy = q[1] - cy1, vl = (float) Math.hypot(vx, vy);
+                if (emitted >= 2 && dl > 0.5f && vl > 0.5f && (dx * vx + dy * vy) / (dl * vl) < 0.55f) break;   // gira más de ~57°: rebote
+                emit(q);
+            }
+            hold.clear();
+        }
+
+        // ---- inicio del trazo: un toque brevísimo y sin movimiento (toque "fantasma") no deja un punto
+        private boolean armed;
+        private float aX, aY, aP;
+        private long aT;
+        private final Runnable armTimeout = () -> { if (armed) startStroke(); };
+
+        private void startStroke() {
+            if (!armed) return;
+            armed = false;
+            drawing = true;
+            doc.begin(doc.cur, brush, size, color, opacity, sym);
+            pend.clear();
+            hold.clear();
+            emitted = 0;
+            pendStart = true;
+            smX = toX(aX); smY = toY(aY);
+            addPt(aX, aY, aP);
+            postDelayed(flush, 40);
         }
 
         private final Runnable flush = this::flush;
@@ -2157,6 +2201,9 @@ public class DualDrawActivity extends Activity implements Link.Listener {
         }
 
         private void cancelStroke() {
+            armed = false;
+            removeCallbacks(armTimeout);
+            hold.clear();
             if (!drawing) return;
             drawing = false;
             pend.clear();
@@ -2778,14 +2825,12 @@ public class DualDrawActivity extends Activity implements Link.Listener {
                     two = false;
                     float x = toX(e.getX()), y = toY(e.getY());
                     if (tool == T_DRAW) {
-                        drawing = true;
-                        doc.begin(doc.cur, brush, size, color, opacity, sym);
-                        pend.clear();
-                        pendStart = true;
                         lastX = e.getX(); lastY = e.getY(); lastT = e.getEventTime(); ps = 0.6f;
-                        smX = x; smY = y;
-                        addPt(e.getX(), e.getY(), pressure(e, e.getX(), e.getY(), e.getEventTime()));
-                        postDelayed(flush, 40);
+                        armed = true;
+                        aX = e.getX(); aY = e.getY(); aT = e.getEventTime();
+                        aP = pressure(e, e.getX(), e.getY(), e.getEventTime());
+                        removeCallbacks(armTimeout);
+                        postDelayed(armTimeout, 45);
                     } else if (tool == T_LINE || tool == T_RECT || tool == T_OVAL) {
                         shaping = true; sx0 = sx1 = x; sy0 = sy1 = y;
                     } else if (tool == T_LASSO) {
@@ -2823,6 +2868,10 @@ public class DualDrawActivity extends Activity implements Link.Listener {
                         float lx = toX(e.getX()), ly = toY(e.getY());
                         if (Math.hypot(lx - lasso.get(lasso.size() - 2), ly - lasso.get(lasso.size() - 1)) * zoom > 3 * dp) { lasso.add(lx); lasso.add(ly); invalidate(); }
                         return true;
+                    }
+                    if (armed) {   // empieza el trazo apenas el dedo se mueve un poco (o a los 45 ms)
+                        if (Math.hypot(e.getX() - aX, e.getY() - aY) > 3 * dp || e.getEventTime() - aT >= 45) { removeCallbacks(armTimeout); startStroke(); }
+                        else return true;
                     }
                     if (!drawing) return true;
                     for (int i = 0; i < e.getHistorySize(); i++) {
@@ -2877,8 +2926,14 @@ public class DualDrawActivity extends Activity implements Link.Listener {
                         invalidate();
                         return true;
                     }
+                    if (armed) {
+                        removeCallbacks(armTimeout);
+                        if (e.getEventTime() - aT < 45 && Math.hypot(e.getX() - aX, e.getY() - aY) <= 3 * dp) { armed = false; return true; }   // toque fantasma
+                        startStroke();
+                    }
                     if (!drawing) return true;
                     drawing = false;
+                    finishTail();
                     flush();
                     doc.end();
                     if (online()) dwSend(opj("end"));

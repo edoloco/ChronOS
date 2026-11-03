@@ -216,7 +216,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         for (Item it : desk.items) desk.normalize(it);
         desk.setPages(Math.max(prefs.getInt(sk("pages"), 1), maxPage() + 1), prefs.getInt(sk("page"), 0), 0);
         desk.setAppsMode(prefs.getBoolean("appsLock", false), prefs.getBoolean("appsAuto", true));
-        desk.setSnap(prefs.getBoolean("snapGrid", false));
+        desk.setSnap(prefs.getBoolean("snapGrid", true));
+        desk.setWall(Wall.get(this));   // fondo de pantalla (la mitad de este teléfono)
         cleanWidgets();
 
         side = hub.side();
@@ -289,6 +290,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         main.postDelayed(offlineTick, 600);
         resumed = true;
         main.postDelayed(this::reportHome, 1200);
+        main.postDelayed(() -> refreshDeskIcons(false), 2500);   // íconos de apps actualizadas
+        String pend = prefs.getString("pendingDesk", "");   // se instaló una app mientras ChronOS no estaba a la vista
+        if (!pend.isEmpty()) { prefs.edit().remove("pendingDesk").apply(); main.postDelayed(() -> askDeskShortcut(pend), 700); }
         PhoneMode.exit(this, hub);   // se volvió a ChronOS: deja el modo teléfono normal (principal, o extendido que se cerró)
         // Xiaomi a veces detiene el lector de notificaciones: se le pide a Android que lo vuelva a conectar
         if (side == 1 && NotifService.instance == null && NotifService.enabled(this))
@@ -385,7 +389,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         hub.send("flip", "p", prefs.getBoolean("flipP", false), "e", prefs.getBoolean("flipE", false));
         if (!solo) hub.send("pages", "n", desk.pages(), "cur", desk.page());
         hub.send("apps", "lock", prefs.getBoolean("appsLock", false), "auto", prefs.getBoolean("appsAuto", true));
-        hub.send("snap", "on", prefs.getBoolean("snapGrid", false));
+        hub.send("snap", "on", prefs.getBoolean("snapGrid", true));
     }
 
     @Override public void onConfigurationChanged(Configuration c) {
@@ -1775,7 +1779,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     /** Ordenar y alinear apps y elementos del escritorio actual (se ve igual en los dos teléfonos). */
     private void arrangeMenu() {
-        boolean lock = prefs.getBoolean("appsLock", false), auto = prefs.getBoolean("appsAuto", true), snap = prefs.getBoolean("snapGrid", false);
+        boolean lock = prefs.getBoolean("appsLock", false), auto = prefs.getBoolean("appsAuto", true), snap = prefs.getBoolean("snapGrid", true);
         new Ui.Sheet(this)
                 .title("Ordenar y alinear")
                 .option(Ui.GRID, "Ordenar todo", "En filas: apps por nombre, después reloj, batería, widgets, notas e imágenes", () -> {
@@ -2162,6 +2166,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                     Toast.makeText(this, "El mensaje dirá: " + LockArt.message(this), Toast.LENGTH_LONG).show();
                     appearanceMenu();
                 });
+        boolean hasWall = Wall.file(this).exists();
+        sh.option(Ui.IMAGE, -1, "Fondo de pantalla: " + (hasWall ? "imagen" : "color"),
+                "Una imagen que se reparte entre las dos pantallas (son una sola)", hasWall, this::wallMenu);
         int bs = prefs.getInt("battSkin", 2);
         sh.option(Ui.BATTERY, -1, "Mostrar baterías: " + BATT_SKINS[bs] + (bs == 0 ? "" : prefs.getBoolean("battUp", false) ? ", de pie" : ", acostadas"),
                 "Batería del principal (P) y del extendido (E), debajo de la hora en la barra", bs != 0, this::batteryMenu);
@@ -2169,6 +2176,134 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     static final String[] BATT_SKINS = {"no", "retro", "moderna"};
+    private static final int REQ_WALL = 93;
+
+    /** Ajustes → Apariencia → Fondo de pantalla. */
+    private void wallMenu() {
+        boolean kb = Wall.onKeyboard(this);
+        Ui.Sheet sh = new Ui.Sheet(this).title("Fondo de pantalla")
+                .message("La imagen se reparte: la parte de arriba en el principal y la de abajo en el extendido.");
+        sh.option(Ui.IMAGE, "Elegir una imagen", "De la galería de este teléfono", () -> {
+            try { startActivityForResult(new Intent(Intent.ACTION_GET_CONTENT).setType("image/*"), REQ_WALL); }
+            catch (Exception e) { Toast.makeText(this, "No hay galería para elegir", Toast.LENGTH_SHORT).show(); }
+        });
+        if (Wall.file(this).exists()) sh.option(Ui.CROSS, "Quitar el fondo", "Vuelve el color de la mesa", () -> {
+            Wall.clear(this);
+            desk.setWall(null);
+            if (hub.connected()) hub.send("wallOff");
+        });
+        sh.option(Ui.KEYBOARD, -1, "Teclado con el fondo: " + (kb ? "sí" : "no"), "El teclado del extendido usa la imagen de la mesa", kb, () -> {
+            prefs.edit().putBoolean("kbWall", !kb).apply();
+            hub.send("kbWallPref", "on", !kb);
+            wallMenu();
+        });
+        sh.button("Volver", false, this::appearanceMenu).show();
+    }
+
+    private void setWallFrom(Uri u) {
+        Toast.makeText(this, "Poniendo el fondo…", Toast.LENGTH_SHORT).show();
+        android.graphics.Point sc = new android.graphics.Point();
+        getWindowManager().getDefaultDisplay().getRealSize(sc);
+        final boolean st = stacked();
+        new Thread(() -> {
+            try (java.io.InputStream in = getContentResolver().openInputStream(u)) {
+                BitmapFactory.Options o = new BitmapFactory.Options();
+                o.inSampleSize = 1;
+                byte[] all = readAll(in);
+                o.inJustDecodeBounds = true;
+                BitmapFactory.decodeByteArray(all, 0, all.length, o);
+                int big = Math.max(o.outWidth, o.outHeight);
+                o.inJustDecodeBounds = false;
+                o.inSampleSize = big > 4000 ? 4 : big > 2000 ? 2 : 1;
+                Bitmap src = BitmapFactory.decodeByteArray(all, 0, all.length, o);
+                if (src == null) throw new Exception();
+                Bitmap[] parts = Wall.split(src, sc.x, sc.y, st);
+                Bitmap mine = parts[side == 1 ? 0 : 1], other = parts[side == 1 ? 1 : 0];
+                Wall.save(this, mine);
+                if (hub.connected()) {
+                    java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+                    other.compress(Bitmap.CompressFormat.JPEG, 86, bo);
+                    hub.send("wallImg", "img", android.util.Base64.encodeToString(bo.toByteArray(), android.util.Base64.NO_WRAP));
+                }
+                main.post(() -> { desk.setWall(Wall.get(this)); Toast.makeText(this, "Fondo listo", Toast.LENGTH_SHORT).show(); });
+            } catch (Exception e) {
+                main.post(() -> Toast.makeText(this, "No se pudo usar esa imagen", Toast.LENGTH_SHORT).show());
+            }
+        }, "fondo").start();
+    }
+
+    private static byte[] readAll(java.io.InputStream in) throws java.io.IOException {
+        java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream();
+        byte[] b = new byte[65536];
+        int n;
+        while ((n = in.read(b)) > 0) bo.write(b, 0, n);
+        return bo.toByteArray();
+    }
+
+    // ---------------- apps nuevas e íconos al día ----------------
+
+    /** Se instaló una app en el principal: ¿ponerla en la mesa? (en la principal o la extendida, en el último escritorio). */
+    void askDeskShortcut(String pkg) {
+        String label;
+        try { label = String.valueOf(getPackageManager().getApplicationLabel(getPackageManager().getApplicationInfo(pkg, 0))); }
+        catch (Exception e) { return; }
+        new Ui.Sheet(this).title("¿Poner " + label + " en la mesa?")
+                .message("Se instaló " + label + ". El acceso va al último escritorio.")
+                .option(Ui.PIN, 0, "En la mesa principal", "Arriba", false, () -> placeShortcut(pkg, label, 0))
+                .option(Ui.PIN, 1, "En la mesa extendida", "Abajo", false, () -> placeShortcut(pkg, label, 1))
+                .button("No", false, null).show();
+    }
+
+    private void placeShortcut(String pkg, String label, int screen) {
+        String png;
+        try { png = AppsDialog.iconPng(getPackageManager().getApplicationIcon(pkg), dp(96)); } catch (Exception e) { return; }
+        int last = desk.pages() - 1;
+        Item it = new Item();
+        it.kind = Item.APP; it.pkg = pkg; it.title = label; it.w = sized(0.24);
+        it.setImage(png);
+        double[] p = desk.freeSpot(it.w, 0, screen, last);
+        Runnable put = () -> {
+            double[] q = desk.freeSpot(it.w, 0, screen, it.page);
+            if (q == null) q = desk.spotOn(it.w, screen);
+            it.x = q[0]; it.y = q[1];
+            addItem(it);
+            sendImage(it);
+            prefs.edit().putLong("ic_" + pkg, appStamp(pkg)).apply();
+            Toast.makeText(this, label + " quedó en el escritorio " + (it.page + 1), Toast.LENGTH_SHORT).show();
+        };
+        if (p != null) { it.page = last; put.run(); return; }
+        new Ui.Sheet(this).title("No hay espacio en el escritorio " + (last + 1))
+                .message("¿Crear un escritorio nuevo para " + label + "?")
+                .button("No", false, null)
+                .button("Crear", true, () -> { newPage(); it.page = desk.pages() - 1; put.run(); }).show();
+    }
+
+    private long appStamp(String pkg) {
+        try { return getPackageManager().getPackageInfo(pkg, 0).lastUpdateTime; } catch (Exception e) { return -1; }
+    }
+
+    private long iconsCheckedAt;
+
+    /** Íconos de apps en la mesa: si la app se actualizó (y pudo cambiar su ícono), se vuelve a tomar. Solo en el principal. */
+    void refreshDeskIcons(boolean force) {
+        if (side != 1 && !solo) return;
+        long now = android.os.SystemClock.uptimeMillis();
+        if (!force && now - iconsCheckedAt < 120_000) return;
+        iconsCheckedAt = now;
+        for (Item it : new ArrayList<>(desk.items())) {
+            if (!Item.APP.equals(it.kind) || it.pkg == null || Pals.isPal(it.pkg) || DualDrawActivity.PKG.equals(it.pkg) || getPackageName().equals(it.pkg)) continue;
+            long st = appStamp(it.pkg);
+            if (st < 0 || prefs.getLong("ic_" + it.pkg, 0) == st) continue;
+            try {
+                it.setImage(AppsDialog.iconPng(getPackageManager().getApplicationIcon(it.pkg), dp(96)));
+                it.touch();
+                onItemChanged(it);
+                sendImage(it);
+                prefs.edit().putLong("ic_" + it.pkg, st).apply();
+            } catch (Exception ignored) { }
+        }
+        desk.invalidate();
+    }
 
     /** Ajustes → Apariencia → Mostrar baterías: estilo (retro tipo Mega Man o moderna de celular) y de pie o acostadas. */
     private void batteryMenu() {
@@ -4189,6 +4324,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     @Override protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
+        if (req == REQ_WALL) { if (res == RESULT_OK && data != null && data.getData() != null) setWallFrom(data.getData()); return; }
         if (req == REQ_HOME) {
             main.postDelayed(() -> {
                 boolean ok = homeDefault(this);
@@ -4547,6 +4683,19 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                         : label + " ya no está instalada en el principal", Toast.LENGTH_LONG).show();
                 break;
             }
+            case "wallImg":   // la mitad del fondo que le toca a este teléfono
+                new Thread(() -> {
+                    try {
+                        byte[] d = android.util.Base64.decode(m.optString("img"), android.util.Base64.DEFAULT);
+                        Bitmap b = BitmapFactory.decodeByteArray(d, 0, d.length);
+                        if (b != null) { Wall.save(this, b); main.post(() -> desk.setWall(Wall.get(this))); }
+                    } catch (Exception ignored) { }
+                }).start();
+                break;
+            case "wallOff": main.post(() -> { Wall.clear(this); desk.setWall(null); }); break;
+            case "kbWallPref": prefs.edit().putBoolean("kbWall", m.optBoolean("on", true)).apply(); break;
+            case "deskAsk": main.post(() -> { prefs.edit().remove("pendingDesk").apply(); askDeskShortcut(m.optString("pkg")); }); break;
+            case "appUpd": main.post(() -> refreshDeskIcons(true)); break;
             case "battPref":
                 prefs.edit().putInt("battSkin", m.optInt("s", 2)).putBoolean("battUp", m.optBoolean("up")).apply();
                 if (cbar != null) cbar.invalidate();

@@ -52,6 +52,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     private KeyboardView keyboard;
     private TouchpadView touchpad;
     private GamepadView gamepad;
+    private boolean kbWall;
     private GameAsist retro;   // Game-Asist: ficha, partidas y botones del juego de RetroArch en el principal
     private MediaControlView mediaView;
     private CameraControlView cameraView;
@@ -98,6 +99,9 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         th = KbTheme.of(this, night);
         themeSig = KbTheme.sig(this);
         root.setBackgroundColor(th.bg);
+        android.graphics.Bitmap wall = Wall.onKeyboard(this) ? Wall.get(this) : null;   // el fondo de la mesa, también aquí
+        if (wall != null) root.setBackground(new Wall.CoverDrawable(wall, (th.bg & 0x00FFFFFF) | 0x8C000000));
+        kbWall = wall != null;
 
         // barra superior: estado a la izquierda, botones de navegación SIEMPRE al centro, opciones a la derecha
         LinearLayout left = new LinearLayout(this), navRow = new LinearLayout(this), top = new LinearLayout(this);
@@ -128,7 +132,11 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         }
         editBtn = chip("Editar", v -> toggleEdit());
         resetBtn = chip("Restablecer", v -> { gamepad.resetLayout(); prefs.edit().remove("padLayout").apply(); });
-        modeBtn = chip(NAMES[mode], v -> pickMode());
+        modeBtn = chip(NAMES[mode], v -> {
+            // si se estaba escribiendo hace un instante, fue un toque escapado: no cambia el tipo de teclado
+            if (System.currentTimeMillis() - KeyboardView.lastTouchAt < 900) return;
+            pickMode();
+        });
         emojiBtn = chip("☺", v -> keyboard.toggleEmoji());   // emojis, al lado del botón que cambia el teclado
         emojiBtn.setTextSize(17);
         emojiBtn.setPadding(dp(10), 0, dp(10), 0);
@@ -175,6 +183,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
 
     private void buildViews() {
         keyboard = new KeyboardView(this, night);
+        keyboard.setSeeThrough(kbWall);
         keyboard.setSink(this);
 
         suggestBar = new LinearLayout(this);
@@ -698,6 +707,12 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         String t = m.optString("t");
         if ("navAck".equals(t) && !m.optBoolean("ok"))
             android.widget.Toast.makeText(this, "Recientes necesita la versión completa en el principal", android.widget.Toast.LENGTH_SHORT).show();
+        if ("kbNoField".equals(t)) {   // escribiste sin un cuadro de texto elegido en el principal
+            boolean f = m.optBoolean("found");
+            h.post(() -> android.widget.Toast.makeText(this, f ? "Abriendo el cuadro de texto del principal…"
+                    : "No hay un cuadro de texto elegido en el principal: tócalo y lo que escribiste aparece ahí", android.widget.Toast.LENGTH_LONG).show());
+            return;
+        }
         if ("raSt".equals(t) || "raStList".equals(t)) { h.post(() -> retro.onMessage(m)); return; }
         if ("dsFrame".equals(t) || "dsState".equals(t)) { h.post(() -> retro.onDs(m)); return; }
         if ("gpImg".equals(t)) h.post(() -> {

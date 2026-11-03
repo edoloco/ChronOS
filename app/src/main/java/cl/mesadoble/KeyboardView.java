@@ -273,8 +273,12 @@ public class KeyboardView extends View {
 
     private boolean isLetter(Key k) { return k.type == CHAR && k.label.length() == 1 && Character.isLetter(k.label.charAt(0)); }
 
+    /** Con fondo de pantalla: el teclado queda translúcido para que se vea la imagen detrás. */
+    void setSeeThrough(boolean on) { seeThrough = on; invalidate(); }
+    private boolean seeThrough;
+
     @Override protected void onDraw(Canvas cv) {
-        cv.drawColor(bg);
+        cv.drawColor(seeThrough ? (bg & 0x00FFFFFF) | 0x66000000 : bg);
         int mods = heldMods | latchedMods;
         boolean shift = (mods & SHIFT) != 0;
         for (Key[] row : rows) for (Key k : row) {
@@ -324,7 +328,11 @@ public class KeyboardView extends View {
         return null;
     }
 
+    /** Último toque en las teclas: el botón de modo no se abre si se estaba escribiendo (toque escapado). */
+    static volatile long lastTouchAt;
+
     @Override public boolean onTouchEvent(MotionEvent e) {
+        lastTouchAt = System.currentTimeMillis();
         int a = e.getActionMasked(), i = e.getActionIndex();
         if (a == MotionEvent.ACTION_DOWN || a == MotionEvent.ACTION_POINTER_DOWN) {
             Key k = keyAt(e.getX(i), e.getY(i));

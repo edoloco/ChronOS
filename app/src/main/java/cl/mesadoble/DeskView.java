@@ -553,6 +553,7 @@ public class DeskView extends View {
     // ---------------- escritorios ----------------
 
     public int page() { return page; }
+    public List<Item> items() { return items; }
     public int pages() { return pages; }
 
     /** Cambia la cantidad de escritorios y el actual. dir: de qué lado entra (1 desde la derecha, -1 desde la izquierda, 0 sin animación). */
@@ -742,14 +743,47 @@ public class DeskView extends View {
     public void clearRemoteDrag(String id) { remoteDrags.remove(id); invalidate(); }
     public void clearAllRemoteDrags() { remoteDrags.clear(); invalidate(); }
 
+    /**
+     * Primer lugar libre de la cuadrícula en una pantalla (0 principal, 1 extendido) y un escritorio, o null si no cabe.
+     * Así lo nuevo aparece ordenado, alineado a los puntos y sin tapar nada.
+     */
+    public double[] freeSpot(double w, float hPx, int screen, int pg) {
+        int W = getWidth(), H = getHeight();
+        if (W == 0 || H == 0) return null;
+        float step = gridStep(), wpx = (float) (w * W), h = hPx > 0 ? hPx : wpx, gap = 6 * dp;
+        float top, bottom, left = 14 * dp, right = 14 * dp;
+        if (vertical) { top = screen == 0 ? 86 * dp : 16 * dp; bottom = screen == 0 ? 30 * dp : 150 * dp; }
+        else if (screen == 0) { top = 84 * dp; bottom = 16 * dp; }
+        else { top = 16 * dp; bottom = 156 * dp; right = 64 * dp; }
+        List<RectF> busy = new ArrayList<>();
+        for (Item it : items) {
+            if ((it.page != pg && !it.pin) || screenOf(it) != screen) continue;
+            float lx = (float) ((vertical ? it.x : it.x - screen) * W), ly = (float) ((vertical ? it.y - screen : it.y) * H);
+            float iw = (float) (it.w * W), ih = it.hPx > 0 ? it.hPx : iw;
+            busy.add(new RectF(lx - gap, ly - gap, lx + iw + gap, ly + ih + gap));
+        }
+        for (float y = (float) Math.ceil(top / step) * step; y + h <= H - bottom; y += step)
+            for (float x = (float) Math.ceil(left / step) * step; x + wpx <= W - right; x += step) {
+                RectF r = new RectF(x, y, x + wpx, y + h);
+                boolean ok = true;
+                for (RectF b : busy) if (RectF.intersects(b, r)) { ok = false; break; }
+                if (ok) return new double[]{vertical ? x / W : screen + x / W, vertical ? screen + y / H : y / H};
+            }
+        return null;
+    }
+
     /** Lugar libre aproximado dentro de la pantalla de este teléfono. */
     public double[] spot(double w) {
+        double[] f = freeSpot(w, 0, side, page);
+        if (f != null) return f;
         if (vertical) return new double[]{0.06 + Math.random() * Math.max(0.01, 0.86 - w), side + 0.12 + Math.random() * 0.3};
         return new double[]{side + 0.08 + Math.random() * Math.max(0.01, 0.84 - w), 0.14 + Math.random() * 0.4};
     }
 
     /** Un lugar libre en la pantalla indicada (0 = principal, 1 = extendido). */
     public double[] spotOn(double w, int screen) {
+        double[] f = freeSpot(w, 0, screen, page);
+        if (f != null) return f;
         if (vertical) return new double[]{0.06 + Math.random() * Math.max(0.01, 0.86 - w), screen + 0.12 + Math.random() * 0.3};
         return new double[]{screen + 0.08 + Math.random() * Math.max(0.01, 0.84 - w), 0.14 + Math.random() * 0.4};
     }
@@ -825,6 +859,10 @@ public class DeskView extends View {
         invalidate();
     }
 
+    /** Fondo de pantalla elegido (la mitad de este teléfono); el de un juego (bgImage) va por encima. */
+    private Bitmap wall;
+    public void setWall(Bitmap b) { wall = b; blurDirty = true; invalidate(); }
+
     private void drawCover(Canvas c, Bitmap b, int W, int H, float alpha) {
         if (b == null || alpha <= 0) return;
         float s = Math.max(W / (float) b.getWidth(), H / (float) b.getHeight());
@@ -863,6 +901,7 @@ public class DeskView extends View {
             drawCover(c, bgImage, W, H, bgFade);
             return;   // con imagen de juego no van los puntos
         }
+        if (wall != null) { drawCover(c, wall, W, H, 1f); return; }   // fondo de pantalla: sin puntos
         float step = 22 * dp;
         float offX = vertical ? 0 : (side * W) % step, offY = vertical ? (side * H) % step : 0;
         for (float x = step / 2 - offX; x < W; x += step)

@@ -94,8 +94,20 @@ public class Hub implements Link.Listener {
         af.addDataScheme("package");
         c.registerReceiver(new android.content.BroadcastReceiver() {
             @Override public void onReceive(Context cx, Intent i) {
-                if (i.getBooleanExtra(Intent.EXTRA_REPLACING, false) || i.getData() == null) return;
-                AppShare.added(app, Hub.this, i.getData().getSchemeSpecificPart());
+                if (i.getData() == null) return;
+                String pkg = i.getData().getSchemeSpecificPart();
+                if (i.getBooleanExtra(Intent.EXTRA_REPLACING, false)) {   // actualizada: su ícono en la mesa puede cambiar
+                    JSONObject u = new JSONObject();
+                    try { u.put("t", "appUpd"); } catch (JSONException ignored) { }
+                    main.postDelayed(() -> local(u), 1500);
+                    return;
+                }
+                AppShare.added(app, Hub.this, pkg);
+                // app nueva en el principal: ¿ponerla en la mesa? (si ChronOS no está a la vista, se pregunta al volver)
+                if ((isPrincipal() || !connected()) && app.getPackageManager().getLaunchIntentForPackage(pkg) != null && !pkg.equals(app.getPackageName())) {
+                    prefs.edit().putString("pendingDesk", pkg).apply();
+                    if (foreground) { JSONObject q = new JSONObject(); try { q.put("t", "deskAsk"); q.put("pkg", pkg); } catch (JSONException ignored) { } local(q); }
+                }
             }
         }, af);
     }

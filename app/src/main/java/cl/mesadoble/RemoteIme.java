@@ -212,6 +212,50 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
             seen.addLast(id);
             if (seen.size() > 64) seen.removeFirst();
         }
+        String a = m.optString("a");
+        // sin un cuadro de texto elegido, las letras le llegarían a la app como atajos (en YouTube el espacio pausa,
+        // la k, j, l, f… también hacen cosas): se guardan, se busca el cuadro de texto y se escriben ahí
+        if (("text".equals(a) || "key".equals(a)) && noField()) {
+            long now = SystemClock.uptimeMillis();
+            if (now - waitingAt > 20000) waiting.clear();
+            boolean first = waiting.isEmpty();
+            waiting.add(m);
+            waitingAt = now;
+            if (first) {
+                boolean found = MesaAccess.focusTextField();
+                if (hub.connected()) hub.send("kbNoField", "found", found);
+                if (found) main.postDelayed(this::flushWaiting, 450);
+            }
+            return;
+        }
+        process(m);
+    }
+
+    private final java.util.ArrayList<JSONObject> waiting = new java.util.ArrayList<>();
+    private long waitingAt;
+    private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+
+    /** ¿No hay un cuadro de texto de verdad? (Android entrega una conexión "falsa" que convierte las letras en teclas). */
+    private boolean noField() {
+        EditorInfo ei = getCurrentInputEditorInfo();
+        return ei == null || ei.inputType == android.text.InputType.TYPE_NULL || getCurrentInputConnection() == null;
+    }
+
+    /** Ya hay cuadro de texto: se escribe lo que quedó esperando (si no pasó mucho rato). */
+    private void flushWaiting() {
+        if (waiting.isEmpty() || noField()) return;
+        if (SystemClock.uptimeMillis() - waitingAt > 20000) { waiting.clear(); return; }
+        java.util.ArrayList<JSONObject> l = new java.util.ArrayList<>(waiting);
+        waiting.clear();
+        for (JSONObject m : l) process(m);
+    }
+
+    @Override public void onStartInput(EditorInfo info, boolean restarting) {
+        super.onStartInput(info, restarting);
+        if (info != null && info.inputType != android.text.InputType.TYPE_NULL && !waiting.isEmpty()) main.postDelayed(this::flushWaiting, 150);
+    }
+
+    private void process(JSONObject m) {
         InputConnection ic = getCurrentInputConnection();
         if (ic == null) return;
         lastEditAt = SystemClock.uptimeMillis();

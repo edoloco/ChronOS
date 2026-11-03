@@ -226,6 +226,11 @@ public class AppsDialog {
 
         final List<App> all = new ArrayList<>();
         final List<App> shown = new ArrayList<>();
+        // selección múltiple: elegir varias apps y ponerlas juntas en una mesa
+        final java.util.LinkedHashMap<String, App> picked = new java.util.LinkedHashMap<>();
+        final boolean[] multi = {false};
+        final LinearLayout selBar = new LinearLayout(a);
+        final TextView selCount = new TextView(a);
         final BaseAdapter adapter = new BaseAdapter() {
             @Override public int getCount() { return shown.size(); }
             @Override public Object getItem(int i) { return shown.get(i); }
@@ -250,13 +255,61 @@ public class AppsDialog {
                 App app = shown.get(i);
                 ((ImageView) cell.getChildAt(0)).setImageDrawable(app.icon);
                 ((TextView) cell.getChildAt(1)).setText(app.label);
+                boolean on = multi[0] && picked.containsKey(app.pkg);
+                if (on) {
+                    GradientDrawable g = new GradientDrawable();
+                    g.setColor(night ? 0x5533B07A : 0x5533B07A);
+                    g.setStroke(Math.round(2 * dp), 0xFF2FA866);
+                    g.setCornerRadius(14 * dp);
+                    cell.setBackground(g);
+                } else cell.setBackground(null);
+                cell.setAlpha(multi[0] && !on ? 0.6f : 1f);
                 return cell;
             }
         };
         grid.setAdapter(adapter);
         // un toque: abrir la app en el principal; mantener presionado: ponerla en una mesa o desinstalarla
+        selBar.setGravity(Gravity.CENTER_VERTICAL);
+        selBar.setPadding(0, Math.round(6 * dp), 0, Math.round(10 * dp));
+        selBar.setVisibility(View.GONE);
+        selCount.setTextColor(fg);
+        selCount.setTextSize(14);
+        selBar.addView(selCount, new LinearLayout.LayoutParams(0, -2, 1));
+        Runnable showCount = () -> selCount.setText(picked.size() + (picked.size() == 1 ? " app elegida" : " apps elegidas"));
+        java.util.function.IntConsumer putAll = screen -> {
+            if (picked.isEmpty()) return;
+            d.dismiss();
+            for (App app : picked.values()) host.putOnDesk(app.pkg, app.label, app.png != null ? app.png : iconPng(app.icon, Math.round(96 * dp)), screen);
+        };
+        String[][] bl = {{"En el principal", "0"}, {"En el extendido", "1"}, {"Cancelar", "-1"}};
+        for (String[] b : bl) {
+            TextView tb = new TextView(a);
+            tb.setText(b[0]);
+            tb.setTextColor(b[1].equals("-1") ? fg : 0xFFFFFFFF);
+            tb.setTextSize(14);
+            tb.setPadding(pad, Math.round(9 * dp), pad, Math.round(9 * dp));
+            GradientDrawable g = new GradientDrawable();
+            g.setColor(b[1].equals("-1") ? (night ? 0xFF223040 : 0xFFFFFFFF) : 0xFF2FA866);
+            g.setCornerRadius(18 * dp);
+            tb.setBackground(g);
+            final int scr = Integer.parseInt(b[1]);
+            tb.setOnClickListener(v -> {
+                if (scr >= 0) { putAll.accept(scr); return; }
+                multi[0] = false; picked.clear(); selBar.setVisibility(View.GONE); adapter.notifyDataSetChanged();
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+            lp.setMarginStart(Math.round(6 * dp));
+            selBar.addView(tb, lp);
+        }
+        root.addView(selBar);
         grid.setOnItemClickListener((parent, view, pos, id) -> {
             App app = shown.get(pos);
+            if (multi[0]) {   // eligiendo varias: tocar marca o desmarca
+                if (picked.remove(app.pkg) == null) picked.put(app.pkg, app);
+                showCount.run();
+                adapter.notifyDataSetChanged();
+                return;
+            }
             d.dismiss();
             host.openThere(app.pkg, app.label);
         });
@@ -271,6 +324,14 @@ public class AppsDialog {
                     })
                     .option(Ui.PIN, 1, "Poner en el extendido", "Queda en la mesa de abajo, lista para ubicarla", false, () -> {
                         d.dismiss(); host.putOnDesk(app.pkg, app.label, png, 1);
+                    })
+                    .option(Ui.CHECK, "Elegir varias", "Marca varias apps y ponlas juntas en una mesa", () -> {
+                        multi[0] = true;
+                        picked.clear();
+                        picked.put(app.pkg, app);
+                        selBar.setVisibility(View.VISIBLE);
+                        selCount.setText("1 app elegida · toca otras para sumarlas");
+                        adapter.notifyDataSetChanged();
                     })
                     .option(Ui.TRASH, Pals.isPal(app.pkg) || DualDrawActivity.PKG.equals(app.pkg) ? "Es parte de ChronOS (no se desinstala)" : "Desinstalar", remote ? "Se confirma en el principal" : null, () -> {
                         if (!Pals.isPal(app.pkg) && !DualDrawActivity.PKG.equals(app.pkg)) host.uninstall(app.pkg, app.label);

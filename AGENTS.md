@@ -12,7 +12,7 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
 | **Horizontal** (uso normal) | **arriba** | abajo |
 | Vertical | izquierda | derecha |
 
-- **Principal** (Redmi 9S): corren las apps, suena el audio, está la accesibilidad.
+- **Principal** (Redmi Note 8): corren las apps, suena el audio, está la accesibilidad.
 - **Extendido** (Poco M8 Pro): pantalla extra, teclado, controles, herramientas.
 - Se comunican por **WiFi local** (sin internet, sin Bluetooth para la conexión).
 - En el código: `side == 1` = principal, `side == 0` = extendido. La pantalla 0 del escritorio es siempre el principal.
@@ -97,6 +97,16 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
 - Separar al alejarlos: `Proximity` (Ajustes → Configuración y pruebas). Por imán (el principal mide µT; calibración
   `sepMagJ` con los dos juntos) o por Bluetooth (el extendido emite BLE con UUID propio, el principal mide RSSI). Separados
   8 s → teléfono normal (`PhoneMode`, preguntando o directo según `sepAsk`); juntos 5 s → vuelve ChronOS. `sepPref`, `sepCal`.
+- ChronOS debe funcionar en cualquier teléfono (el principal ahora es un Redmi Note 8): nada fijo a un modelo.
+- Teclado sin cuadro de texto: `RemoteIme` guarda lo escrito (no lo manda como atajos: en YouTube el espacio pausaba),
+  `MesaAccess.focusTextField` busca el cuadro (o el "Di algo…") y lo toca; al aparecer un cuadro se escribe ahí (20 s).
+  El botón de modo del teclado ignora toques justo después de escribir (`KeyboardView.lastTouchAt`).
+- Fondo de pantalla (`Wall`): una imagen repartida entre las dos pantallas (`wallImg`/`wallOff`); el teclado la usa
+  si `kbWall`. Mesa en cuadrícula por defecto (`snapGrid`), lo nuevo va al primer lugar libre (`DeskView.freeSpot`).
+  App instalada → "¿ponerla en la mesa?" (principal/extendida, último escritorio, o uno nuevo). Íconos de la mesa se
+  renuevan cuando la app se actualiza (`refreshDeskIcons`, `ic_<pkg>`). Lista de apps: "Elegir varias".
+- DUAL-Draw: un toque de menos de 45 ms sin moverse no dibuja (toque fantasma); al levantar el dedo se descarta el
+  "rebote" final si dobla de golpe (`hold`/`finishTail`, la colita en J).
 - Chat en vivo de YouTube (solo versión completa): `LiveChat` (lo llama `MesaAccess` con `typeWindowsChanged`). YouTube en
   pantalla flotante (PiP) → burbuja animada con "?" al lado; al tocarla, ventanita gris oscura (overlay de accesibilidad,
   se arrastra por la cabecera y cambia de tamaño por la esquina) con el chat del directo/estreno. Lee el chat público

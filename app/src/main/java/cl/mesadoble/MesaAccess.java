@@ -34,6 +34,7 @@ import java.util.Set;
  * 3) ejecuta el touchpad (puntero, clic, desplazar, atrás/inicio) y el gamepad (toques en pantalla).
  * 4) mesa de dibujo para Sketchbook: dibuja los trazos que llegan del extendido y captura la zona para mostrarla allá.
  * 5) chat en vivo de YouTube: con el video en pantalla flotante, burbuja y ventanita de chat ({@link LiveChat}).
+ * 6) al escribir sin un cuadro de texto elegido, busca el cuadro de texto (o el "Di algo…") de la app y lo toca.
  * Fuera de la captura de la mesa de dibujo (solo con Sketchbook abierto), no lee el contenido de las pantallas.
  */
 public class MesaAccess extends AccessibilityService {
@@ -92,6 +93,46 @@ public class MesaAccess extends AccessibilityService {
     }
 
     @Override public void onInterrupt() { }
+
+    private static final java.util.regex.Pattern CHAT_HINT = java.util.regex.Pattern.compile(
+            "(?i)(di algo|chatea|chat|say something|escribe|comenta|comentario|add a comment|mensaje|message|reply|responder)");
+
+    /**
+     * Teclado: se escribió sin un cuadro de texto elegido. Busca en la pantalla del principal el cuadro de texto (o el
+     * botón "Di algo…/Chatea…" que lo abre) y lo toca. Solo mira la ventana activa, y solo en ese momento.
+     */
+    static boolean focusTextField() {
+        MesaAccess s = instance;
+        if (s == null) return false;
+        android.view.accessibility.AccessibilityNodeInfo root;
+        try { root = s.getRootInActiveWindow(); } catch (Exception e) { return false; }
+        if (root == null) return false;
+        java.util.ArrayDeque<android.view.accessibility.AccessibilityNodeInfo> q = new java.util.ArrayDeque<>();
+        q.add(root);
+        android.view.accessibility.AccessibilityNodeInfo hint = null;
+        int seen = 0;
+        while (!q.isEmpty() && seen++ < 600) {
+            android.view.accessibility.AccessibilityNodeInfo n = q.poll();
+            if (n == null) continue;
+            if (n.isVisibleToUser()) {
+                if (n.isEditable()) {
+                    n.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_FOCUS);
+                    n.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK);
+                    return true;
+                }
+                if (hint == null) {
+                    CharSequence t = n.getText() != null ? n.getText() : n.getContentDescription();
+                    if (t == null && android.os.Build.VERSION.SDK_INT >= 26) t = n.getHintText();
+                    if (t != null && t.length() < 40 && CHAT_HINT.matcher(t).find()) hint = n;
+                }
+            }
+            for (int i = 0; i < n.getChildCount(); i++) q.add(n.getChild(i));
+        }
+        // no hay cuadro a la vista: el botón que lo abre (o su contenedor que se puede tocar)
+        for (android.view.accessibility.AccessibilityNodeInfo n = hint; n != null; n = n.getParent())
+            if (n.isClickable()) { n.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK); return true; }
+        return false;
+    }
 
     /** ¿La app pkg quedó en pantalla partida (su ventana ocupa menos de lo que mide la pantalla)? */
     static boolean isSplit(String pkg) {
