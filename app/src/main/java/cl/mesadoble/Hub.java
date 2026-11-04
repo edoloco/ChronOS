@@ -445,6 +445,26 @@ public class Hub implements Link.Listener {
         // separar al alejarlos: ajuste compartido; la calibración del imán se hace en el principal
         // el extendido cerró ChronOS: el principal ofrece pasar a teléfono normal
         // fondo de pantalla elegido desde el extendido: la galería se abre en el principal (ahí están las fotos)
+        // apariencia que manda el otro teléfono: se guarda AQUÍ aunque la pantalla de ChronOS esté cerrada
+        // (antes solo la guardaba la mesa, y si Android la había cerrado el cambio se perdía o tardaba en aparecer)
+        if ("cardTheme".equals(t)) CardTheme.save(app, m.optInt("c"), m.optInt("g"), m.optInt("k"));
+        if ("bg".equals(t)) prefs.edit().putInt("deskColor", m.optInt("c")).apply();
+        if ("kbWallPref".equals(t)) prefs.edit().putBoolean("kbWall", m.optBoolean("on", true)).apply();
+        if ("battPref".equals(t)) prefs.edit().putInt("battSkin", m.optInt("s", 2)).putBoolean("battUp", m.optBoolean("up")).apply();
+        if ("wallOff".equals(t)) Wall.clear(app);
+        if ("wallImg".equals(t)) {
+            new Thread(() -> {
+                try {
+                    byte[] d = android.util.Base64.decode(m.optString("img"), android.util.Base64.DEFAULT);
+                    android.graphics.Bitmap b = android.graphics.BitmapFactory.decodeByteArray(d, 0, d.length);
+                    if (b != null) Wall.save(app, b);
+                } catch (Exception ignored) { }
+                JSONObject r = new JSONObject();
+                try { r.put("t", "wallReady"); } catch (JSONException ignored) { }
+                main.post(() -> local(r));
+            }, "fondo").start();
+            return;
+        }
         if ("wallPick".equals(t)) {
             if (isPrincipal()) main.post(() -> startOwn(new Intent(app, MainActivity.class).putExtra("wallPick", true)
                     .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), () -> false, 94, "Fondo de pantalla", "Toca para elegir la imagen"));
@@ -647,6 +667,11 @@ public class Hub implements Link.Listener {
                 .putExtra("auto", true)
                 .putExtra("vert", wantVertKb())   // principal de pie: teclado vertical
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        if (!foreground && Settings.canDrawOverlays(app)) {
+            blip();
+            main.postDelayed(() -> { try { app.startActivity(i); } catch (Exception ignored) { } }, 150);
+            return;
+        }
         if (foreground || Settings.canDrawOverlays(app)) {
             try { app.startActivity(i); return; } catch (Exception ignored) { }
         }
@@ -689,7 +714,16 @@ public class Hub implements Link.Listener {
     public void startOwn(Intent i, java.util.function.BooleanSupplier shown, int code, String title, String text) {
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         if (shown.getAsBoolean()) return;
-        if (foreground || Settings.canDrawOverlays(app)) { try { app.startActivity(i); return; } catch (Exception ignored) { } }
+        if (!foreground && Settings.canDrawOverlays(app)) {
+            // Android 15: "mostrar sobre otras apps" solo deja abrir pantallas desde segundo plano si ChronOS tiene una
+            // ventana visible: se pone una de 1 px un momento y se intenta varias veces (si no, un aviso)
+            blip();
+            for (int ms : new int[]{120, 400, 900})
+                main.postDelayed(() -> { if (!shown.getAsBoolean()) try { app.startActivity(i); } catch (Exception ignored) { } }, ms);
+            main.postDelayed(() -> { if (!shown.getAsBoolean()) startOrNotify(i, code, title, text); }, 1800);
+            return;
+        }
+        if (foreground) { try { app.startActivity(i); return; } catch (Exception ignored) { } }
         Intent home = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION);
         try { app.startActivity(home); } catch (Exception ignored) { }
@@ -771,7 +805,43 @@ public class Hub implements Link.Listener {
     }
 
     /** Abre una pantalla; si Android no lo permite con la app de fondo, deja un aviso de un toque. */
+    private android.view.View blipView;
+    private final Runnable unblip = this::removeBlip;
+
+    private void removeBlip() {
+        if (blipView == null) return;
+        try { ((android.view.WindowManager) app.getSystemService(Context.WINDOW_SERVICE)).removeView(blipView); } catch (Exception ignored) { }
+        blipView = null;
+    }
+
+    /** Una ventanita de 1 px visible un par de segundos (permiso de abrir pantallas desde segundo plano en Android 15). */
+    void blip() {
+        if (!Settings.canDrawOverlays(app)) return;
+        main.post(() -> {
+            try {
+                if (blipView == null) {
+                    android.view.WindowManager wm = (android.view.WindowManager) app.getSystemService(Context.WINDOW_SERVICE);
+                    blipView = new android.view.View(app);
+                    blipView.setBackgroundColor(0x01000000);
+                    android.view.WindowManager.LayoutParams lp = new android.view.WindowManager.LayoutParams(1, 1,
+                            android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                            android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                            android.graphics.PixelFormat.TRANSLUCENT);
+                    lp.gravity = android.view.Gravity.TOP | android.view.Gravity.START;
+                    wm.addView(blipView, lp);
+                }
+                main.removeCallbacks(unblip);
+                main.postDelayed(unblip, 3000);
+            } catch (Exception ignored) { blipView = null; }
+        });
+    }
+
     public int startOrNotify(Intent i, int reqCode, String title, String text) {
+        if (!foreground && Settings.canDrawOverlays(app) && blipView == null) {   // primero la ventanita, después se abre
+            blip();
+            main.postDelayed(() -> { try { app.startActivity(i); } catch (Exception ignored) { } }, 150);
+            return LAUNCHED;
+        }
         if (foreground || Settings.canDrawOverlays(app)) {
             try { app.startActivity(i); return LAUNCHED; } catch (Exception ignored) { }
         }

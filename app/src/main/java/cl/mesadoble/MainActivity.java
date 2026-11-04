@@ -218,6 +218,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         desk.setAppsMode(prefs.getBoolean("appsLock", false), prefs.getBoolean("appsAuto", true));
         desk.setSnap(prefs.getBoolean("snapGrid", true));
         desk.setWall(Wall.get(this));   // fondo de pantalla (la mitad de este teléfono)
+        lookSig = lookNow();
         cleanWidgets();
 
         side = hub.side();
@@ -293,6 +294,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         resumed = true;
         main.postDelayed(this::reportHome, 1200);
         main.postDelayed(() -> refreshDeskIcons(false), 2500);   // íconos de apps actualizadas
+        if (!lookSig.isEmpty()) applyLookIfChanged();   // cambios de apariencia llegados mientras no se veía
         main.postDelayed(() -> desk.alignApps(), 1200);   // grilla invisible: las apps de esta pantalla, cada una en su celda
         String pend = prefs.getString("pendingDesk", "");   // se instaló una app mientras ChronOS no estaba a la vista
         if (!pend.isEmpty()) { prefs.edit().remove("pendingDesk").apply(); main.postDelayed(() -> askDeskShortcut(pend), 700); }
@@ -787,6 +789,22 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (cbar != null) cbar.invalidate();
         rebuildBar();
         if (!fromRemote) hub.send("cardTheme", "c", color, "g", glass, "k", console);
+    }
+
+    /** Colores, fondo y tema tal como están guardados: si cambiaron (aunque fuera con la mesa cerrada), se aplican. */
+    private String lookSig = "";
+
+    private String lookNow() {
+        return CardTheme.color + "," + CardTheme.glass + "," + CardTheme.console + "," + prefs.getInt("deskColor", 0) + "," + Wall.file(this).lastModified();
+    }
+
+    private void applyLookIfChanged() {
+        String sig = lookNow();
+        if (sig.equals(lookSig)) return;
+        lookSig = sig;
+        setCardTheme(CardTheme.color, CardTheme.glass, CardTheme.console, true);
+        desk.setDeskColor(prefs.getInt("deskColor", 0), night);
+        desk.setWall(Wall.get(this));
     }
 
     private void setDeskColor(int c, boolean fromRemote) {
@@ -4631,12 +4649,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             case "apps":
                 setAppsMode(m.optBoolean("lock", false), m.optBoolean("auto", false), true);
                 break;
-            case "cardTheme":
-                if (m.optInt("c") != CardTheme.color || m.optInt("g") != CardTheme.glass || m.optInt("k") != CardTheme.console)
-                    setCardTheme(m.optInt("c"), m.optInt("g"), m.optInt("k"), true);
-                break;
+            case "cardTheme":   // ya lo guardó Hub: aquí solo se aplica (siempre)
             case "bg":
-                if (m.optInt("c") != prefs.getInt("deskColor", 0)) setDeskColor(m.optInt("c"), true);
+                main.post(this::applyLookIfChanged);
                 break;
             case "flip":
                 main.post(() -> setFlip(m.optBoolean("p"), m.optBoolean("e"), true));
@@ -4694,21 +4709,11 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                         : label + " ya no está instalada en el principal", Toast.LENGTH_LONG).show();
                 break;
             }
-            case "wallImg":   // la mitad del fondo que le toca a este teléfono
-                new Thread(() -> {
-                    try {
-                        byte[] d = android.util.Base64.decode(m.optString("img"), android.util.Base64.DEFAULT);
-                        Bitmap b = BitmapFactory.decodeByteArray(d, 0, d.length);
-                        if (b != null) { Wall.save(this, b); main.post(() -> desk.setWall(Wall.get(this))); }
-                    } catch (Exception ignored) { }
-                }).start();
-                break;
-            case "wallOff": main.post(() -> { Wall.clear(this); desk.setWall(null); }); break;
-            case "kbWallPref": prefs.edit().putBoolean("kbWall", m.optBoolean("on", true)).apply(); break;
+            case "wallReady": main.post(this::applyLookIfChanged); break;
+            case "wallOff": main.post(this::applyLookIfChanged); break;
             case "deskAsk": main.post(() -> { prefs.edit().remove("pendingDesk").apply(); askDeskShortcut(m.optString("pkg")); }); break;
             case "appUpd": main.post(() -> refreshDeskIcons(true)); break;
             case "battPref":
-                prefs.edit().putInt("battSkin", m.optInt("s", 2)).putBoolean("battUp", m.optBoolean("up")).apply();
                 if (cbar != null) cbar.invalidate();
                 break;
             case "pOrient":

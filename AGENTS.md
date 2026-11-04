@@ -99,6 +99,10 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   8 s → teléfono normal (`PhoneMode`, preguntando o directo según `sepAsk`); juntos 5 s → vuelve ChronOS. `sepPref`, `sepCal`.
 - ENFOQUE: ChronOS asiste y administra al PRINCIPAL. Fotos, archivos y apps están en el principal: lo que se elige
   desde el extendido (fondo de pantalla `wallPick`, imagen de DUAL-Draw `dwPick`) se abre en el principal.
+- Abrir pantallas desde segundo plano (Android 15): `Hub.blip()` pone una ventanita de 1 px antes de `startActivity`
+  (startOwn/startOrNotify/openKeyboard). En Xiaomi además hace falta "Mostrar ventanas emergentes en segundo plano".
+- Apariencia del otro teléfono (`cardTheme`, `bg`, `wallImg`, `wallOff`, `kbWallPref`, `battPref`) la guarda `Hub` aunque
+  la mesa esté cerrada; `MainActivity.applyLookIfChanged` la aplica al volver (`lookSig`).
 - ChronOS debe funcionar en cualquier teléfono (el principal ahora es un Redmi Note 8): nada fijo a un modelo.
 - Teclado sin cuadro de texto: `RemoteIme` guarda lo escrito (no lo manda como atajos: en YouTube el espacio pausaba),
   `MesaAccess.focusTextField` busca el cuadro (o el "Di algo…") y lo toca; al aparecer un cuadro se escribe ahí (20 s).
