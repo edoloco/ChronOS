@@ -465,6 +465,8 @@ public class Hub implements Link.Listener {
             }, "fondo").start();
             return;
         }
+        // el principal abrió una app de dos pantallas: aquí (extendido) se abre la misma app, que toma su otra mitad
+        if ("dualOpen".equals(t)) { if (!isPrincipal()) main.post(() -> openDualCompanion(m.optString("pkg"))); return; }
         if ("wallPick".equals(t)) {
             if (isPrincipal()) main.post(() -> startOwn(new Intent(app, MainActivity.class).putExtra("wallPick", true)
                     .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), () -> false, 94, "Fondo de pantalla", "Toca para elegir la imagen"));
@@ -805,6 +807,42 @@ public class Hub implements Link.Listener {
     }
 
     /** Abre una pantalla; si Android no lo permite con la app de fondo, deja un aviso de un toque. */
+    // ---------------- apps de dos pantallas (como DUAL Motion) ----------------
+
+    private static final java.util.Set<String> DUAL_APPS = new java.util.HashSet<>(java.util.Arrays.asList("cl.dualmotion"));
+    private static final java.util.Map<String, Boolean> dualCache = new java.util.HashMap<>();
+
+    /** ¿Es una app hecha para las dos pantallas? (las conocidas, o las que lo declaran con meta-data "chronos.dual"). */
+    static boolean isDualApp(Context c, String pkg) {
+        if (pkg == null || pkg.equals(c.getPackageName())) return false;
+        if (DUAL_APPS.contains(pkg)) return true;
+        Boolean b = dualCache.get(pkg);
+        if (b != null) return b;
+        boolean v = false;
+        try {
+            android.content.pm.ApplicationInfo ai = c.getPackageManager().getApplicationInfo(pkg, android.content.pm.PackageManager.GET_META_DATA);
+            v = ai.metaData != null && ai.metaData.getBoolean("chronos.dual", false);
+        } catch (Exception ignored) { }
+        dualCache.put(pkg, v);
+        return v;
+    }
+
+    /** Extendido: abre la otra mitad de la app de dos pantallas (si está instalada aquí). */
+    void openDualCompanion(String pkg) {
+        Intent li = app.getPackageManager().getLaunchIntentForPackage(pkg);
+        String label = pkg;
+        try { label = String.valueOf(app.getPackageManager().getApplicationLabel(app.getPackageManager().getApplicationInfo(pkg, 0))); } catch (Exception ignored) { }
+        if (li == null) {
+            Intent store = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/edoloco/" + ("cl.dualmotion".equals(pkg) ? "dual-motion/releases/latest" : "")))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startOrNotify(store, 92, "Falta " + label + " en el extendido", "Instálala aquí también para usar las dos pantallas");
+            return;
+        }
+        li.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+        if (foreground) { try { app.startActivity(li); return; } catch (Exception ignored) { } }
+        startOrNotify(li, 92, label, "Toca para abrir " + label + " en esta pantalla");
+    }
+
     private android.view.View blipView;
     private final Runnable unblip = this::removeBlip;
 
