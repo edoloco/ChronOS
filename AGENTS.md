@@ -123,6 +123,10 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
 - Ajustes → Configuración → **Teclados automáticos** (`kbAutoMenu`, se copian al otro con `prefSet`): `autoKb`
   (cuadro de texto), `autoKbChat` (apps de chat, `openKb`), `autoVideo` 0 control de video / 1 teclado / 2 nada
   (`mActive` en Hub), `autoAsist` (RetroArch), `vertKbAuto`, `kbSpaceFix`.
+- **Sonido 3D** (`Sound3D`, perilla en "Nivelar volumen (Boost)", pref `boost3d` 0..100, en vivo con `Sound3D.live`,
+  se copia con `prefSet`): ensancha el estéreo (M/S), cancela el cruce (resta del otro lado atrasado ~0,22 ms y sin
+  agudos) y realza agudos. Completo en `Boost.Engine` (música y video de ChronOS); en `CaptureService` (apps) solo
+  se procesa lo que va al extendido (el principal suena tal cual).
 - Extendido sin conexión: `Hub.lostLock` lo bloquea a los `lostLockSec` (30/60/120/0 = no) segundos de perder al
   principal (solo si estuvo conectado y no está en modo teléfono).
 - Fondo de pantalla (`Wall`): una imagen repartida entre las dos pantallas (`wallImg`/`wallOff`); el teclado la usa

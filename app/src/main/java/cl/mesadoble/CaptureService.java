@@ -80,13 +80,19 @@ public class CaptureService extends Service {
         byte[] st = new byte[frames * 4], mono = new byte[frames * 2];
         try {
             rec.startRecording();
+            Sound3D fx = null;
             while (!stop) {
                 int n = rec.read(st, 0, st.length);
                 if (n <= 0) continue;
                 int f = n / 4;
+                // sonido 3D: el principal suena tal cual (es la app), así que el extendido lleva el lado izquierdo
+                // ensanchado y con realce; la diferencia entre los dos es lo que da el espacio
+                int lv = Sound3D.live;
+                if (lv <= 0) fx = null; else if (fx == null || fx.level != lv) fx = new Sound3D(RATE, lv, false);
                 for (int k = 0; k < f; k++) {   // izquierda + derecha → un solo canal
                     int l = (short) ((st[k * 4] & 0xff) | (st[k * 4 + 1] << 8)), r = (short) ((st[k * 4 + 2] & 0xff) | (st[k * 4 + 3] << 8));
                     int m = (l + r) / 2;
+                    if (fx != null) { fx.process(l, r); m = Sound3D.clip(fx.l()); }
                     mono[k * 2] = (byte) m; mono[k * 2 + 1] = (byte) (m >> 8);
                 }
                 long now = System.currentTimeMillis();

@@ -2130,8 +2130,9 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         knobs.setGravity(Gravity.CENTER);
         Knob kp = new Knob(this, 0, Boost.GAIN_MAX, Boost.gain(this, true)).label("Principal");
         Knob ke = new Knob(this, 0, Boost.GAIN_MAX, Boost.gain(this, false)).label("Extendido");
+        Knob k3 = new Knob(this, 0, 100, Sound3D.level(this)).label("Sonido 3D").suffix(" %");
         int face = n ? 0xFF2A3744 : 0xFFFFFFFF;
-        for (Knob k : new Knob[]{kp, ke}) {
+        for (Knob k : new Knob[]{kp, ke, k3}) {
             k.colors(Ui.fg(n), (Ui.fg(n) & 0x00FFFFFF) | 0x26000000, face);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1);
             lp.setMargins(dp(6), dp(4), dp(6), dp(4));
@@ -2143,10 +2144,16 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         };
         kp.setChange(ch);
         ke.setChange(ch);
+        k3.setChange((v, done) -> {   // en vivo: se oye el cambio mientras se gira
+            Sound3D.set(this, k3.value());
+            if (done && hub.connected()) hub.send("prefSet", "k", "boost3d", "i", k3.value());
+        });
         box.addView(knobs);
         TextView tip = new TextView(this);
         tip.setText("Gira cada perilla (o arrástrala hacia arriba o abajo). Doble toque: vuelve a 100 %. "
-                + "Baja la del teléfono que suena más fuerte, o sube la del más suave, y prueba hasta que suenen igual.");
+                + "Baja la del teléfono que suena más fuerte, o sube la del más suave, y prueba hasta que suenen igual. "
+                + "Sonido 3D: como la Nintendo DSi, el sonido sale «por fuera» y se oyen más detalles (0 % = apagado). "
+                + "Se nota más en la música y videos de ChronOS; en YouTube y otras apps, un poco menos.");
         tip.setTextSize(12.5f);
         tip.setTextColor(Ui.muted(n));
         tip.setPadding(dp(6), dp(6), dp(6), dp(4));

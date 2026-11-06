@@ -481,6 +481,7 @@ final class Boost {
                 MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
                 boolean inEos = false, wasPlaying = true;
                 byte[] right = new byte[0], left = new byte[0];
+                Sound3D fx = null;
                 while (!stop) {
                     if (seekMs >= 0) {
                         ex.seekTo(seekMs * 1000, MediaExtractor.SEEK_TO_CLOSEST_SYNC);
@@ -521,9 +522,13 @@ final class Boost {
                             int frames = info.size / 2 / Math.max(1, ch);
                             if (right.length < frames * 2) { right = new byte[frames * 2]; left = new byte[frames * 2]; }
                             ob.order(ByteOrder.LITTLE_ENDIAN);
+                            int lv = Sound3D.live;   // sonido 3D: se ajusta en vivo con la perilla
+                            if (lv <= 0 || ch < 2) fx = null;
+                            else if (fx == null || fx.level != lv || fx.rate != sr) fx = new Sound3D(sr, lv, true);
                             for (int f = 0; f < frames; f++) {
                                 short l = ob.getShort(), r = l;
                                 if (ch >= 2) { r = ob.getShort(); for (int k = 2; k < ch; k++) ob.getShort(); }
+                                if (fx != null) { fx.process(l, r); l = Sound3D.clip(fx.l()); r = Sound3D.clip(fx.r()); }
                                 left[f * 2] = (byte) l; left[f * 2 + 1] = (byte) (l >> 8);
                                 right[f * 2] = (byte) r; right[f * 2 + 1] = (byte) (r >> 8);
                             }

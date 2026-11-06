@@ -157,6 +157,7 @@ public class Hub implements Link.Listener {
         prefs.edit().putInt("side", s).apply();
         ForceView.apply(app);   // cada teléfono aplica la vista forzada de su papel
         Boost.loadGain(app);    // y su nivel de volumen de Boost
+        Sound3D.level(app);     // y el sonido 3D
         if (changed || !started) { started = true; link.start(s == 0); }
     }
 
@@ -615,6 +616,7 @@ public class Hub implements Link.Listener {
             String k = m.optString("k");
             if (m.has("b")) prefs.edit().putBoolean(k, m.optBoolean("b")).apply();
             else prefs.edit().putInt(k, m.optInt("i")).apply();
+            if ("boost3d".equals(k)) Sound3D.live = m.optInt("i");
             return;
         }
         if ("vertKbPref".equals(t)) { prefs.edit().putBoolean("vertKbAuto", m.optBoolean("on")).apply(); return; }
