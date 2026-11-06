@@ -1973,21 +1973,17 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 "Qué sensor o sensores deciden que la tapa se cerró", this::lidSensorsMenu);
         sh.option(Ui.LOCK, "Prueba de sensores", "Proximidad, luz e imán de los dos teléfonos: para detectar la tapa cerrada",
                 () -> startActivity(SensorTestActivity.intent(this)));
-        sh.option(Ui.AUTO, -1, "Teclado automático: " + (auto ? "sí" : "no"),
-                        "El teclado aparece solo en el extendido al escribir", auto, () -> {
-                            prefs.edit().putBoolean("autoKb", !auto).apply();
-                            Toast.makeText(this, !auto ? "El teclado se abrirá solo en el extendido" : "Teclado automático desactivado", Toast.LENGTH_SHORT).show();
+        int lsec = prefs.getInt("lostLockSec", 30);
+        sh.option(Ui.AUTO, "Teclados automáticos", "Qué teclado se abre solo en el extendido: al escribir, en chats, videos y RetroArch", this::kbAutoMenu)
+                .option(Ui.LOCK, -1, "Extendido sin conexión: " + (lsec == 0 ? "no bloquear" : "bloquear a los " + lsec + " s"),
+                        "Si pierde al principal, el extendido se bloquea pasado ese rato", lsec > 0, () -> {
+                            int[] opts = {30, 60, 120, 0};
+                            int nx = opts[0];
+                            for (int i = 0; i < opts.length; i++) if (opts[i] == lsec) nx = opts[(i + 1) % opts.length];
+                            setShared("lostLockSec", nx);
                             configMenu();
-                        })
-                .option(Ui.KB_TOUCHPAD, -1, "Teclado vertical automático: " + (prefs.getBoolean("vertKbAuto", true) ? "sí" : "no"),
-                        "Con el principal de pie, al escribir: arriba deslizas, abajo escribes", prefs.getBoolean("vertKbAuto", true), () -> {
-                            boolean on = !prefs.getBoolean("vertKbAuto", true);
-                            prefs.edit().putBoolean("vertKbAuto", on).apply();
-                            hub.send("vertKbPref", "on", on);
-                            Toast.makeText(this, on ? "El teclado vertical saldrá solo" : "Teclado vertical automático desactivado", Toast.LENGTH_SHORT).show();
-                            configMenu();
-                        })
-                .option(principal ? Ui.LOCK : Ui.UNLOCK, -1, "Pantalla unida: " + (ScreenSync.enabled(this) ? "sí" : "no"),
+                        });
+        sh.option(principal ? Ui.LOCK : Ui.UNLOCK, -1, "Pantalla unida: " + (ScreenSync.enabled(this) ? "sí" : "no"),
                         "El extendido se enciende, desbloquea y bloquea junto con el principal", ScreenSync.enabled(this), () -> {
                             boolean on = !ScreenSync.enabled(this);
                             prefs.edit().putBoolean("syncScreen", on).apply();
@@ -2060,6 +2056,34 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     /** Elegir qué sensores bloquean al cerrar la tapa (se guarda en los dos teléfonos). */
+    /** Un ajuste que vale para los dos teléfonos (el que lo usa suele ser el extendido). */
+    private void setShared(String k, boolean v) { prefs.edit().putBoolean(k, v).apply(); hub.send("prefSet", "k", k, "b", v); }
+    private void setShared(String k, int v) { prefs.edit().putInt(k, v).apply(); hub.send("prefSet", "k", k, "i", v); }
+
+    /** Ajustes → Configuración → Teclados automáticos: qué se abre solo en el extendido. */
+    private void kbAutoMenu() {
+        Ui.Sheet sh = new Ui.Sheet(this).title("Teclados automáticos")
+                .message("Qué aparece solo en el extendido según lo que pasa en el principal. Toca para cambiar.");
+        boolean auto = hub.autoKeyboard(), chat = prefs.getBoolean("autoKbChat", true), vert = prefs.getBoolean("vertKbAuto", true),
+                asist = prefs.getBoolean("autoAsist", true), fixSp = prefs.getBoolean("kbSpaceFix", true);
+        int av = prefs.getInt("autoVideo", 0);
+        String[] avName = {"Control de video", "Teclado", "Nada"};
+        sh.option(Ui.KB_TOUCHPAD, -1, "Al tocar un cuadro de texto: " + (auto ? "teclado" : "nada"),
+                "Escribir en cualquier app del principal", auto, () -> { setShared("autoKb", !auto); kbAutoMenu(); });
+        sh.option(Ui.KB_TOUCHPAD, -1, "En apps de chat: " + (chat ? "teclado" : "nada"),
+                "WhatsApp, Telegram, Messenger…: el teclado listo al abrirlas", chat, () -> { setShared("autoKbChat", !chat); kbAutoMenu(); });
+        sh.option(Ui.AUTO, -1, "Al ver un video: " + avName[av],
+                "YouTube y otras apps de video (el teclado sirve para buscar y comentar)", av != 2, () -> { setShared("autoVideo", (av + 1) % 3); kbAutoMenu(); });
+        sh.option(Ui.AUTO, -1, "Con RetroArch: " + (asist ? "Game-Asist" : "nada"),
+                "Partidas guardadas, rebobinar y la segunda pantalla del DS", asist, () -> { setShared("autoAsist", !asist); kbAutoMenu(); });
+        sh.option(Ui.KB_TOUCHPAD, -1, "Teclado vertical con el principal de pie: " + (vert ? "sí" : "no"),
+                "Arriba deslizas, abajo escribes", vert, () -> { setShared("vertKbAuto", !vert); hub.send("vertKbPref", "on", !vert); kbAutoMenu(); });
+        sh.option(Ui.CHECK, -1, "Arreglar espacios mal apretados: " + (fixSp ? "sí" : "no"),
+                "«tengonsueño» → «tengo sueño», «hola.como» → «hola como» (borrando el espacio se puede deshacer)", fixSp,
+                () -> { setShared("kbSpaceFix", !fixSp); kbAutoMenu(); });
+        sh.button("Volver", false, this::configMenu).show();
+    }
+
     private void lidSensorsMenu() {
         Ui.Sheet sh = new Ui.Sheet(this).title("Sensores de la tapa")
                 .message("Marca los que deben notar la tapa cerrada. Usa la Prueba de sensores para ver cuál responde mejor en tu carcasa.");

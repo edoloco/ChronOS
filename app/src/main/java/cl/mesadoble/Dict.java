@@ -39,7 +39,73 @@ public class Dict {
         String[] ws = w.toArray(new String[0]);
         String[] ks = new String[ws.length];
         for (int i = 0; i < ws.length; i++) ks[i] = plain(ws[i]);
-        words = ws; keys = ks; ready = true;
+        java.util.HashMap<String, Integer> rk = new java.util.HashMap<>(ks.length * 2);
+        for (int i = 0; i < ks.length; i++) rk.putIfAbsent(ks[i], i);
+        words = ws; keys = ks; rank = rk; ready = true;
+    }
+
+    private java.util.Map<String, Integer> rank = new java.util.HashMap<>();   // palabra sin tildes → puesto (0 = la más usada)
+
+    /** ¿Es una palabra que existe (diccionario, diccionario del principal o escrita varias veces)? */
+    boolean known(String w) {
+        if (w == null || w.isEmpty()) return false;
+        String k = plain(w), low = w.toLowerCase();
+        return rank.containsKey(k) || userWords.containsKey(low) || learned.getOrDefault(low, 0) >= 3;
+    }
+
+    private int rankOf(String w) {
+        Integer r = rank.get(plain(w));
+        if (r != null) return r;
+        return known(w) ? 5000 : Integer.MAX_VALUE / 4;
+    }
+
+    /**
+     * Espacio que se apretó mal: "tengonsueño" → "tengo sueño" (la n, b, m, v o c están junto a la barra).
+     * Solo si la palabra entera no existe y las dos mitades sí. null si no hay arreglo seguro.
+     */
+    String splitSpace(String w) {
+        if (!ready || w == null || w.length() < 5 || known(w)) return null;
+        String best = null; long bestScore = Long.MAX_VALUE;
+        for (int i = 2; i < w.length() - 2; i++) {
+            char ch = Character.toLowerCase(w.charAt(i));
+            if ("nmbvcñ".indexOf(ch) < 0) continue;
+            String a = w.substring(0, i), b = w.substring(i + 1);
+            if (!rank.containsKey(plain(a)) || !rank.containsKey(plain(b))) continue;
+            long sc = (long) rankOf(a) + rankOf(b);
+            String cand = a + " " + b;
+            // si la letra también calza en una de las palabras, faltó el espacio (no se apretó en su lugar): "vamosmal" → "vamos mal"
+            String a1 = w.substring(0, i + 1), b1 = w.substring(i);
+            if (rank.containsKey(plain(a1)) && rank.containsKey(plain(b))) { cand = a1 + " " + b; sc = (long) rankOf(a1) + rankOf(b); }
+            else if (rank.containsKey(plain(a)) && rank.containsKey(plain(b1))) { cand = a + " " + b1; sc = (long) rankOf(a) + rankOf(b1); }
+            if (sc < bestScore) { bestScore = sc; best = cand; }
+        }
+        if (best != null) {   // la segunda mitad con sus tildes ("sueno" → "sueño")
+            int sp = best.indexOf(' ');
+            String b = best.substring(sp + 1);
+            Integer r = rank.get(plain(b));
+            if (r != null && !words[r].equals(b.toLowerCase()) && plain(words[r]).equals(plain(b))) best = best.substring(0, sp + 1) + matchCase(b, words[r]);
+        }
+        return best;
+    }
+
+    /** Correcciones para una palabra ya escrita (al borrar el espacio de después): tildes y tipeos cercanos. */
+    List<String> corrections(String typed, int n) {
+        List<String> out = new ArrayList<>();
+        if (!ready || typed == null || typed.length() < 2) return out;
+        String low = typed.toLowerCase(), key = plain(typed);
+        Set<String> res = new LinkedHashSet<>();
+        Integer r = rank.get(key);
+        if (r != null && !words[r].equals(low)) res.add(words[r]);   // "esta" → "está"
+        String sp = splitSpace(typed);
+        if (sp != null) res.add(sp);
+        int max = key.length() >= 6 ? 2 : 1;
+        for (int i = 0; i < keys.length && res.size() < n + 2; i++) {
+            String k = keys[i];
+            if (k.equals(key) || Math.abs(k.length() - key.length()) > max) continue;
+            if (distance(key, k, max) <= (r != null ? 1 : max)) res.add(words[i]);
+        }
+        for (String x : res) { if (x.equalsIgnoreCase(typed)) continue; out.add(matchCase(typed, x)); if (out.size() >= n) break; }
+        return out;
     }
 
     /** Quita tildes, diéresis y la tilde de la ñ, para comparar sin importar cómo se escribió. */

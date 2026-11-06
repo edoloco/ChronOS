@@ -109,6 +109,22 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
 - Teclado sin cuadro de texto: `RemoteIme` guarda lo escrito (no lo manda como atajos: en YouTube el espacio pausaba),
   `MesaAccess.focusTextField` busca el cuadro (o el "Di algo…") y lo toca; al aparecer un cuadro se escribe ahí (20 s).
   El botón de modo del teclado ignora toques justo después de escribir (`KeyboardView.lastTouchAt`).
+- Escritura pulcra (`KeyboardActivity` + `RemoteIme` + `Dict`):
+  - Orden: si hay letras esperando cuadro de texto, las nuevas van DETRÁS (antes "saludos" llegaba "asludos").
+  - Acción `kb` `word {old, s}`: cambia de una vez la palabra antes del cursor (sugerencias y correcciones; antes
+    borraba con teclas sueltas y quedaba "cucumpleaño"). El borrar normal usa `deleteSurroundingTextInCodePoints`.
+  - `Dict.splitSpace`: palabra desconocida con n/m/b/v/c/ñ en medio y dos palabras conocidas a los lados →
+    "tengonsueño" → "tengo sueño" (si la letra calza en una mitad, solo faltó el espacio). "hola.como" → "hola como"
+    (punto pegado entre dos palabras conocidas en minúscula, no dominios). Pref `kbSpaceFix` (def. sí).
+  - Borrar el espacio recién puesto → correcciones en ámbar en la barra (`Dict.corrections`; si hubo arreglo
+    automático, la 1ª opción lo deshace). Se aplican con `word`.
+  - Diseño Android: franja libre de 7dp sobre la fila del espacio (cuenta como esa fila en `keyAt`), fila más alta
+    (1.2), espacio 6 unidades, coma y punto 0.8 y de tono distinto (no se confunden con la n ni el espacio).
+- Ajustes → Configuración → **Teclados automáticos** (`kbAutoMenu`, se copian al otro con `prefSet`): `autoKb`
+  (cuadro de texto), `autoKbChat` (apps de chat, `openKb`), `autoVideo` 0 control de video / 1 teclado / 2 nada
+  (`mActive` en Hub), `autoAsist` (RetroArch), `vertKbAuto`, `kbSpaceFix`.
+- Extendido sin conexión: `Hub.lostLock` lo bloquea a los `lostLockSec` (30/60/120/0 = no) segundos de perder al
+  principal (solo si estuvo conectado y no está en modo teléfono).
 - Fondo de pantalla (`Wall`): una imagen repartida entre las dos pantallas (`wallImg`/`wallOff`); el teclado la usa
   si `kbWall`. Mesa en cuadrícula por defecto (`snapGrid`), lo nuevo va al primer lugar libre (`DeskView.freeSpot`).
   La mesa es una TABLA invisible (`appGrid`): celdas iguales; cada elemento ocupa un bloque (`span`) que empieza en una

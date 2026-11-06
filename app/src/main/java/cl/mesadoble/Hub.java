@@ -262,8 +262,22 @@ public class Hub implements Link.Listener {
 
     // ---------------- Link.Listener ----------------
 
+    // el extendido se quedó sin el principal: pasado un rato se bloquea (Ajustes → Configuración → "Sin conexión")
+    private boolean everLinked;
+    private final Runnable lostLock = this::lockIfLost;
+    private void lockIfLost() {
+        if (state == Link.CONNECTED || isPrincipal() || PhoneMode.active(app)) return;
+        ScreenSync.lockNow(app, this);
+    }
+
     @Override public void onState(int st, String inf) {
         Proximity.update(app, this);   // el papel (principal/extendido) puede haber cambiado
+        if (st == Link.CONNECTED) { everLinked = true; main.removeCallbacks(lostLock); }
+        else if (state == Link.CONNECTED && everLinked && !isPrincipal()) {
+            int sec = prefs.getInt("lostLockSec", 30);
+            main.removeCallbacks(lostLock);
+            if (sec > 0) main.postDelayed(lostLock, sec * 1000L);
+        }
         state = st;
         info = inf;
         if (st == Link.CONNECTED) {
@@ -487,7 +501,7 @@ public class Hub implements Link.Listener {
             return;
         }
         if ("openAsist".equals(t)) {
-            if (!isPrincipal() && !KeyboardActivity.showingAsist)
+            if (!isPrincipal() && !KeyboardActivity.showingAsist && prefs.getBoolean("autoAsist", true))
                 main.post(() -> startOwn(new Intent(app, KeyboardActivity.class).putExtra("mode", KeyboardActivity.ASIST)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP),
                         () -> KeyboardActivity.showingAsist, 96, "Game-Asist", "Toca para abrir la ayuda de RetroArch"));
@@ -571,9 +585,15 @@ public class Hub implements Link.Listener {
         if ("mCmd".equals(t)) { if (isPrincipal()) MediaHub.command(app, m); return; }
         // un video empezó en el principal: el control de video se abre UNA vez (si se cierra, no vuelve hasta otro video)
         // (si ChronOS está a la vista, los controles salen en su action bar)
+        // qué se abre lo elige Ajustes → Teclados automáticos → "Al ver un video": control de video, teclado o nada
         if ("mActive".equals(t) && !isPrincipal() && m.optBoolean("video") && m.optBoolean("fresh")
-                && !KeyboardActivity.showingMedia && !foreground)
-            MediaHub.openControls(app, MediaHub.VIDEO);
+                && !KeyboardActivity.showingMedia && !foreground) {
+            int av = prefs.getInt("autoVideo", 0);
+            if (av == 0) MediaHub.openControls(app, MediaHub.VIDEO);
+            else if (av == 1 && !keyboardVisible)
+                startOrNotify(new Intent(app, KeyboardActivity.class).putExtra("mode", KeyboardActivity.KB).putExtra("manual", true)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP), 43, "Teclado", "Toca para abrir el teclado");
+        }
         if ("mOpen".equals(t)) {
             // la música se controla desde la action bar cuando ChronOS está a la vista
             String k = m.optString("kind");
@@ -591,6 +611,12 @@ public class Hub implements Link.Listener {
             return;
         }
         if ("pPortrait".equals(t)) { principalPortrait = m.optBoolean("on"); for (Link.Listener l : listeners) l.onMessage(m); return; }
+        if ("prefSet".equals(t)) {   // ajuste cambiado en el otro teléfono (teclados automáticos, bloqueo sin conexión)
+            String k = m.optString("k");
+            if (m.has("b")) prefs.edit().putBoolean(k, m.optBoolean("b")).apply();
+            else prefs.edit().putInt(k, m.optInt("i")).apply();
+            return;
+        }
         if ("vertKbPref".equals(t)) { prefs.edit().putBoolean("vertKbAuto", m.optBoolean("on")).apply(); return; }
         if ("xCmd".equals(t)) {   // control de YouTube/otras apps desde el extendido
             if (isPrincipal()) {
@@ -651,7 +677,7 @@ public class Hub implements Link.Listener {
             // el principal tocó un campo de texto: mostrar el teclado aquí, en el extendido
             if (!isPrincipal() && remoteImeReady && !wasReady && autoKeyboard()) openKeyboard();
         }
-        if ("openKb".equals(t) && !isPrincipal() && autoKeyboard()) openKeyboard();
+        if ("openKb".equals(t) && !isPrincipal() && prefs.getBoolean("autoKbChat", true)) openKeyboard();
         if ("kbAck".equals(t)) { if (m.optBoolean("ok")) acksOk++; else acksFail++; }
         for (Link.Listener l : listeners) l.onMessage(m);
         if ("kb".equals(t)) {

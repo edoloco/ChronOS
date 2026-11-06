@@ -48,6 +48,7 @@ public class KeyboardView extends View {
     private static Key c(String l, String s, String a) { return new Key(CHAR, l, s, a, 0, null, 1); }
     private static Key c(String l, String s, String a, float u) { return new Key(CHAR, l, s, a, 0, null, u); }
     private static Key l(String l) { return new Key(CHAR, l, null, null, 0, null, 1); }
+    private static Key l(String l, float units) { return new Key(CHAR, l, null, null, 0, null, units); }
     private static Key key(String l, int code, float u) { return new Key(KEY, l, null, null, code, null, u); }
     private static Key mod(String l, int bit, float u) { return new Key(MOD, l, null, null, bit, null, u); }
     private static Key act(String l, String a) { return new Key(ACT, l, null, null, 0, a, 1.5f); }
@@ -223,7 +224,7 @@ public class KeyboardView extends View {
     }
 
     private void buildAndroid() {
-        rowWeights = numberRow ? new float[]{1, 1, 1, 1, 1.05f} : new float[]{1, 1, 1, 1.05f};
+        rowWeights = numberRow ? new float[]{1, 1, 1, 1, 1.2f} : new float[]{1, 1, 1, 1.2f};   // la fila del espacio, más alta
         Key del = key("⌫", KeyEvent.KEYCODE_DEL, 1.5f);
         if (page == 3) { buildEmoji(del); return; }
         if (numberRow) {   // fila de números (en símbolos: más símbolos, para que todas las páginas tengan las mismas filas)
@@ -244,7 +245,7 @@ public class KeyboardView extends View {
             rows.add(new Key[]{page("?123", "page:1", 1.5f), l("¿"), l("¡"), l("["), l("]"), l("<"), l(">"), l("´"), del});
         }
         rows.add(new Key[]{page(page == 0 ? "?123" : "ABC", page == 0 ? "page:1" : "page:0", 1.3f), page("PC", "layout:pc", 1f),
-                l(","), c(" ", null, null, 5.5f), l("."), sendKey()});   // sin "saltar línea": el punto en su lugar y el espacio más ancho
+                l(",", 0.8f), c(" ", null, null, 6f), l(".", 0.8f), sendKey()});   // sin "saltar línea": el punto en su lugar y el espacio más ancho
     }
 
     public void setSink(Sink s) { sink = s; }
@@ -254,15 +255,20 @@ public class KeyboardView extends View {
         layoutKeys(w, h);
     }
 
+    private float spaceGap;
+
     private void layoutKeys(int w, int h) {
         float gap = 4 * dp, pad = 6 * dp, total = 0;
         for (float rw : rowWeights) total += rw;
-        float avail = h - 2 * pad - gap * (rows.size() - 1);
+        spaceGap = android && page != 3 ? 7 * dp : 0;
+        float avail = h - 2 * pad - gap * (rows.size() - 1) - spaceGap;
         float y = pad;
         for (int i = 0; i < rows.size(); i++) {
             Key[] row = rows.get(i);
             float rh = avail * rowWeights[i] / total, units = 0;
             for (Key k : row) units += k.units;
+            // teclado Android: una franja libre sobre la fila del espacio, para no apretar la n (o la b, la m) por el espacio
+            if (android && i == rows.size() - 1 && page != 3) y += spaceGap;
             float uw = (w - 2 * pad - gap * (row.length - 1)) / units, x = pad;
             for (Key k : row) { float kw = uw * k.units; k.r.set(x, y, x + kw, y + rh); x += kw + gap; }
             y += rh + gap;
@@ -286,7 +292,8 @@ public class KeyboardView extends View {
             boolean active = k.down || (k.type == MOD && k.code != 0 && (mods & k.code) != 0) || (android && k.type == MOD && k.code == SHIFT && caps)
                     || (k.type == MOD && k.code == 0 && caps) || (k.type == CHAR && k.label.equals(deadKey));
             if (k.type == ACT && k.act != null && k.act.equals("emo:cat:" + emoCat) && page == 3) active = true;
-            boolean special = !(k.type == CHAR);
+            // la coma y el punto, de otro tono que las letras: así se distinguen del espacio y de la n
+            boolean special = !(k.type == CHAR) || (android && page == 0 && (",".equals(k.label) || ".".equals(k.label)));
             boolean send = k.type == ACT && "send".equals(k.act);
             boolean layout = k.type == ACT && k.act != null && k.act.startsWith("layout:");   // PC / Android: verde agua
             keyBg.setColor(layout ? 0xFF2EC4B6 : active || send ? accent : special ? keyDark : keyColor);
@@ -324,6 +331,11 @@ public class KeyboardView extends View {
         for (Key[] row : rows) for (Key k : row) {
             RectF r = k.r;
             if (x >= r.left - 2 * dp && x <= r.right + 2 * dp && y >= r.top - 2 * dp && y <= r.bottom + 2 * dp) return k;
+        }
+        // la franja libre sobre la fila del espacio cuenta para esa fila (apuntar al espacio y quedar corto da espacio, no n)
+        if (spaceGap > 0 && !rows.isEmpty()) for (Key k : rows.get(rows.size() - 1)) {
+            RectF r = k.r;
+            if (x >= r.left - 2 * dp && x <= r.right + 2 * dp && y >= r.top - spaceGap - 2 * dp && y < r.top) return k;
         }
         return null;
     }

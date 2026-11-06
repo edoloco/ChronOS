@@ -196,6 +196,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
             t.setSingleLine(true);
             t.setEllipsize(TextUtils.TruncateAt.END);
             t.setTextColor(th.fg);
+            suggestFg = th.fg;
             t.setTypeface(Typeface.create("sans-serif", i == 0 ? Typeface.BOLD : Typeface.NORMAL));
             GradientDrawable g = new GradientDrawable();
             g.setColor(th.keyDark);
@@ -756,11 +757,47 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     private void sendText(String s) { hub.send("kb", "a", "text", "s", s, "q", ++kbSeq, "qs", KB_SESSION); }
     private void sendKey(int code, int meta, int n) { hub.send("kb", "a", "key", "k", code, "m", meta, "n", n, "q", ++kbSeq, "qs", KB_SESSION); }
 
+    private void sendWord(String old, String s) { hub.send("kb", "a", "word", "old", old, "s", s, "q", ++kbSeq, "qs", KB_SESSION); }
+
+    // la última palabra terminada (para corregirla si se borra el espacio de después) y el punto pegado ("hola.como")
+    private String lastWord, lastFixFrom, prevDot, corrOld;
+    private boolean justSep;
+    private int suggestFg = 0xFFFFFFFF;
+    private List<String> corrOpts = new java.util.ArrayList<>();
+
+    private boolean spaceFix() { return getSharedPreferences("mesa", MODE_PRIVATE).getBoolean("kbSpaceFix", true); }
+
+    private static final java.util.Set<String> DOMAINS = new java.util.HashSet<>(java.util.Arrays.asList(
+            "com", "cl", "net", "org", "es", "ar", "mx", "io", "app", "gob", "edu", "co", "pe", "uy", "html", "php", "jpg", "png", "pdf"));
+
     @Override public void text(String s) {
-        sendText(s);
         boolean letters = !s.isEmpty();
         for (int i = 0; i < s.length(); i++) if (!Character.isLetter(s.charAt(i))) { letters = false; break; }
-        if (letters) word.append(s); else { dict.learn(word.toString()); word.setLength(0); }
+        corrOld = null;
+        if (letters) {
+            sendText(s);
+            word.append(s);
+            justSep = false;
+        } else {
+            String w = word.toString();
+            String sent = null, from = null;
+            if (" ".equals(s) && spaceFix() && !w.isEmpty()) {
+                String sp = dict.splitSpace(w);
+                if (sp != null) { sent = sp; from = w; sendWord(w, sp + " "); }   // "tengonsueño" → "tengo sueño"
+                else if (prevDot != null && w.equals(w.toLowerCase()) && w.length() >= 2 && !DOMAINS.contains(w)
+                        && !prevDot.toLowerCase().startsWith("www") && dict.known(prevDot) && dict.known(w)) {
+                    from = prevDot + "." + w; sent = prevDot + " " + w;   // "hola.como" → "hola como"
+                    sendWord(from, sent + " ");
+                }
+            }
+            if (sent == null) { sendText(s); sent = w; }
+            prevDot = ".".equals(s) && !w.isEmpty() ? w : null;
+            dict.learn(from != null ? sent.substring(sent.lastIndexOf(' ') + 1) : w);
+            lastWord = sent.isEmpty() ? null : sent;
+            lastFixFrom = from;
+            justSep = " ".equals(s) && lastWord != null;
+            word.setLength(0);
+        }
         fix = null;
         refreshSuggestions();
     }
@@ -768,9 +805,22 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     @Override public void key(int code, int meta) {
         sendKey(code, meta, 1);
         fix = null;
+        corrOld = null;
         if (code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_TAB) dict.learn(word.toString());
         if (code == KeyEvent.KEYCODE_DEL && meta == 0 && word.length() > 0) word.setLength(word.length() - 1);
-        else word.setLength(0);
+        else if (code == KeyEvent.KEYCODE_DEL && meta == 0 && justSep && lastWord != null) {
+            // borró el espacio recién puesto: vio algo mal en la palabra → se ofrecen correcciones
+            String lw = lastWord;
+            word.setLength(0);
+            word.append(lw.substring(lw.lastIndexOf(' ') + 1));
+            corrOpts = new java.util.ArrayList<>();
+            if (lastFixFrom != null) corrOpts.add(lastFixFrom);   // deshacer el arreglo automático
+            for (String c : dict.corrections(word.toString(), 3)) if (!corrOpts.contains(c) && corrOpts.size() < 3) corrOpts.add(c);
+            if (!corrOpts.isEmpty()) corrOld = lastFixFrom != null ? lw : word.toString();
+        } else word.setLength(0);
+        justSep = false;
+        prevDot = null;
+        lastWord = null;
         refreshSuggestions();
     }
 
@@ -797,6 +847,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         for (int i = 0; i < 3; i++) {
             TextView t = (TextView) suggestBar.getChildAt(i);
             String v = a != null && i < a.length() ? a.optString(i) : "";
+            t.setTextColor(suggestFg);
             t.setText(v);
             t.setVisibility(v.isEmpty() ? View.INVISIBLE : View.VISIBLE);
         }
@@ -806,6 +857,17 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         if (suggestBar == null) return;
         if (fix != null) return;
         h.removeCallbacks(askSpell);
+        if (corrOld != null) {   // correcciones de la palabra a la que se le borró el espacio (en color, para que se noten)
+            for (int i = 0; i < 3; i++) {
+                TextView t = (TextView) suggestBar.getChildAt(i);
+                String v = i < corrOpts.size() ? corrOpts.get(i) : "";
+                t.setText(v);
+                t.setTextColor(0xFFF0B040);   // ámbar: son correcciones, no sugerencias
+                t.setVisibility(v.isEmpty() ? View.INVISIBLE : View.VISIBLE);
+            }
+            return;
+        }
+        for (int i = 0; i < 3; i++) ((TextView) suggestBar.getChildAt(i)).setTextColor(suggestFg);
         if (word.length() >= 2) h.postDelayed(askSpell, 120);
         List<String> s = new java.util.ArrayList<>();
         if (phoneFor.equals(word.toString())) for (String p : phoneSugg) if (!s.contains(p) && s.size() < 3) s.add(p);
@@ -830,10 +892,11 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
             return;
         }
         dict.learn(s);
-        int n = word.codePointCount(0, word.length());
-        if (n > 0) sendKey(KeyEvent.KEYCODE_DEL, 0, n);
-        sendText(s + " ");
+        String old = corrOld != null ? corrOld : word.toString();
+        corrOld = null;
+        sendWord(old, s + " ");   // de una vez en el principal: "cum" → "cumpleaños " (antes quedaba "cucumpleaño")
         word.setLength(0);
+        lastWord = s; lastFixFrom = null; justSep = true; prevDot = null;
         refreshSuggestions();
     }
 

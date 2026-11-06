@@ -215,8 +215,17 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
         String a = m.optString("a");
         // sin un cuadro de texto elegido, las letras le llegarían a la app como atajos (en YouTube el espacio pausa,
         // la k, j, l, f… también hacen cosas): se guardan, se busca el cuadro de texto y se escriben ahí
-        if (("text".equals(a) || "key".equals(a)) && noField()) {
-            long now = SystemClock.uptimeMillis();
+        boolean typing = "text".equals(a) || "key".equals(a) || "word".equals(a);
+        long now0 = SystemClock.uptimeMillis();
+        if (typing && !waiting.isEmpty() && now0 - waitingAt <= 20000) {
+            // ya hay letras esperando: las nuevas van detrás (si no, "saludos" llegaba como "asludos")
+            waiting.add(m);
+            waitingAt = now0;
+            if (!noField()) flushWaiting();
+            return;
+        }
+        if (typing && noField()) {
+            long now = now0;
             if (now - waitingAt > 20000) waiting.clear();
             boolean first = waiting.isEmpty();
             waiting.add(m);
@@ -267,8 +276,40 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
             case "text":
                 ic.commitText(m.optString("s"), 1);
                 break;
+            case "word": {   // sugerencia o corrección: cambia de una vez la palabra recién escrita (sin "cucumpleaño")
+                String old = m.optString("old"), nw = m.optString("s");
+                ic.beginBatchEdit();
+                ic.finishComposingText();
+                CharSequence before = ic.getTextBeforeCursor(Math.max(1, old.length() + 2), 0);
+                String b = before == null ? "" : before.toString();
+                int del = 0;
+                if (!old.isEmpty()) {
+                    if (b.endsWith(old)) del = old.length();
+                    else if (b.toLowerCase(java.util.Locale.ROOT).endsWith(old.toLowerCase(java.util.Locale.ROOT))) del = old.length();
+                    else if (b.endsWith(old + " ")) del = old.length() + 1;
+                    else {   // no calza (la app cambió el texto): se borra solo la palabra que hay antes del cursor
+                        int i = b.length();
+                        while (i > 0 && Character.isLetterOrDigit(b.charAt(i - 1))) i--;
+                        del = b.length() - i;
+                    }
+                }
+                if (del > 0) ic.deleteSurroundingText(del, 0);
+                ic.commitText(nw, 1);
+                ic.endBatchEdit();
+                break;
+            }
             case "key": {
                 int code = m.optInt("k"), meta = m.optInt("m"), n = Math.max(1, Math.min(500, m.optInt("n", 1)));
+                if (code == KeyEvent.KEYCODE_DEL && meta == 0) {   // borrar sin teclas sueltas (no se pierden ni se desordenan)
+                    CharSequence sel = ic.getSelectedText(0);
+                    if (sel != null && sel.length() > 0) { ic.commitText("", 1); n--; }
+                    if (n > 0) {
+                        CharSequence bf = ic.getTextBeforeCursor(1, 0);
+                        if (bf == null) { ic.beginBatchEdit(); for (int i = 0; i < n; i++) sendDownUpKeyEvents(code); ic.endBatchEdit(); }
+                        else if (bf.length() > 0) ic.deleteSurroundingTextInCodePoints(n, 0);
+                    }
+                    break;
+                }
                 ic.beginBatchEdit();
                 for (int i = 0; i < n; i++) {
                     if (code == KeyEvent.KEYCODE_ENTER && meta == 0) sendKeyChar('\n');
