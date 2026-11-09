@@ -10,6 +10,8 @@ import android.os.Bundle;
  */
 public class NetAsk extends Activity {
 
+    private boolean answered;
+
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
         Hub hub = Hub.get(this);
@@ -25,15 +27,16 @@ public class NetAsk extends Activity {
             d.setTitle("Conectar la red del principal")
              .setMessage((why != null && !why.isEmpty() ? why : "Esto") + " necesita una conexión más rápida que Bluetooth. "
                      + "¿Uno los teléfonos por una red Wi-Fi temporal del principal? Se conecta sola y se apaga cuando ya no se usa.")
-             .setPositiveButton("Sí", (x, y) -> hub.netGo())
+             .setPositiveButton("Sí", (x, y) -> { answered = true; hub.netGo(); })
              .setNeutralButton("Siempre sí", (x, y) -> {
+                 answered = true;
                  getSharedPreferences("mesa", MODE_PRIVATE).edit().putBoolean("netAlways", true).apply();
                  hub.send("prefSet", "k", "netAlways", "b", true);
                  hub.netGo();
              })
              .setNegativeButton("No", (x, y) -> hub.netDeclined());
         }
-        d.setOnDismissListener(x -> finish());
+        d.setOnDismissListener(x -> { if (!idle && !answered) hub.netDeclined(); finish(); });   // cerrar sin elegir = "No"
         d.show();
     }
 }

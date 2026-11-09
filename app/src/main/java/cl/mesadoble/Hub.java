@@ -129,7 +129,7 @@ public class Hub implements Link.Listener {
     public void needNet(String why) {
         if (link.hasNet() || !link.isConnected() || link.joinMode() != 1) return;
         long now = System.currentTimeMillis();
-        if (now - netAskedAt < 20000 || now - netNoAt < 60000) return;
+        if (now - netAskedAt < 45000 || now - netNoAt < 600000) return;   // "No": no se vuelve a preguntar en 10 min
         netAskedAt = now;
         if (prefs.getBoolean("netAlways", false)) { netGo(); return; }
         if (isPrincipal()) { send("netOffer", "why", why == null ? "" : why); return; }   // se pregunta donde se está usando: el extendido

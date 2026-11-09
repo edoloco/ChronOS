@@ -266,9 +266,23 @@ public class Link {
         final String line = msg.toString();
         Conn a = active();
         if (a != null && a.bt) {
-            boolean stream = STREAMS.contains(msg.optString("t"));
-            if (stream || line.length() > 24000) { Runnable r = onBig; if (r != null) main.post(r); }
-            if (stream) return;
+            // imágenes en vivo (DS, cámara, boceto): no caben por Bluetooth → se ofrece la red rápida
+            if (STREAMS.contains(msg.optString("t"))) { Runnable r = onBig; if (r != null) main.post(r); return; }
+            if (line.length() > 1500000) return;   // algo enorme: no se atasca el Bluetooth
+            // por Bluetooth lo grande (íconos, carátulas, fondos) va en trozos y lo chico (teclas, teclado
+            // automático, controles) se cuela entre trozo y trozo: ya no queda esperando detrás
+            if (line.length() <= CHUNK) hiQ.add(line);
+            else {
+                int id = ++chunkId, n = (line.length() + CHUNK - 1) / CHUNK;
+                for (int i = 0; i < n; i++) {
+                    try {
+                        loQ.add(new JSONObject().put("t", "ck").put("id", id).put("i", i).put("n", n)
+                                .put("d", line.substring(i * CHUNK, Math.min(line.length(), (i + 1) * CHUNK))).toString());
+                    } catch (Exception ignored) { }
+                }
+            }
+            writer.execute(this::pumpBt);
+            return;
         } else if (line.length() > 8000) bigAt = System.currentTimeMillis();
         writer.execute(() -> {
             Conn c = active();
@@ -282,6 +296,25 @@ public class Link {
             }
         });
     }
+
+    private static final int CHUNK = 2000;
+    private final java.util.concurrent.ConcurrentLinkedQueue<String> hiQ = new java.util.concurrent.ConcurrentLinkedQueue<>(), loQ = new java.util.concurrent.ConcurrentLinkedQueue<>();
+    private int chunkId;
+
+    /** Manda por Bluetooth: primero todo lo chico, después UN trozo de lo grande, y vuelve a mirar lo chico. */
+    private void pumpBt() {
+        while (true) {
+            String x = hiQ.poll();
+            if (x == null) x = loQ.poll();
+            if (x == null) return;
+            Conn c = active();
+            if (c == null) { hiQ.clear(); loQ.clear(); return; }
+            try { c.w.write(x); c.w.write('\n'); c.w.flush(); } catch (IOException e) { drop(c); return; }
+        }
+    }
+
+    // trozos que llegan (por Bluetooth) de un mensaje grande
+    private final java.util.Map<Integer, StringBuilder> parts = new java.util.HashMap<>();
 
     /** Conexión manual por IP (por si la búsqueda automática no funciona en esa red). */
     public void connectTo(final String ip) {
@@ -427,7 +460,18 @@ public class Link {
                     }
                     if (!c.bt && line.length() > 8000) bigAt = c.rxAt;
                     try {
-                        final JSONObject o = new JSONObject(line);
+                        JSONObject o0 = new JSONObject(line);
+                        if ("ck".equals(o0.optString("t"))) {   // un trozo: se junta hasta el último
+                            int id = o0.optInt("id"), i = o0.optInt("i"), n = o0.optInt("n");
+                            StringBuilder b = parts.get(id);
+                            if (i == 0) { b = new StringBuilder(); parts.put(id, b); if (parts.size() > 8) parts.keySet().removeIf(k -> k < id - 8); }
+                            if (b == null) continue;
+                            b.append(o0.optString("d"));
+                            if (i < n - 1) continue;
+                            parts.remove(id);
+                            o0 = new JSONObject(b.toString());
+                        }
+                        final JSONObject o = o0;
                         main.post(() -> listener.onMessage(o));
                     } catch (Exception ignored) { }
                 }

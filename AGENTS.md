@@ -136,6 +136,9 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
     `netAlways` / No) → `TempNet`: el principal crea una zona local sin internet (`startLocalOnlyHotspot`; Android
     <13 pide la Ubicación encendida), manda `netCfg` por Bluetooth, el extendido se une con `WifiNetworkSpecifier`
     (Android puede mostrar "Conectar") y `bindProcessToNetwork`, responde `netIp` y el principal conecta.
+  - Por Bluetooth, `Link.send` parte lo grande (> 2000) en trozos `ck {id,i,n,d}` (cola baja `loQ`) y lo chico va por
+    `hiQ`, que se manda primero entre trozo y trozo (`pumpBt`): un ícono o carátula ya no atrasa el teclado automático.
+    Solo las imágenes en vivo (STREAMS) piden la red; "No" (o cerrar la pregunta) = 10 min sin preguntar.
   - Fin de la red (`netEnd`): 0 a los 2 min sin uso (Boost, DS, archivos, mensajes grandes = uso), 1 al apagar la
     pantalla, 2 preguntando (`netIdleAsk`).
 - **Sonido 3D** (`Sound3D`, perilla en "Nivelar volumen (Boost)", pref `boost3d` 0..100, en vivo con `Sound3D.live`,
