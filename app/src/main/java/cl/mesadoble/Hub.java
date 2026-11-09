@@ -855,11 +855,13 @@ public class Hub implements Link.Listener {
 
     /** Extendido: abre la otra mitad de la app de dos pantallas (si está instalada aquí). */
     void openDualCompanion(String pkg) {
+        // ya está al frente aquí: no se vuelve a abrir (reabrirla pausaba la app y cortaba el trazo que se estaba haciendo)
+        if (pkg.equals(MesaAccess.front)) return;
         Intent li = app.getPackageManager().getLaunchIntentForPackage(pkg);
         String label = pkg;
         try { label = String.valueOf(app.getPackageManager().getApplicationLabel(app.getPackageManager().getApplicationInfo(pkg, 0))); } catch (Exception ignored) { }
         if (li == null) {
-            Intent store = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/edoloco/" + ("cl.dualmotion".equals(pkg) ? "dual-motion/releases/latest" : "")))
+            Intent store = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://github.com/edoloco/" + ("cl.dualmotion".equals(pkg) ? "dual-motion/releases/latest" : "cl.dualdraw".equals(pkg) ? "dual-draw/releases/latest" : "")))
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startOrNotify(store, 92, "Falta " + label + " en el extendido", "Instálala aquí también para usar las dos pantallas");
             return;
