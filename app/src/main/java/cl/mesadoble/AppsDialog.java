@@ -51,10 +51,9 @@ public class AppsDialog {
         void uninstall(String pkg, String label);
     }
 
-    /** Apps propias de ChronOS que se ven como una más: DUAL-Draw y los PALS. */
+    /** Apps propias de ChronOS que se ven como una más: los PALS (DUAL Draw ahora es una app aparte, cl.dualdraw). */
     static List<App> extras(android.content.Context c) {
         List<App> l = new ArrayList<>();
-        l.add(DualDrawActivity.asApp(c));
         l.addAll(Pals.asApps(c));
         return l;
     }
@@ -333,8 +332,8 @@ public class AppsDialog {
                         selCount.setText("1 app elegida · toca otras para sumarlas");
                         adapter.notifyDataSetChanged();
                     })
-                    .option(Ui.TRASH, Pals.isPal(app.pkg) || DualDrawActivity.PKG.equals(app.pkg) ? "Es parte de ChronOS (no se desinstala)" : "Desinstalar", remote ? "Se confirma en el principal" : null, () -> {
-                        if (!Pals.isPal(app.pkg) && !DualDrawActivity.PKG.equals(app.pkg)) host.uninstall(app.pkg, app.label);
+                    .option(Ui.TRASH, Pals.isPal(app.pkg) ? "Es parte de ChronOS (no se desinstala)" : "Desinstalar", remote ? "Se confirma en el principal" : null, () -> {
+                        if (!Pals.isPal(app.pkg)) host.uninstall(app.pkg, app.label);
                     })
                     .button("Cerrar", false, null)
                     .show();

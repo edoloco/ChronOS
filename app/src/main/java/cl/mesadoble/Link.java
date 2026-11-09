@@ -41,23 +41,13 @@ public class Link {
     public static final int PORT = 47820;
     static final String TYPE = "_mesadoble._tcp.";
 
-    /** Una conexión: por Wi-Fi (TCP) o por Bluetooth (canal BLE). */
     private static class Conn {
-        final Socket s; final java.io.Closeable bs; final boolean bt;
-        final java.io.InputStream in; final BufferedWriter w;
-        volatile long rxAt = System.currentTimeMillis();
-        volatile boolean nap;
+        final Socket s; final BufferedWriter w;
         Conn(Socket s) throws IOException {
-            this.s = s; bs = null; bt = false;
-            in = s.getInputStream();
+            this.s = s;
             this.w = new BufferedWriter(new OutputStreamWriter(s.getOutputStream(), StandardCharsets.UTF_8));
         }
-        Conn(android.bluetooth.BluetoothSocket b) throws IOException {
-            s = null; bs = b; bt = true;
-            in = b.getInputStream();
-            w = new BufferedWriter(new OutputStreamWriter(b.getOutputStream(), StandardCharsets.UTF_8), 2048);
-        }
-        void close() { try { if (s != null) s.close(); else bs.close(); } catch (IOException ignored) { } }
+        void close() { try { s.close(); } catch (IOException ignored) { } }
     }
 
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -67,19 +57,13 @@ public class Link {
     private final Listener listener;
 
     private volatile boolean running, host, resolving;
-    private volatile Conn conn;     // por Wi-Fi
-    private volatile Conn bt;       // por Bluetooth (método de unión "Bluetooth")
-    private final Context app;
-    private final BleLink ble = new BleLink(this::attachBtSafe);
-    /** Avisos para el Hub: cambió por dónde van (Wi-Fi ↔ Bluetooth); algo pesado quiso ir por Bluetooth. */
-    volatile Runnable onVia, onBig;
+    private volatile Conn conn;
     private ServerSocket server;
     private NsdManager.RegistrationListener regL;
     private NsdManager.DiscoveryListener discL;
 
     public Link(Context ctx, Listener l) {
         listener = l;
-        app = ctx.getApplicationContext();
         nsd = (NsdManager) ctx.getSystemService(Context.NSD_SERVICE);
         WifiManager wm = (WifiManager) ctx.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         lock = wm != null ? wm.createMulticastLock("mesadoble") : null;
@@ -95,23 +79,7 @@ public class Link {
         }, f);
     }
 
-    public boolean isConnected() { return conn != null || bt != null; }
-    /** ¿Hay conexión por red (para lo pesado: archivos, Boost, DS)? */
-    public boolean hasNet() { return conn != null; }
-    /** Por dónde están unidos ahora. */
-    public String via() { return conn != null ? (bt != null ? "Wi-Fi (y Bluetooth de respaldo)" : "Wi-Fi") : bt != null ? "Bluetooth" : "sin unir"; }
-    public String bleStatus() { return ble.running() ? ble.status : "apagado"; }
-    private Conn active() { Conn c = conn; return c != null ? c : bt; }
-
-    /** Método de unión: 0 red Wi-Fi (como siempre), 1 Bluetooth de bajo consumo + red a pedido. */
-    public int joinMode() { return app.getSharedPreferences("mesa", Context.MODE_PRIVATE).getInt("joinMode", 0); }
-
-    /** Se cambió el método de unión: el Bluetooth se enciende o se apaga (lo de Wi-Fi sigue igual). */
-    public void joinChanged() {
-        if (!running) return;
-        if (joinMode() == 1) { if (bt == null) ble.start(!host); }   // (re)abre el Bluetooth, p. ej. tras dar el permiso
-        else { ble.stop(); Conn b = bt; if (b != null) drop(b); }
-    }
+    public boolean isConnected() { return conn != null; }
     public boolean isHost() { return host; }
     /** IP del otro teléfono (para el canal de archivos). */
     public String peerIp() {
@@ -127,7 +95,6 @@ public class Link {
         state(WAITING, null);
         if (asHost) { startServer(); main.postDelayed(autoCall, 3000); }
         else { startDiscovery(); startCallListener(); }
-        if (joinMode() == 1) ble.start(!asHost);   // el principal (no host) abre el canal Bluetooth
     }
 
     // ---------- llamada: el extendido le pide al principal que se conecte ----------
@@ -237,9 +204,6 @@ public class Link {
         if (server != null) { try { server.close(); } catch (IOException ignored) { } server = null; }
         Conn c = conn; conn = null;
         if (c != null) c.close();
-        ble.stop();
-        Conn b = bt; bt = null;
-        if (b != null) b.close();
         if (lock != null && lock.isHeld()) lock.release();
         state(IDLE, null);
     }
@@ -250,42 +214,16 @@ public class Link {
     private void beat() {
         final String line = asleep ? "{\"t\":\"hb\",\"z\":1}" : "{\"t\":\"hb\"}";
         writer.execute(() -> {
-            for (Conn c : new Conn[]{conn, bt}) {
-                if (c == null) continue;
-                try { c.w.write(line); c.w.write('\n'); c.w.flush(); } catch (IOException e) { drop(c); }
-            }
+            Conn c = conn;
+            if (c == null) return;
+            try { c.w.write(line); c.w.write('\n'); c.w.flush(); } catch (IOException e) { drop(c); }
         });
     }
 
-    // por Bluetooth no van las imágenes en vivo (la pantalla del DS, la cámara, el boceto): se pide la red
-    private static final java.util.Set<String> STREAMS = new java.util.HashSet<>(java.util.Arrays.asList("dsFrame", "camFrame", "skImg"));
-    /** Último mensaje grande (para que la red temporal sepa que se está usando). */
-    static volatile long bigAt;
-
     public void send(JSONObject msg) {
         final String line = msg.toString();
-        Conn a = active();
-        if (a != null && a.bt) {
-            // imágenes en vivo (DS, cámara, boceto): no caben por Bluetooth → se ofrece la red rápida
-            if (STREAMS.contains(msg.optString("t"))) { Runnable r = onBig; if (r != null) main.post(r); return; }
-            if (line.length() > 1500000) return;   // algo enorme: no se atasca el Bluetooth
-            // por Bluetooth lo grande (íconos, carátulas, fondos) va en trozos y lo chico (teclas, teclado
-            // automático, controles) se cuela entre trozo y trozo: ya no queda esperando detrás
-            if (line.length() <= CHUNK) hiQ.add(line);
-            else {
-                int id = ++chunkId, n = (line.length() + CHUNK - 1) / CHUNK;
-                for (int i = 0; i < n; i++) {
-                    try {
-                        loQ.add(new JSONObject().put("t", "ck").put("id", id).put("i", i).put("n", n)
-                                .put("d", line.substring(i * CHUNK, Math.min(line.length(), (i + 1) * CHUNK))).toString());
-                    } catch (Exception ignored) { }
-                }
-            }
-            writer.execute(this::pumpBt);
-            return;
-        } else if (line.length() > 8000) bigAt = System.currentTimeMillis();
         writer.execute(() -> {
-            Conn c = active();
+            Conn c = conn;
             if (c == null) return;
             try {
                 c.w.write(line);
@@ -296,25 +234,6 @@ public class Link {
             }
         });
     }
-
-    private static final int CHUNK = 2000;
-    private final java.util.concurrent.ConcurrentLinkedQueue<String> hiQ = new java.util.concurrent.ConcurrentLinkedQueue<>(), loQ = new java.util.concurrent.ConcurrentLinkedQueue<>();
-    private int chunkId;
-
-    /** Manda por Bluetooth: primero todo lo chico, después UN trozo de lo grande, y vuelve a mirar lo chico. */
-    private void pumpBt() {
-        while (true) {
-            String x = hiQ.poll();
-            if (x == null) x = loQ.poll();
-            if (x == null) return;
-            Conn c = active();
-            if (c == null) { hiQ.clear(); loQ.clear(); return; }
-            try { c.w.write(x); c.w.write('\n'); c.w.flush(); } catch (IOException e) { drop(c); return; }
-        }
-    }
-
-    // trozos que llegan (por Bluetooth) de un mensaje grande
-    private final java.util.Map<Integer, StringBuilder> parts = new java.util.HashMap<>();
 
     /** Conexión manual por IP (por si la búsqueda automática no funciona en esa red). */
     public void connectTo(final String ip) {
@@ -409,69 +328,40 @@ public class Link {
 
     // ---------- conexión ----------
 
-    private void attachBtSafe(android.bluetooth.BluetoothSocket s) {
-        try { attachConn(new Conn(s)); } catch (IOException e) { try { s.close(); } catch (IOException ignored) { } }
-    }
-
     private void attach(Socket s) throws IOException {
         s.setTcpNoDelay(true);
+        final Conn c = new Conn(s);
+        Conn old = conn;
+        conn = c;
+        if (old != null) old.close();
         try { s.setKeepAlive(true); } catch (Exception ignored) { }
-        attachConn(new Conn(s));
-    }
-
-    private void attachConn(final Conn c) {
-        boolean was, replaced;
-        synchronized (this) {
-            was = isConnected();
-            Conn old = c.bt ? bt : conn;
-            replaced = old != null;
-            if (c.bt) bt = c; else conn = c;
-            if (old != null) old.close();
-        }
-        if (c.bt) ble.onUp();
-        // nueva conexión del mismo tipo (el otro pudo reiniciarse) o la primera: "conectado" como siempre
-        if (!was || replaced) state(CONNECTED, null);
-        else { Runnable r = onVia; if (r != null) main.post(r); }
+        state(CONNECTED, null);
         // latido: cada 5 s un mensaje corto. Si el otro teléfono se apaga o pierde el WiFi de golpe, sin esto la
         // conexión parecería abierta para siempre; con él, a los 20 s sin noticias se da por perdida.
         // Con la pantalla apagada Android duerme el teléfono y los latidos se detienen: por eso cada teléfono avisa
         // "me voy a dormir" (z) y el otro deja de contar el silencio hasta que vuelva a latir normal.
         main.postDelayed(new Runnable() {
             @Override public void run() {
-                if (conn != c && bt != c) return;
+                if (conn != c) return;
                 beat();
-                // por Bluetooth no hay tiempo de espera del socket: 20 s sin noticias (sin "duermo") = perdido
-                if (c.bt && !c.nap && System.currentTimeMillis() - c.rxAt > 20000) { drop(c); return; }
                 main.postDelayed(this, 5000);
             }
         }, 1000);
         new Thread(() -> {
             try {
-                BufferedReader in = new BufferedReader(new InputStreamReader(c.in, StandardCharsets.UTF_8));
+                BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
                 String line;
+                boolean beats = false;
                 while ((line = in.readLine()) != null) {
-                    c.rxAt = System.currentTimeMillis();
                     if (line.startsWith("{\"t\":\"hb\"")) {
                         // el otro teléfono late: 20 s de silencio = conexión perdida; si avisó que duerme, sin límite
+                        beats = true;
                         boolean napping = line.contains("\"z\"");
-                        c.nap = napping;
-                        if (c.s != null) try { c.s.setSoTimeout(napping ? 0 : 20000); } catch (Exception ignored) { }
+                        try { s.setSoTimeout(napping ? 0 : 20000); } catch (Exception ignored) { }
                         continue;
                     }
-                    if (!c.bt && line.length() > 8000) bigAt = c.rxAt;
                     try {
-                        JSONObject o0 = new JSONObject(line);
-                        if ("ck".equals(o0.optString("t"))) {   // un trozo: se junta hasta el último
-                            int id = o0.optInt("id"), i = o0.optInt("i"), n = o0.optInt("n");
-                            StringBuilder b = parts.get(id);
-                            if (i == 0) { b = new StringBuilder(); parts.put(id, b); if (parts.size() > 8) parts.keySet().removeIf(k -> k < id - 8); }
-                            if (b == null) continue;
-                            b.append(o0.optString("d"));
-                            if (i < n - 1) continue;
-                            parts.remove(id);
-                            o0 = new JSONObject(b.toString());
-                        }
-                        final JSONObject o = o0;
+                        final JSONObject o = new JSONObject(line);
                         main.post(() -> listener.onMessage(o));
                     } catch (Exception ignored) { }
                 }
@@ -481,17 +371,12 @@ public class Link {
     }
 
     private void drop(Conn c) {
-        synchronized (this) {
-            if (conn == c) conn = null;
-            else if (bt == c) bt = null;
-            else return;
-        }
+        if (conn != c) return;
+        conn = null;
         c.close();
-        if (c.bt) ble.onDown();
         if (running) {
-            if (!isConnected()) state(WAITING, null);
-            else { Runnable r = onVia; if (r != null) main.post(r); }   // sigue unido por el otro camino
-            if (!host && !c.bt) main.post(() -> { stopDiscovery(); retryDiscovery(); });
+            state(WAITING, null);
+            if (!host) main.post(() -> { stopDiscovery(); retryDiscovery(); });
         }
     }
 

@@ -715,7 +715,6 @@ public class FileServer {
     }
 
     private void serve(Socket s) {
-        TempNet.touch();   // archivos: la red temporal se está usando
         try (Socket sock = s) {
             sock.setSoTimeout(60000);
             InputStream in = new BufferedInputStream(sock.getInputStream());

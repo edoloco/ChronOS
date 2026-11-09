@@ -42,7 +42,6 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
 - **Naranja + cristal + verde** ("como una naranja"): naranjo `#F57C1F`, verde `#2FA866`.
 - `Glass.java`: vidrio esmerilado ("cristal intenso") con `Glass.body(...)` y `Glass.shadow(...)`.
 - Sombras difuminadas para todo lo que flota sobre un fondo.
-- DUAL-Draw: fondo gris, panel derecho naranjo, demás paneles blancos con verde, botones solo con símbolo.
 - PALS: fondo naranja, panel izquierdo de cristal naranjo (árbol), contenido en un cristal naranjo grande.
 
 ## Mapa del código (`app/src/main/java/cl/mesadoble/`)
@@ -69,28 +68,9 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
 - Tapa (`LidWatch`): sensores elegibles (imán, proximidad, luz; "todos" o "cualquiera"), prefs `lidSensors`/`lidAll`, mensaje `lidSens`.
 
 **Funciones**
-- DUAL-Draw (dibujo en dos pantallas): `DualDrawActivity` (interfaz) + `DrawDoc` (motor: capas, pinceles,
-  selección, transformar). Los dos teléfonos aplican **las mismas órdenes en el mismo orden** (`dw {op…}`).
-  Tableta de dibujo (lápiz USB/Bluetooth) en el **principal**: `dispatchTouchEvent`/`dispatchGenericMotionEvent` la
-  capturan (no toca los paneles del principal) y la mandan como `dwPen {a, pts:[x,y,p…], er}`; el extendido la repite
-  en su lienzo (lo que se ve, con su zoom) con presión real y circulito al flotar (del porte real de la punta:
-  `DrawDoc.radiusFor`). La lista de capas se desliza.
-  Panel de herramientas (extendido): `CATALOG` → grilla de 2 o 3 columnas que se desliza; "✎" elige cuáles se ven
-  (`dwTools`); botones agrupados con variantes al mantener: Formas (`shapeVar`) y Pluma (normal / vector distanciado
-  `penOff`: el punto va ~30 mm sobre el dedo, `penTouchOff`). Paneles de herramientas, color y capas cambian de tamaño
-  manteniendo presionado su borde/título (`Glass2.resizable`, prefs `dwToolsP*`, `dwColorP*`, `dwLayersP*`).
-  Hasta 30 capas (`maxLayers`). "Guardar PSD" (`DrawDoc.writePsd`, RLE, con capas) en Descargas › DUAL-Draw.
-  El balde dentro de una forma cerrada cambia su relleno; en la pintura REEMPLAZA el color (se puede repintar).
-  "Abrir PSD" (`DrawDoc.readPsd`: RGB 8 bits, capas raw/RLE, grupos aplanados) → `dwLoad` al extendido → `applyLoaded`.
-  El PSD guarda en el recurso 4242 los textos/formas y la pintura de su capa sin ellos: al reabrirlo siguen editables.
-  Texto (T_TEXT): un `VShape` con `text` (fuente, tamaño `tsize`, color = fill, negrita/cursiva) en su propia capa;
-  tocar = editar (`textDialog`), arrastrar = mover, siempre con `vec set` (deshacer). Palma (toque > 20 mm) no dibuja.
-  Envíos del extendido por una sola fila (`dwSend`/`outQ`) para que `dwFull` no pise órdenes más nuevas.
-  DUAL-Draw también es "app" (`PKG = dd:draw`, ícono `DualDrawActivity.icon`) en la lista de apps y en la mesa.
-  Pluma (T_PEN, como FreeHand MX): formas vectoriales `DrawDoc.VShape` en `Layer.shapes` (nodos x,y + 2 manillas), orden
-  `vec {a:set|del, l, i, s}` con deshacer (`Step.vb/va`). Toca = punto recto, arrastra = curva, primer punto = cerrar,
-  último punto = terminar. Las formas se pasan a pintura solo al combinar capas. Balde: `fill {tol, gap, all}` (mira solo
-  la capa salvo `all`; `gap` cierra huecos). Combinar: con la de abajo, `mergeVis` o `mergeSet {ids}`.
+- **DUAL Draw ya no está en ChronOS** (nov. 2026): es la app aparte `cl.dualdraw` (repo `edoloco/dual-draw`, su propia
+  conexión en los puertos 47832/47833, ver su AGENTS.md). ChronOS la trata como app de dos pantallas (`Hub.DUAL_APPS`);
+  Herramientas › DUAL Draw y el ícono viejo `dd:draw` de la mesa la abren (o llevan a su página de descarga).
 - Barra de abajo del extendido (`ChronoBar` NAV): baterías P y E fijas debajo de donde aparece la hora; Ajustes → Apariencia →
   Mostrar baterías: no / retro (Mega Man) / moderna (ícono de celular), de pie o acostadas (`battSkin`, `battUp`, `battPref`) (la barra de tareas deja ese espacio libre). Íconos de apps: giran según la posición del
   PRINCIPAL (`pOrient {q}`), nunca a 180°.
@@ -98,7 +78,7 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   `sepMagJ` con los dos juntos) o por Bluetooth (el extendido emite BLE con UUID propio, el principal mide RSSI). Separados
   8 s → teléfono normal (`PhoneMode`, preguntando o directo según `sepAsk`); juntos 5 s → vuelve ChronOS. `sepPref`, `sepCal`.
 - ENFOQUE: ChronOS asiste y administra al PRINCIPAL. Fotos, archivos y apps están en el principal: lo que se elige
-  desde el extendido (fondo de pantalla `wallPick`, imagen de DUAL-Draw `dwPick`) se abre en el principal.
+  desde el extendido (fondo de pantalla `wallPick`) se abre en el principal.
 - Apps de dos pantallas de otros repos (DUAL Motion `cl.dualmotion`, o cualquiera con meta-data `chronos.dual`):
   si el principal la abre, `MesaAccess` manda `dualOpen` y el extendido abre la misma app (`Hub.openDualCompanion`).
 - Abrir pantallas desde segundo plano (Android 15): `Hub.blip()` pone una ventanita de 1 px antes de `startActivity`
@@ -127,24 +107,8 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   gamepads/teclados/mouse con `InputDevice.getBatteryState`, Android 12+), se los pasa al otro (`peri {l:[{n,k,p}]}`)
   y `ChronoBar.drawBatteries` los dibuja junto a P y E con un iconito (`periIcon`: h audífonos, g gamepad, k teclado,
   m mouse, w reloj, o runa Bluetooth). Solo los que informan carga; máx. 4; si no caben, se achican todas.
-- **Conexión** (botón de cadenas en el inicio, `connectionMenu`): "Red" (`showConnection`, lo de siempre) y
-  "Métodos de unión" (`joinMenu`, pref `joinMode` copiada con `prefSet` → `Hub.joinModeChanged`):
-  - 0 = Red Wi-Fi (como siempre; por defecto, nada cambia).
-  - 1 = Bluetooth (ahorro): `BleLink` = canal L2CAP de BLE (Android 10+, sin emparejar; el anuncio DEBE ser
-    conectable; la búsqueda alterna con y sin filtro cada 12 s; BLUETOOTH_SCAN con neverForLocation). El PRINCIPAL abre el canal y
-    lo anuncia (UUID corto 0xC4A0, datos 'C'+PSM); el EXTENDIDO lo busca y se conecta. `Link` tiene ahora dos
-    conexiones (`conn` Wi-Fi y `bt`), manda por Wi-Fi si hay (`active()`), y cambiar de una a otra NO cambia el
-    estado (avisa `onVia` → `Hub.viaChanged`, mensaje local `linkVia`). `peerIp()` solo es Wi-Fi.
-  - Lo pesado sin Wi-Fi → `Hub.needNet` (desde `Hub.peerIp()`, mensajes > 24 KB o imágenes en vivo `dsFrame`/
-    `camFrame`/`skImg`, que por Bluetooth no se mandan) → pregunta en el extendido (`NetAsk`: Sí / Siempre sí
-    `netAlways` / No) → `TempNet`: el principal crea una zona local sin internet (`startLocalOnlyHotspot`; Android
-    <13 pide la Ubicación encendida), manda `netCfg` por Bluetooth, el extendido se une con `WifiNetworkSpecifier`
-    (Android puede mostrar "Conectar") y `bindProcessToNetwork`, responde `netIp` y el principal conecta.
-  - Por Bluetooth, `Link.send` parte lo grande (> 2000) en trozos `ck {id,i,n,d}` (cola baja `loQ`) y lo chico va por
-    `hiQ`, que se manda primero entre trozo y trozo (`pumpBt`): un ícono o carátula ya no atrasa el teclado automático.
-    Solo las imágenes en vivo (STREAMS) piden la red; "No" (o cerrar la pregunta) = 10 min sin preguntar.
-  - Fin de la red (`netEnd`): 0 a los 2 min sin uso (Boost, DS, archivos, mensajes grandes = uso), 1 al apagar la
-    pantalla, 2 preguntando (`netIdleAsk`).
+- **Conexión** (botón de cadenas en el inicio, antes "Red"): abre `showConnection`. La unión por Bluetooth
+  (BLE + red temporal, nov. 2026) se probó y se **quitó**: perdía mensajes y desincronizaba DUAL-Draw. Solo Wi-Fi.
 - **Sonido 3D** (`Sound3D`, perilla en "Nivelar volumen (Boost)", pref `boost3d` 0..100, en vivo con `Sound3D.live`,
   se copia con `prefSet`): ensancha el estéreo (M/S), cancela el cruce (resta del otro lado atrasado ~0,22 ms y sin
   agudos) y realza agudos. Completo en `Boost.Engine` (música y video de ChronOS); en `CaptureService` (apps) solo
@@ -158,8 +122,6 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   mesa `alignApps` acomoda lo de esa pantalla. Sin opción "Imán": siempre activa.
   App instalada → "¿ponerla en la mesa?" (principal/extendida, último escritorio, o uno nuevo). Íconos de la mesa se
   renuevan cuando la app se actualiza (`refreshDeskIcons`, `ic_<pkg>`). Lista de apps: "Elegir varias".
-- DUAL-Draw: un toque de menos de 45 ms sin moverse no dibuja (toque fantasma); al levantar el dedo se descarta el
-  "rebote" final si dobla de golpe (`hold`/`finishTail`, la colita en J).
 - Chat en vivo de YouTube (solo versión completa): `LiveChat` (lo llama `MesaAccess` con `typeWindowsChanged`). YouTube en
   pantalla flotante (PiP) → burbuja animada con "?" al lado; al tocarla, ventanita gris oscura (overlay de accesibilidad,
   se arrastra por la cabecera y cambia de tamaño por la esquina) con el chat del directo/estreno. Lee el chat público
