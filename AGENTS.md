@@ -123,6 +123,20 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
 - Ajustes → Configuración → **Teclados automáticos** (`kbAutoMenu`, se copian al otro con `prefSet`): `autoKb`
   (cuadro de texto), `autoKbChat` (apps de chat, `openKb`), `autoVideo` 0 control de video / 1 teclado / 2 nada
   (`mActive` en Hub), `autoAsist` (RetroArch), `vertKbAuto`, `kbSpaceFix`.
+- **Conexión** (botón de cadenas en el inicio, `connectionMenu`): "Red" (`showConnection`, lo de siempre) y
+  "Métodos de unión" (`joinMenu`, pref `joinMode` copiada con `prefSet` → `Hub.joinModeChanged`):
+  - 0 = Red Wi-Fi (como siempre; por defecto, nada cambia).
+  - 1 = Bluetooth (ahorro): `BleLink` = canal L2CAP de BLE (Android 10+, sin emparejar). El PRINCIPAL abre el canal y
+    lo anuncia (UUID corto 0xC4A0, datos 'C'+PSM); el EXTENDIDO lo busca y se conecta. `Link` tiene ahora dos
+    conexiones (`conn` Wi-Fi y `bt`), manda por Wi-Fi si hay (`active()`), y cambiar de una a otra NO cambia el
+    estado (avisa `onVia` → `Hub.viaChanged`, mensaje local `linkVia`). `peerIp()` solo es Wi-Fi.
+  - Lo pesado sin Wi-Fi → `Hub.needNet` (desde `Hub.peerIp()`, mensajes > 24 KB o imágenes en vivo `dsFrame`/
+    `camFrame`/`skImg`, que por Bluetooth no se mandan) → pregunta en el extendido (`NetAsk`: Sí / Siempre sí
+    `netAlways` / No) → `TempNet`: el principal crea una zona local sin internet (`startLocalOnlyHotspot`; Android
+    <13 pide la Ubicación encendida), manda `netCfg` por Bluetooth, el extendido se une con `WifiNetworkSpecifier`
+    (Android puede mostrar "Conectar") y `bindProcessToNetwork`, responde `netIp` y el principal conecta.
+  - Fin de la red (`netEnd`): 0 a los 2 min sin uso (Boost, DS, archivos, mensajes grandes = uso), 1 al apagar la
+    pantalla, 2 preguntando (`netIdleAsk`).
 - **Sonido 3D** (`Sound3D`, perilla en "Nivelar volumen (Boost)", pref `boost3d` 0..100, en vivo con `Sound3D.live`,
   se copia con `prefSet`): ensancha el estéreo (M/S), cancela el cruce (resta del otro lado atrasado ~0,22 ms y sin
   agudos) y realza agudos. Completo en `Boost.Engine` (música y video de ChronOS); en `CaptureService` (apps) solo

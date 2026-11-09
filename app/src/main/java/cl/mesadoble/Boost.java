@@ -179,6 +179,7 @@ final class Boost {
 
     /** Un trozo del canal izquierdo, con la hora en que suena en el principal. */
     static void send(int sampleRate, byte[] pcm, int len, long when) {
+        TempNet.lastUse = System.currentTimeMillis();   // la red temporal se está usando
         if (client == null) return;
         if (out.size() > 80) out.clear();   // el extendido no alcanza: mejor saltar que atrasarse
         ByteBuffer b = ByteBuffer.allocate(1 + 4 + 4 + 8 + len).order(ByteOrder.BIG_ENDIAN);
@@ -205,7 +206,7 @@ final class Boost {
         if (on && cur != null && cur.isAlive()) return;   // ya está escuchando
         stopSink();
         if (!on) return;
-        String ip = hub.link.peerIp();
+        String ip = hub.peerIp();   // solo Bluetooth: ofrece la red rápida
         if (ip == null) return;
         Thread t = new Thread(() -> {
             AudioTrack track = null;

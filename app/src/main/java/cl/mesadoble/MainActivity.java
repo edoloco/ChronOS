@@ -135,7 +135,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         addSquare(SquareButton.DESKS, "Mesas", false, v -> desksMenu());
         addSquare(SquareButton.KEYBOARD, "Teclado", false, v -> keyboardMenu());
         settingsBtn = addSquare(SquareButton.SETTINGS, "Ajustes", false, v -> settingsMenu());
-        statusBtn = addSquare(SquareButton.STATUS, "Red", false, v -> showConnection());
+        statusBtn = addSquare(SquareButton.STATUS, "Conexión", false, v -> connectionMenu());
         // Atrás, Inicio y Recientes del PRINCIPAL, al lado de la barra (solo en el extendido)
         navPill = new LinearLayout(this);
         navPill.setPadding(dp(6), dp(6), dp(6), dp(6));
@@ -240,6 +240,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (bw != null) bindRequested(bw, 0);
         if (getIntent().hasExtra("homeSet")) { boolean on = getIntent().getBooleanExtra("homeSet", true); getIntent().removeExtra("homeSet"); main.post(() -> { if (on) forceHome(); else releaseHome(); }); }
         if (getIntent().getBooleanExtra("callPerm", false)) { getIntent().removeExtra("callPerm"); requestPermissions(CallHub.PERMS, 61); }
+        if (getIntent().getBooleanExtra("btPerm", false)) { getIntent().removeExtra("btPerm"); askBtPerms(); }
         if (getIntent().getBooleanExtra("notifSetup", false)) { getIntent().removeExtra("notifSetup"); main.post(this::guideNotifs); }
         if (getIntent().hasExtra("phoneAsk")) { String pt = getIntent().getStringExtra("phoneAsk"); getIntent().removeExtra("phoneAsk"); main.post(() -> phoneOffer(pt)); }
         if (getIntent().getBooleanExtra("forceLink", false)) { getIntent().removeExtra("forceLink"); main.post(() -> { hub.forceLink(); Toast.makeText(this, "Buscando al extendido…", Toast.LENGTH_SHORT).show(); }); }
@@ -260,6 +261,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (bw != null) { intent.removeExtra("bindWidget"); bindRequested(bw, 0); }
         if (intent.hasExtra("homeSet")) { boolean on = intent.getBooleanExtra("homeSet", true); intent.removeExtra("homeSet"); main.post(() -> { if (on) forceHome(); else releaseHome(); }); }
         if (intent.getBooleanExtra("callPerm", false)) { intent.removeExtra("callPerm"); requestPermissions(CallHub.PERMS, 61); }
+        if (intent.getBooleanExtra("btPerm", false)) { intent.removeExtra("btPerm"); askBtPerms(); }
         if (intent.getBooleanExtra("notifSetup", false)) { intent.removeExtra("notifSetup"); main.post(this::guideNotifs); }
         if (intent.hasExtra("phoneAsk")) { String pt = intent.getStringExtra("phoneAsk"); intent.removeExtra("phoneAsk"); main.post(() -> phoneOffer(pt)); }
         if (intent.getBooleanExtra("forceLink", false)) { intent.removeExtra("forceLink"); main.post(() -> { hub.forceLink(); Toast.makeText(this, "Buscando al extendido…", Toast.LENGTH_SHORT).show(); }); }
@@ -1933,7 +1935,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                         Toast.makeText(this, !spl ? "Las apps se abrirán arriba, con ChronOS abajo" : "Las apps se abrirán a pantalla completa", Toast.LENGTH_SHORT).show();
                     });
         }
-        sh.option(Ui.WIFI, "Conexión", statusText, this::showConnection)
+        sh.option(Ui.CHAIN, "Conexión", statusText, this::connectionMenu)
                 .option(Ui.NOTE, "Acerca de la app", Updater.updateAvailable(this)
                         ? "Hay una versión nueva: " + Updater.latestKnown(this) : "Versión " + Updater.clean(Updater.installedVersion(this)), this::about)
                 .badgeIf(Updater.updateAvailable(this), "1")
@@ -2043,8 +2045,10 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     private static String[] btPerms() {
+        if (android.os.Build.VERSION.SDK_INT >= 33)   // + crear la red temporal (Wi-Fi cercano)
+            return new String[]{"android.permission.BLUETOOTH_SCAN", "android.permission.BLUETOOTH_ADVERTISE", "android.permission.BLUETOOTH_CONNECT", "android.permission.NEARBY_WIFI_DEVICES"};
         return android.os.Build.VERSION.SDK_INT >= 31
-                ? new String[]{"android.permission.BLUETOOTH_SCAN", "android.permission.BLUETOOTH_ADVERTISE", "android.permission.BLUETOOTH_CONNECT"}
+                ? new String[]{"android.permission.BLUETOOTH_SCAN", "android.permission.BLUETOOTH_ADVERTISE", "android.permission.BLUETOOTH_CONNECT", android.Manifest.permission.ACCESS_FINE_LOCATION}
                 : new String[]{android.Manifest.permission.ACCESS_FINE_LOCATION};
     }
 
@@ -2052,7 +2056,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (!btPermsOk(this)) requestPermissions(btPerms(), 62);
         if (android.os.Build.VERSION.SDK_INT < 31 && hub.isPrincipal())
             Toast.makeText(this, "En este Android, Bluetooth necesita la Ubicación encendida para medir la distancia", Toast.LENGTH_LONG).show();
-        main.postDelayed(() -> { Proximity.update(this, hub); }, 1500);
+        main.postDelayed(() -> { Proximity.update(this, hub); hub.link.joinChanged(); }, 1500);
     }
 
     /** Elegir qué sensores bloquean al cerrar la tapa (se guarda en los dos teléfonos). */
@@ -4010,6 +4014,51 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     private final Runnable statusTick = this::updateStatus;
+
+    /** Inicio → Conexión (cadenas): la red de siempre y los métodos de unión. */
+    private void connectionMenu() {
+        int jm = hub.link.joinMode();
+        new Ui.Sheet(this).title("Conexión")
+                .message(statusText + (hub.connected() ? "\nUnidos por: " + hub.link.via() : ""))
+                .option(Ui.WIFI, "Red", "Buscar o llamar al otro teléfono, o conectar por IP", this::showConnection)
+                .option(Ui.CHAIN, "Métodos de unión", jm == 1 ? "Bluetooth (ahorro) con red rápida a pedido" : "Red Wi-Fi (como siempre)", this::joinMenu)
+                .button("Cerrar", false, null).show();
+    }
+
+    /** Cómo se unen los dos teléfonos (se copia al otro). */
+    private void joinMenu() {
+        int jm = hub.link.joinMode(), end = prefs.getInt("netEnd", 0);
+        boolean always = prefs.getBoolean("netAlways", false);
+        Ui.Sheet sh = new Ui.Sheet(this).title("Métodos de unión")
+                .message("Red Wi-Fi: como siempre (zona Wi-Fi del principal o el mismo Wi-Fi de la casa).\n"
+                        + "Bluetooth (ahorro): lo liviano va por Bluetooth de bajo consumo, sin zona Wi-Fi. Para lo pesado "
+                        + "(Boost, segunda pantalla del DS, fotos y archivos) te ofrece la red temporal del principal y se conecta sola. "
+                        + "Si los dos están en el mismo Wi-Fi, se usa ese."
+                        + (jm == 1 ? "\nBluetooth ahora: " + hub.link.bleStatus() + ". Unidos por: " + hub.link.via() : ""));
+        sh.option(jm == 0 ? Ui.CHECK : Ui.WIFI, -1, "Red Wi-Fi (como siempre)", "Todo por Wi-Fi", jm == 0, () -> setJoin(0));
+        sh.option(jm == 1 ? Ui.CHECK : Ui.CHAIN, -1, "Bluetooth (ahorro) + red a pedido", "Gasta menos batería el resto del día", jm == 1, () -> setJoin(1));
+        if (jm == 1) {
+            String[] en = {"se apaga a los 2 min sin uso", "queda hasta apagar la pantalla", "me pregunta"};
+            sh.option(Ui.CLOCK, -1, "Al terminar lo pesado: " + en[end], "Toca para cambiar", true, () -> { setShared("netEnd", (end + 1) % 3); joinMenu(); });
+            sh.option(Ui.AUTO, -1, "Ofrecer la red: " + (always ? "siempre sí (sin preguntar)" : "preguntar"),
+                    always ? "Toca para que vuelva a preguntar" : "En la pregunta puedes elegir «Siempre sí»", always,
+                    () -> { setShared("netAlways", !always); joinMenu(); });
+            sh.option(Ui.WIFI, "Conectar la red rápida ahora", hub.link.hasNet() ? "Ya está conectada" : "Para lo pesado, sin esperar la pregunta", () -> {
+                if (!hub.link.hasNet()) hub.netGo();
+            });
+            if (TempNet.up()) sh.option(Ui.CROSS, "Apagar la red rápida", "Vuelven a Bluetooth", () -> TempNet.stop(this, hub));
+        }
+        sh.button("Volver", false, this::connectionMenu).show();
+    }
+
+    private void setJoin(int m) {
+        if (m == 1 && !BleLink.supported()) { Toast.makeText(this, "Este teléfono necesita Android 10 o más para unirse por Bluetooth", Toast.LENGTH_LONG).show(); return; }
+        setShared("joinMode", m);
+        hub.joinModeChanged();
+        Toast.makeText(this, m == 1 ? "Unión por Bluetooth activada (la red Wi-Fi sigue funcionando si está)" : "Unión por red Wi-Fi", Toast.LENGTH_LONG).show();
+        if (m == 1) askBtPerms();
+        main.postDelayed(this::joinMenu, 400);
+    }
 
     private void showConnection() {
         final EditText ip = field("Ej: 192.168.1.20");

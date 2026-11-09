@@ -60,6 +60,8 @@ public class Hub implements Link.Listener {
         SystemSetup.preset(c, prefs);   // ChronOS instalado en el sistema (J7 Prime): papel de fábrica y ajustes
         side = prefs.getInt("side", -1);
         link = new Link(c, this);
+        link.onBig = () -> needNet(null);
+        link.onVia = this::viaChanged;
         ScreenSync.listen(c, this);
         LidWatch.update(c, this);
         Proximity.update(c, this);   // separar al alejarlos (imán o Bluetooth), si está activado
@@ -112,7 +114,57 @@ public class Hub implements Link.Listener {
         }, af);
     }
 
-    public String peerIp() { return link.peerIp(); }
+    /** IP del otro teléfono (archivos, Boost, apps). Unidos solo por Bluetooth: no hay, y se ofrece la red rápida. */
+    public String peerIp() {
+        String ip = link.peerIp();
+        if (ip == null && link.isConnected()) main.post(() -> needNet(null));
+        return ip;
+    }
+
+    // ---------------- método de unión "Bluetooth": red rápida a pedido ----------------
+
+    private long netAskedAt, netNoAt;
+
+    /** Algo pesado necesita red y solo hay Bluetooth: se ofrece (o se conecta solo con "Siempre sí"). */
+    public void needNet(String why) {
+        if (link.hasNet() || !link.isConnected() || link.joinMode() != 1) return;
+        long now = System.currentTimeMillis();
+        if (now - netAskedAt < 20000 || now - netNoAt < 60000) return;
+        netAskedAt = now;
+        if (prefs.getBoolean("netAlways", false)) { netGo(); return; }
+        if (isPrincipal()) { send("netOffer", "why", why == null ? "" : why); return; }   // se pregunta donde se está usando: el extendido
+        startOrNotify(new Intent(app, NetAsk.class).putExtra("k", "offer").putExtra("why", why)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), 97, "Red rápida", "Toca para conectar la red del principal");
+    }
+
+    /** "Sí": el principal crea la red temporal y el extendido se une solo. */
+    public void netGo() {
+        netAskedAt = System.currentTimeMillis();
+        toast("Conectando la red del principal…");
+        if (isPrincipal()) TempNet.start(app, this); else send("netReq");
+    }
+
+    public void netDeclined() { netNoAt = System.currentTimeMillis(); }
+
+    void toast(String msg) { main.post(() -> android.widget.Toast.makeText(app, msg, android.widget.Toast.LENGTH_LONG).show()); }
+
+    private boolean hadNet;
+    private void viaChanged() {
+        boolean net = link.hasNet();
+        if (net != hadNet && link.joinMode() == 1) toast(net ? "Red rápida conectada: ya puedes usarlo" : "Unidos por Bluetooth (ahorro)");
+        hadNet = net;
+        // el Boost de apps ya sonaba: con la red lista, el extendido se suma
+        if (net && isPrincipal() && CaptureService.running) send("boost", "on", true);
+        try { for (Link.Listener l : listeners) l.onMessage(new JSONObject().put("t", "linkVia").put("net", net)); } catch (Exception ignored) { }
+    }
+
+    /** Cambió el método de unión (aquí o en el otro): Bluetooth encendido o apagado; pide permisos si faltan. */
+    public void joinModeChanged() {
+        link.joinChanged();
+        if (link.joinMode() == 1 && !MainActivity.btPermsOk(app))
+            startOrNotify(new Intent(app, MainActivity.class).putExtra("btPerm", true)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP), 99, "Unión por Bluetooth", "Toca para dar el permiso de Bluetooth");
+    }
 
     public int side() { return side; }
     /** Lado 1 = derecha = PRINCIPAL (donde corren las apps). Lado 0 = izquierda = EXTENDIDO. */
@@ -339,6 +391,23 @@ public class Hub implements Link.Listener {
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
         if ("media".equals(t)) { media(m.optString("k")); return; }
+        if (t.startsWith("net") && t.length() > 3 && Character.isUpperCase(t.charAt(3))) {   // red temporal (TempNet)
+            switch (t) {
+                case "netReq": if (isPrincipal()) TempNet.start(app, this); break;
+                case "netOffer": if (!isPrincipal()) { String w = m.optString("why"); needNet(w.isEmpty() ? null : w); } break;
+                case "netCfg": if (!isPrincipal()) TempNet.join(app, this, m.optString("ssid"), m.optString("pass"), m.optInt("sec", 1)); break;
+                case "netIp": if (isPrincipal() && !link.hasNet()) link.connectTo(m.optString("ip")); break;
+                case "netDown": if (!isPrincipal()) TempNet.leave(app); break;
+                case "netErr": toast(m.optString("msg")); break;
+                case "netIdleAsk":
+                    if (!isPrincipal()) startOrNotify(new Intent(app, NetAsk.class).putExtra("k", "idle").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                            98, "Red rápida sin uso", "Toca para volver a Bluetooth");
+                    break;
+                case "netStop": case "netFail": if (isPrincipal()) TempNet.stop(app, this); break;
+                case "netKeep": TempNet.keep(); break;
+            }
+            return;
+        }
         if ("installApp".equals(t)) { if (!isPrincipal()) main.post(() -> AppShare.install(app, this, m)); return; }
         // centro de apagado: el otro teléfono pide abrir aquí el menú de apagado o bloquear
         if ("power".equals(t)) {
@@ -617,6 +686,7 @@ public class Hub implements Link.Listener {
             if (m.has("b")) prefs.edit().putBoolean(k, m.optBoolean("b")).apply();
             else prefs.edit().putInt(k, m.optInt("i")).apply();
             if ("boost3d".equals(k)) Sound3D.live = m.optInt("i");
+            if ("joinMode".equals(k)) joinModeChanged();
             return;
         }
         if ("vertKbPref".equals(t)) { prefs.edit().putBoolean("vertKbAuto", m.optBoolean("on")).apply(); return; }

@@ -271,11 +271,14 @@ public class SquareButton extends View {
                     c.drawLine(cx, cy - u * 0.15f, cx, cy + u * 0.65f, stroke);
                     break;
                 }
-                for (int i = 1; i <= 2; i++) {
-                    float rr = u * 0.55f * i;
-                    c.drawArc(new RectF(cx - rr, cy + u * 0.5f - rr, cx + rr, cy + u * 0.5f + rr), 225, 90, false, stroke);
+                {   // cadenas: dos eslabones
+                    c.save();
+                    c.rotate(-45, cx, cy);
+                    float hh = u * 0.4f;
+                    c.drawRoundRect(new RectF(cx - u * 1.15f, cy - hh, cx + u * 0.18f, cy + hh), hh, hh, stroke);
+                    c.drawRoundRect(new RectF(cx - u * 0.18f, cy - hh, cx + u * 1.15f, cy + hh), hh, hh, stroke);
+                    c.restore();
                 }
-                c.drawCircle(cx, cy + u * 0.5f, 2 * dp, fill);
                 break;
         }
         if (badge) {
