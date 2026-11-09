@@ -67,6 +67,7 @@ public class Hub implements Link.Listener {
         Proximity.update(c, this);   // separar al alejarlos (imán o Bluetooth), si está activado
         ForceView.apply(c);
         CallHub.listen(c, this);   // llamadas del principal → controles en el extendido
+        Peri.start(c, this);       // baterías de audífonos, gamepads y teclados
         // batería: la de este teléfono se comparte con el otro para el widget de baterías
         c.registerReceiver(new android.content.BroadcastReceiver() {
             @Override public void onReceive(Context cx, Intent i) {
@@ -347,6 +348,7 @@ public class Hub implements Link.Listener {
             if (isPrincipal()) send("boostGain", "p", Boost.gain(app, true), "e", Boost.gain(app, false));
             sendImeState();
             sendBattery();
+            Peri.share();
             if (prefs.getBoolean("forceViewPending", false)) {   // vista forzada elegida sin conexión
                 prefs.edit().putBoolean("forceViewPending", false).apply();
                 send("forceView", "v", ForceView.mode(app, true), "w", 1);
@@ -612,6 +614,7 @@ public class Hub implements Link.Listener {
             return;
         }
         if ("fmPath".equals(t)) FileServer.remoteDir = m.optString("path");
+        if ("peri".equals(t)) { Peri.received(m); for (Link.Listener l : listeners) l.onMessage(m); return; }
         if ("batt".equals(t)) {
             otherBatt = m.optInt("l", -1); otherChg = m.optBoolean("c");
             // el extendido se está quedando sin batería: se ofrece (una vez) volver al teléfono normal

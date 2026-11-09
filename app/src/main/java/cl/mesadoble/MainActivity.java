@@ -4799,6 +4799,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
             case "pOrient":
                 if (!hub.isPrincipal() && !solo) applyOrient(m.optInt("q"));
                 break;
+            case "peri": case "periNow":
             case "batt":
                 desk.invalidate();
                 if (cbar != null) cbar.invalidate();

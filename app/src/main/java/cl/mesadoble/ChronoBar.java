@@ -578,11 +578,82 @@ public class ChronoBar extends FrameLayout {
         battP.clearShadowLayer();
         // medida de cada batería: de pie (angosta y alta) o acostada (ancha y baja)
         float bw = up ? (skin == 1 ? 3.5f : 6.5f) * dp : 15 * dp, bh = up ? 13 * dp : (skin == 1 ? 3.5f : 7) * dp;
-        float lw = battP.measureText("P"), one = lw + 2.5f * dp + bw + (skin == 2 && !up ? 1.5f * dp : 0), sep = 7 * dp, total = 2 * one + sep;
+        float lw = battP.measureText("P"), one = lw + 2.5f * dp + bw + (skin == 2 && !up ? 1.5f * dp : 0), sep = 7 * dp;
+        // accesorios (audífonos, gamepad, teclado…): el mismo dibujo, con su iconito en lugar de la letra
+        java.util.List<Peri.Item> per = Peri.all();
+        if (per.size() > 4) per = per.subList(0, 4);
+        float oneP = ICON * dp + 2.5f * dp + bw + (skin == 2 && !up ? 1.5f * dp : 0);
+        float total = 2 * one + sep + per.size() * (oneP + sep);
         float mid = y(strip() / 2f);
+        float avail = Math.max(40 * dp, timeW() + 2 * logoW() / 3);
+        c.save();
+        if (total > avail) c.scale(avail / total, avail / total, cx, mid);   // no caben: se achican todas un poco
         float x = cx - total / 2;
         battery(c, "P", pl, pc, x, mid, bw, bh, skin, up, ink);
-        battery(c, "E", el, ec, x + one + sep, mid, bw, bh, skin, up, ink);
+        x += one + sep;
+        battery(c, "E", el, ec, x, mid, bw, bh, skin, up, ink);
+        x += one + sep;
+        for (Peri.Item it : per) { battery(c, "@" + it.kind, it.pct, false, x, mid, bw, bh, skin, up, ink); x += oneP + sep; }
+        c.restore();
+    }
+
+    private static final float ICON = 8.5f;
+
+    /** Iconito del accesorio (h audífonos, g gamepad, k teclado, m mouse, w reloj, o otro), de ICON dp de ancho. */
+    private void periIcon(Canvas c, String k, float x, float mid, int col) {
+        float u = ICON * dp, t = mid - u * 0.45f, b = mid + u * 0.45f;
+        battP.setColor(col);
+        battP.setStyle(Paint.Style.STROKE);
+        battP.setStrokeWidth(1.1f * dp);
+        battP.setStrokeCap(Paint.Cap.ROUND);
+        switch (k) {
+            case "h": {   // audífonos: vincha y dos almohadillas
+                c.drawArc(x + u * 0.1f, t, x + u * 0.9f, t + u * 0.85f, 180, 180, false, battP);
+                battP.setStyle(Paint.Style.FILL);
+                c.drawRoundRect(x, mid - u * 0.02f, x + u * 0.28f, b, 0.8f * dp, 0.8f * dp, battP);
+                c.drawRoundRect(x + u * 0.72f, mid - u * 0.02f, x + u, b, 0.8f * dp, 0.8f * dp, battP);
+                break;
+            }
+            case "g": {   // gamepad: cuerpo, cruz y dos botones
+                c.drawRoundRect(x, mid - u * 0.3f, x + u, mid + u * 0.32f, u * 0.28f, u * 0.28f, battP);
+                battP.setStrokeWidth(0.9f * dp);
+                c.drawLine(x + u * 0.18f, mid, x + u * 0.4f, mid, battP);
+                c.drawLine(x + u * 0.29f, mid - u * 0.11f, x + u * 0.29f, mid + u * 0.11f, battP);
+                battP.setStyle(Paint.Style.FILL);
+                c.drawCircle(x + u * 0.66f, mid + u * 0.06f, 0.7f * dp, battP);
+                c.drawCircle(x + u * 0.8f, mid - u * 0.08f, 0.7f * dp, battP);
+                break;
+            }
+            case "k": {   // teclado: rectángulo con teclitas
+                c.drawRoundRect(x, mid - u * 0.3f, x + u, mid + u * 0.3f, 1 * dp, 1 * dp, battP);
+                battP.setStyle(Paint.Style.FILL);
+                for (int r = 0; r < 2; r++) for (int i = 0; i < 4; i++)
+                    c.drawRect(x + u * (0.14f + i * 0.2f), mid - u * (0.14f - r * 0.18f), x + u * (0.24f + i * 0.2f), mid - u * (0.06f - r * 0.18f), battP);
+                c.drawRect(x + u * 0.3f, mid + u * 0.14f, x + u * 0.7f, mid + u * 0.2f, battP);
+                break;
+            }
+            case "m": {   // mouse
+                c.drawRoundRect(x + u * 0.22f, t, x + u * 0.78f, b, u * 0.28f, u * 0.28f, battP);
+                c.drawLine(x + u * 0.5f, t + u * 0.1f, x + u * 0.5f, t + u * 0.32f, battP);
+                break;
+            }
+            case "w": {   // reloj
+                c.drawRoundRect(x + u * 0.22f, mid - u * 0.25f, x + u * 0.78f, mid + u * 0.25f, 1.2f * dp, 1.2f * dp, battP);
+                c.drawLine(x + u * 0.38f, t, x + u * 0.62f, t, battP);
+                c.drawLine(x + u * 0.38f, b, x + u * 0.62f, b, battP);
+                break;
+            }
+            default: {    // otro: la runa de Bluetooth
+                float cx = x + u * 0.5f, h = u * 0.45f, w = u * 0.22f;
+                c.drawLine(cx - w, mid - h * 0.5f, cx + w, mid + h * 0.5f, battP);
+                c.drawLine(cx - w, mid + h * 0.5f, cx + w, mid - h * 0.5f, battP);
+                c.drawLine(cx, mid - h, cx, mid + h, battP);
+                c.drawLine(cx, mid - h, cx + w, mid - h * 0.5f, battP);
+                c.drawLine(cx, mid + h, cx + w, mid + h * 0.5f, battP);
+            }
+        }
+        battP.setStyle(Paint.Style.FILL);
+        battP.setStrokeCap(Paint.Cap.BUTT);
     }
 
     private static int battColor(int pct) { return pct < 0 ? 0xFF8A8A8A : pct <= 20 ? 0xFFFF3B30 : pct <= 50 ? 0xFFFFC400 : 0xFF3DDC84; }
@@ -590,8 +661,8 @@ public class ChronoBar extends FrameLayout {
     private void battery(Canvas c, String l, int pct, boolean chg, float x, float mid, float bw, float bh, int skin, boolean up, int ink) {
         battP.setStyle(Paint.Style.FILL);
         battP.setColor(chg ? 0xFFFFC400 : (ink & 0x00FFFFFF) | 0xCC000000);
-        c.drawText(l, x, mid + 3 * dp, battP);
-        x += battP.measureText(l) + 2.5f * dp;
+        if (l.startsWith("@")) { periIcon(c, l.substring(1), x, mid, (ink & 0x00FFFFFF) | 0xCC000000); x += ICON * dp + 2.5f * dp; }
+        else { c.drawText(l, x, mid + 3 * dp, battP); x += battP.measureText(l) + 2.5f * dp; }
         float top = mid - bh / 2, bot = mid + bh / 2, right = x + bw;
         int col = battColor(pct);
         float f = pct < 0 ? 0 : Math.max(0.04f, pct / 100f);

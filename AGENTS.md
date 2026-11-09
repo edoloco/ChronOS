@@ -123,6 +123,10 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
 - Ajustes → Configuración → **Teclados automáticos** (`kbAutoMenu`, se copian al otro con `prefSet`): `autoKb`
   (cuadro de texto), `autoKbChat` (apps de chat, `openKb`), `autoVideo` 0 control de video / 1 teclado / 2 nada
   (`mActive` en Hub), `autoAsist` (RetroArch), `vertKbAuto`, `kbSpaceFix`.
+- **Baterías de accesorios** (`Peri`): cada teléfono mira sus accesorios (Bluetooth `getBatteryLevel` por reflexión;
+  gamepads/teclados/mouse con `InputDevice.getBatteryState`, Android 12+), se los pasa al otro (`peri {l:[{n,k,p}]}`)
+  y `ChronoBar.drawBatteries` los dibuja junto a P y E con un iconito (`periIcon`: h audífonos, g gamepad, k teclado,
+  m mouse, w reloj, o runa Bluetooth). Solo los que informan carga; máx. 4; si no caben, se achican todas.
 - **Conexión** (botón de cadenas en el inicio, `connectionMenu`): "Red" (`showConnection`, lo de siempre) y
   "Métodos de unión" (`joinMenu`, pref `joinMode` copiada con `prefSet` → `Hub.joinModeChanged`):
   - 0 = Red Wi-Fi (como siempre; por defecto, nada cambia).
