@@ -126,7 +126,8 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
 - **Conexión** (botón de cadenas en el inicio, `connectionMenu`): "Red" (`showConnection`, lo de siempre) y
   "Métodos de unión" (`joinMenu`, pref `joinMode` copiada con `prefSet` → `Hub.joinModeChanged`):
   - 0 = Red Wi-Fi (como siempre; por defecto, nada cambia).
-  - 1 = Bluetooth (ahorro): `BleLink` = canal L2CAP de BLE (Android 10+, sin emparejar). El PRINCIPAL abre el canal y
+  - 1 = Bluetooth (ahorro): `BleLink` = canal L2CAP de BLE (Android 10+, sin emparejar; el anuncio DEBE ser
+    conectable; la búsqueda alterna con y sin filtro cada 12 s; BLUETOOTH_SCAN con neverForLocation). El PRINCIPAL abre el canal y
     lo anuncia (UUID corto 0xC4A0, datos 'C'+PSM); el EXTENDIDO lo busca y se conecta. `Link` tiene ahora dos
     conexiones (`conn` Wi-Fi y `bt`), manda por Wi-Fi si hay (`active()`), y cambiar de una a otra NO cambia el
     estado (avisa `onVia` → `Hub.viaChanged`, mensaje local `linkVia`). `peerIp()` solo es Wi-Fi.

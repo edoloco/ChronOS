@@ -127,9 +127,11 @@ final class BleLink {
             if (adv == null) { status = "el Bluetooth no puede anunciar"; return; }
             advCb = new AdvertiseCallback() {
                 @Override public void onStartFailure(int code) { status = "no pudo anunciarse (" + code + ")"; }
+                @Override public void onStartSuccess(AdvertiseSettings x) { status = "anunciándose, esperando al extendido"; }
             };
-            AdvertiseSettings st = new AdvertiseSettings.Builder().setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_BALANCED)
-                    .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM).setConnectable(false).build();
+            // conectable: si no, el extendido ve el anuncio pero no puede abrir el canal (era el error de la 1ª versión)
+            AdvertiseSettings st = new AdvertiseSettings.Builder().setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
+                    .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM).setConnectable(true).build();
             AdvertiseData d = new AdvertiseData.Builder().addServiceData(SVC, new byte[]{MAGIC, (byte) (p >> 8), (byte) p}).build();
             adv.startAdvertising(st, d, advCb);
         } catch (SecurityException e) { status = "falta el permiso de Bluetooth"; adv = null; advCb = null; }
@@ -143,8 +145,12 @@ final class BleLink {
 
     // ---------------- extendido ----------------
 
+    private boolean seen, plainScan;
+    private int tries;
+
     private void scan() {
         if (!on || linked || scCb != null) return;
+        seen = false;
         try {
             BluetoothAdapter ad = adapter();
             if (ad == null) return;
@@ -156,14 +162,24 @@ final class BleLink {
                     if (connecting || linked || r.getScanRecord() == null) return;
                     byte[] d = r.getScanRecord().getServiceData(SVC);
                     if (d == null || d.length < 3 || d[0] != MAGIC) return;
+                    seen = true;
                     int p = ((d[1] & 0xff) << 8) | (d[2] & 0xff);
+                    tries++;
+                    status = "principal visto, uniendo (intento " + tries + ")";
                     connect(r.getDevice(), p);
                 }
                 @Override public void onScanFailed(int code) { scCb = null; status = "no pudo buscar (" + code + ")"; retry(); }
             };
-            ScanFilter f = new ScanFilter.Builder().setServiceData(SVC, new byte[]{MAGIC, 0, 0}, new byte[]{(byte) 0xff, 0, 0}).build();
-            ScanSettings st = new ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_BALANCED).build();
-            sc.startScan(Collections.singletonList(f), st, scCb);
+            ScanSettings st = new ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build();   // solo mientras busca
+            if (plainScan) sc.startScan(null, st, scCb);   // algunos Bluetooth no filtran bien: se revisa cada anuncio aquí
+            else sc.startScan(Collections.singletonList(new ScanFilter.Builder().setServiceData(SVC, new byte[]{MAGIC, 0, 0}, new byte[]{(byte) 0xff, 0, 0}).build()), st, scCb);
+            h.postDelayed(() -> {   // 12 s sin ver al principal: se alterna entre buscar con filtro y sin filtro
+                if (!on || linked || seen) return;
+                stopScan();
+                plainScan = !plainScan;
+                status = "no veo al principal (¿Bluetooth encendido y ChronOS abierto allá?)";
+                scan();
+            }, 12000);
         } catch (SecurityException e) { status = "falta el permiso de Bluetooth"; sc = null; scCb = null; }
         catch (Exception e) { sc = null; scCb = null; }
     }
@@ -181,7 +197,7 @@ final class BleLink {
                 s.connect();
                 sink.attachBt(s);
             } catch (Exception e) {
-                status = "no se pudo unir; se reintenta";
+                status = "lo vi pero no se pudo unir (intento " + tries + "): " + e.getClass().getSimpleName();
             } finally { connecting = false; }
         }, "ble-connect").start();
     }
