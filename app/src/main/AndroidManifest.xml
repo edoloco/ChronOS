@@ -115,6 +115,13 @@
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
         <activity
+            android:name=".MoveTo$ClipGrab"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <activity
             android:name=".MoveTo$ShareIn"
             android:exported="true"
             android:label="Al otro teléfono"

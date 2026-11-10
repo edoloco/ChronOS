@@ -27,19 +27,20 @@ public class CaptureActivity extends Activity {
     private void ask() {
         MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
         try { startActivityForResult(mpm.createScreenCaptureIntent(), 72); }
-        catch (Exception e) { tell("El principal no permite capturar el sonido de las apps"); finish(); }
+        catch (Exception e) { tell("Este teléfono no permite capturar el sonido de las apps"); finish(); }
     }
 
     @Override public void onRequestPermissionsResult(int req, String[] p, int[] r) {
         if (r.length > 0 && r[0] == PackageManager.PERMISSION_GRANTED) ask();
-        else { tell("Boost necesita el permiso de micrófono en el principal"); finish(); }
+        else { tell("Hace falta el permiso de micrófono para capturar el sonido"); finish(); }
     }
 
     @Override protected void onActivityResult(int req, int res, Intent data) {
         if (req == 72 && res == RESULT_OK && data != null) {
-            Intent i = new Intent(this, CaptureService.class).putExtra("code", res).putExtra("data", data);
-            try { startForegroundService(i); } catch (Exception e) { tell("No pude iniciar Boost en el principal"); }
-        } else if (req == 72) tell("Boost: no se aceptó capturar el sonido en el principal");
+            Intent i = new Intent(this, CaptureService.class).putExtra("code", res).putExtra("data", data)
+                    .putExtra("rev", getIntent().getBooleanExtra("rev", false));
+            try { startForegroundService(i); } catch (Exception e) { tell("No pude iniciar la captura de sonido"); }
+        } else if (req == 72) tell("No se aceptó capturar el sonido");
         finish();
     }
 }

@@ -21,6 +21,9 @@ import android.os.IBinder;
 public class CaptureService extends Service {
 
     static volatile boolean running;
+    /** Al revés: en el EXTENDIDO, su sonido va al principal (video pasado al extendido, audífonos en el principal). */
+    static volatile boolean reverse;
+    private int savedVol = -1;
     private static final int RATE = 48000;
     private MediaProjection projection;
     private AudioRecord rec;
@@ -45,11 +48,19 @@ public class CaptureService extends Service {
         } catch (Exception e) { rec = null; }
         if (rec == null || rec.getState() != AudioRecord.STATE_INITIALIZED) { fail("Este teléfono no deja capturar el sonido de las apps"); return START_NOT_STICKY; }
         running = true;
+        reverse = i.getBooleanExtra("rev", false);
         Hub hub = Hub.get(this);
         Boost.serve();
-        hub.send("boost", "on", true);
-        Boost.syncVolume(this, hub, true);
-        if (hub.connected()) hub.send("boostMsg", "msg", "Boost activo: el sonido sale por los dos teléfonos");
+        if (reverse) {
+            // el principal escucha y lo toca (por sus audífonos o su parlante); aquí se silencia
+            hub.send("soundHome", "on", true);
+            android.media.AudioManager am = (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
+            if (am != null) { savedVol = am.getStreamVolume(android.media.AudioManager.STREAM_MUSIC); am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, 0, 0); }
+        } else {
+            hub.send("boost", "on", true);
+            Boost.syncVolume(this, hub, true);
+            if (hub.connected()) hub.send("boostMsg", "msg", "Boost activo: el sonido sale por los dos teléfonos");
+        }
         new Thread(this::loop, "captura").start();
         return START_NOT_STICKY;
     }
@@ -88,7 +99,7 @@ public class CaptureService extends Service {
                 // sonido 3D: el principal suena tal cual (es la app), así que el extendido lleva el lado izquierdo
                 // ensanchado y con realce; la diferencia entre los dos es lo que da el espacio
                 int lv = Sound3D.live;
-                if (lv <= 0) fx = null; else if (fx == null || fx.level != lv) fx = new Sound3D(RATE, lv, false);
+                if (lv <= 0 || reverse) fx = null; else if (fx == null || fx.level != lv) fx = new Sound3D(RATE, lv, false);
                 for (int k = 0; k < f; k++) {   // izquierda + derecha → un solo canal
                     int l = (short) ((st[k * 4] & 0xff) | (st[k * 4 + 1] << 8)), r = (short) ((st[k * 4 + 2] & 0xff) | (st[k * 4 + 3] << 8));
                     int m = (l + r) / 2;
@@ -96,7 +107,7 @@ public class CaptureService extends Service {
                     mono[k * 2] = (byte) m; mono[k * 2 + 1] = (byte) (m >> 8);
                 }
                 long now = System.currentTimeMillis();
-                if (now - btCheck > 1000) { btCheck = now; quiet = Boost.headphones(this) || Boost.gameInFront; }
+                if (now - btCheck > 1000) { btCheck = now; quiet = !reverse && (Boost.headphones(this) || Boost.gameInFront); }
                 if (!quiet) Boost.send(RATE, mono, f * 2, 0L);   // con audífonos o en un juego no se manda
             }
         } catch (Exception ignored) { }
@@ -108,8 +119,15 @@ public class CaptureService extends Service {
         try { if (rec != null) { rec.stop(); rec.release(); } } catch (Exception ignored) { }
         try { if (projection != null) projection.stop(); } catch (Exception ignored) { }
         Hub hub = Hub.get(this);
-        hub.send("boost", "on", false);
-        Boost.syncVolume(this, hub, false);
+        if (reverse) {
+            hub.send("soundHome", "on", false);
+            android.media.AudioManager am = (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
+            if (am != null && savedVol >= 0) am.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, savedVol, 0);
+            reverse = false;
+        } else {
+            hub.send("boost", "on", false);
+            Boost.syncVolume(this, hub, false);
+        }
         super.onDestroy();
     }
 

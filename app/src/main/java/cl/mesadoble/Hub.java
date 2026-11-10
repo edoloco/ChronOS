@@ -492,6 +492,7 @@ public class Hub implements Link.Listener {
                     .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), () -> false, 94, "Fondo de pantalla", "Toca para elegir la imagen"));
             return;
         }
+        if ("soundHome".equals(t)) { if (isPrincipal()) Boost.listen(app, this, m.optBoolean("on"), false); return; }   // sonido del extendido aquí
         if ("moveOpen".equals(t)) { main.post(() -> MoveTo.onMessage(app, this, m)); return; }   // video o página del otro teléfono
         if ("homeAll".equals(t)) {   // se tocó Inicio en el otro teléfono: aquí se cierran los teclados y vuelve la mesa
             main.post(() -> {

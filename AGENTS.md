@@ -126,6 +126,13 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   Navegador: barra de direcciones) →
   `moveOpen {url, pkg}` al otro, que lo abre en su misma app o en la de siempre; aquí se va al inicio. Lanzarla fuera
   de la pantalla la descarta para esa app. Compartir › "Al otro teléfono" (`MoveTo.ShareIn`) sirve a mano.
+  - Leer lo copiado: Android solo deja leer el portapapeles a la app del frente o al teclado; si no se puede,
+    `MoveTo.ClipGrab` (ventana invisible) toma el foco, lo lee y se cierra. Respaldo: `lastYtId` (el último video
+    que llegó del otro teléfono), para devolverlo.
+  - Sonido por el principal (pref `moveSound`, def. sí): al llegar un video/página al extendido, este captura el
+    sonido de sus apps (`CaptureService` con `rev`, `CaptureActivity` pide "Iniciar ahora"), se silencia (volumen
+    de música a 0, se restaura al terminar) y manda el audio; el principal lo toca (`soundHome` →
+    `Boost.listen(…, sync=false)`), así suenan sus audífonos Bluetooth. Se detiene al dejar esa app o devolverla.
 - **Zona Wi-Fi de un toque** (`Hotspot`): Android no deja encenderla a una app; la accesibilidad abre su pantalla de
   Ajustes, toca el interruptor de la fila "Zona Wi-Fi…" (o el de arriba) y vuelve atrás. Botón de la barra rápida.
 - **Menú Apagar** (único botón del inicio; ya no están "Teléfono normal" ni "Cerrar ChronOS"): Apagar teléfonos

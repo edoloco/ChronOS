@@ -102,6 +102,7 @@ final class MoveTo {
             offered = null;
             dismissedFor = null;
             h.post(MoveTo::hide);
+            if (!hub.isPrincipal()) stopSoundHome(c);   // se dejó el video en el extendido: el sonido vuelve a lo normal
         }
     }
 
@@ -132,6 +133,19 @@ final class MoveTo {
         }
         fail(hub, "No hay un video ni un navegador al frente");
     }
+
+    // ---- el sonido de lo que se pasó al extendido sigue en el principal
+
+    static boolean soundHome(Context c) { return c.getSharedPreferences("mesa", Context.MODE_PRIVATE).getBoolean("moveSound", true); }
+
+    /** Extendido: captura el sonido de sus apps y lo manda al principal (Android pide aceptar "Iniciar ahora"). */
+    static void startSoundHome(Context c, Hub hub) {
+        if (CaptureService.running) return;
+        hub.startOrNotify(new Intent(c, CaptureActivity.class).putExtra("rev", true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), 64,
+                "Sonido por el principal", "Toca para que el sonido siga saliendo por el principal");
+    }
+
+    static void stopSoundHome(Context c) { if (CaptureService.running && CaptureService.reverse) CaptureService.stop(c); }
 
     /** Ya se mandó: aquí se va al inicio y se quita la flecha. */
     private static void done() {
@@ -240,9 +254,44 @@ final class MoveTo {
         }
         h.postDelayed(() -> {
             String id = ytId(clip(s));
-            if (id == null) { fail(hub, "No pude leer el enlace del video"); return; }
-            openYt(c, hub, id, sec);
+            if (id != null) { openYt(c, hub, id, sec); return; }
+            // Android solo deja leer lo copiado a la app que está al frente (o al teclado): una ventanita invisible
+            // de ChronOS toma el foco un instante, lo lee y se cierra (en el extendido el teclado no es ChronOS)
+            ClipGrab.then = txt -> {
+                String id2 = ytId(txt);
+                if (id2 == null && lastYtId != null && System.currentTimeMillis() - lastYtAt < 6 * 3600_000L) id2 = lastYtId;   // el que llegó
+                if (id2 == null) { fail(hub, "No pude leer el enlace del video"); return; }
+                openYt(c, hub, id2, sec);
+            };
+            try { c.startActivity(new Intent(c, ClipGrab.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION)); }
+            catch (Exception e) { ClipGrab.deliver(""); }
         }, 500);
+    }
+
+    /** El último video de YouTube que llegó del otro teléfono (para devolverlo aunque no se pueda leer el enlace). */
+    private static volatile String lastYtId;
+    private static volatile long lastYtAt;
+
+    /** Ventanita invisible que toma el foco para poder leer el portapapeles, y se cierra. */
+    public static class ClipGrab extends Activity {
+        static volatile java.util.function.Consumer<String> then;
+        private boolean done;
+
+        static void deliver(String txt) {
+            java.util.function.Consumer<String> t = then;
+            then = null;
+            if (t != null) h.post(() -> t.accept(txt == null ? "" : txt));
+        }
+
+        @Override protected void onCreate(Bundle b) {
+            super.onCreate(b);
+            h.postDelayed(() -> { if (!done) { done = true; deliver(clip(this)); finish(); } }, 1500);   // por si no llega el foco
+        }
+
+        @Override public void onWindowFocusChanged(boolean has) {
+            super.onWindowFocusChanged(has);
+            if (has && !done) { done = true; deliver(clip(this)); finish(); overridePendingTransition(0, 0); }
+        }
     }
 
     /** El segundo en que va el video (de su sesión), o 0. */
@@ -263,6 +312,7 @@ final class MoveTo {
         MediaController mc = ytSession(c);
         if (mc != null) try { mc.getTransportControls().pause(); } catch (Exception ignored) { }
         hub.send("moveOpen", "url", "https://www.youtube.com/watch?v=" + id + (sec > 0 ? "&t=" + sec + "s" : ""), "pkg", YT);
+        if (!hub.isPrincipal()) stopSoundHome(c);
         done();
     }
 
@@ -347,6 +397,10 @@ final class MoveTo {
     static void onMessage(Context c, Hub hub, JSONObject m) {
         if (!"moveOpen".equals(m.optString("t"))) return;
         String url = m.optString("url"), pkg = m.optString("pkg");
+        String yid = ytId(url);
+        if (yid != null) { lastYtId = yid; lastYtAt = System.currentTimeMillis(); }
+        // en el extendido: el sonido sigue saliendo por el principal (sus audífonos Bluetooth, por ejemplo)
+        if (!hub.isPrincipal() && soundHome(c)) h.postDelayed(() -> startSoundHome(c, hub), 1500);
         Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         // su misma app si está en este teléfono; si no, la de siempre
         if (!pkg.isEmpty() && c.getPackageManager().getLaunchIntentForPackage(pkg) != null) i.setPackage(pkg);

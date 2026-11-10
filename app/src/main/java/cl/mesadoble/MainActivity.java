@@ -2023,6 +2023,12 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                     MoveTo.reoffer(this, hub);
                     configMenu();
                 });
+        boolean ms = MoveTo.soundHome(this);
+        sh.option(Ui.RECEIVE, -1, "Sonido de lo que pasas al extendido: " + (ms ? "por el principal" : "en el extendido"),
+                "Por el principal: siguen sonando sus audífonos Bluetooth (Android pide aceptar «Iniciar ahora» en el extendido)", ms, () -> {
+                    setShared("moveSound", !ms);
+                    configMenu();
+                });
         boolean ycOn = LiveChat.enabled(this);
         sh.option(Ui.NOTE, -1, "Chat en vivo de YouTube: " + (ycOn ? "sí" : "no"),
                 "Con un directo o estreno en pantalla flotante, sale una burbuja para abrir su chat al lado", ycOn, () -> {
