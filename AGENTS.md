@@ -109,6 +109,8 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   (accesibilidad, portapapeles vaciado antes) + segundo de su sesión (`NotifService`), se pausa y va al inicio;
   navegador: barra de direcciones (ids conocidos o texto con forma de dirección arriba). `moveOpen {url, pkg}` en el
   extendido abre en la misma app o en la de siempre. Compartir › "Al extendido" (`MoveTo.ShareIn`) sirve a mano.
+  Al conectarse se vuelve a ofrecer (`reoffer`); si no se puede mostrar, el extendido avisa por qué. Configuración ›
+  "Probar la flecha" la muestra a mano.
 - **Zona Wi-Fi de un toque** (`Hotspot`): Android no deja encenderla a una app; la accesibilidad abre su pantalla de
   Ajustes, toca el interruptor de la fila "Zona Wi-Fi…" (o el de arriba) y vuelve atrás. Botón de la barra rápida.
 - **Menú Apagar** (único botón del inicio; ya no están "Teléfono normal" ni "Cerrar ChronOS"): Apagar teléfonos

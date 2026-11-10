@@ -90,6 +90,13 @@ final class MoveTo {
         }
     }
 
+    /** Se conectaron (o el extendido volvió): si hay video o navegador al frente, se ofrece de nuevo. */
+    static void reoffer(Context c, Hub hub) {
+        offered = null;
+        String f = MesaAccess.front;
+        if (f != null) onFront(c, hub, f);
+    }
+
     /** El extendido tocó la flecha: se lee el video o la página y se manda. */
     static void request(Context c, Hub hub) {
         String pkg = MesaAccess.front;
@@ -308,7 +315,10 @@ final class MoveTo {
         if (arrow != null) { arrow.pkg = pkg; arrow.busy(false); return; }
         Context ctx = MesaAccess.instance != null ? MesaAccess.instance : c.getApplicationContext();
         int type = MesaAccess.instance != null ? WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY : WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY;
-        if (MesaAccess.instance == null && !Settings.canDrawOverlays(c)) return;
+        if (MesaAccess.instance == null && !Settings.canDrawOverlays(c)) {
+            hub.toast("Para la flecha «Mover a extendido»: activa la accesibilidad de ChronOS en este teléfono (o «Mostrar sobre otras apps»)");
+            return;
+        }
         Point sc = new Point();
         awm = (WindowManager) ctx.getSystemService(Context.WINDOW_SERVICE);
         awm.getDefaultDisplay().getRealSize(sc);
@@ -322,7 +332,11 @@ final class MoveTo {
         lp.y = Math.round(sc.y * 0.08f);
         arrow.lp = lp;
         arrow.screen = sc;
-        try { awm.addView(arrow, lp); } catch (Exception e) { arrow = null; }
+        try { awm.addView(arrow, lp); }
+        catch (Exception e) {
+            arrow = null;
+            hub.toast("No se pudo mostrar la flecha «Mover a extendido»: " + e.getClass().getSimpleName());
+        }
     }
 
     static void hide() {

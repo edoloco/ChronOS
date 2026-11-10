@@ -299,6 +299,7 @@ public class Hub implements Link.Listener {
             sendImeState();
             sendBattery();
             Peri.share();
+            if (isPrincipal()) main.postDelayed(() -> MoveTo.reoffer(app, this), 1500);   // flecha "Mover a extendido"
             if (prefs.getBoolean("forceViewPending", false)) {   // vista forzada elegida sin conexión
                 prefs.edit().putBoolean("forceViewPending", false).apply();
                 send("forceView", "v", ForceView.mode(app, true), "w", 1);
@@ -496,6 +497,7 @@ public class Hub implements Link.Listener {
             return;
         }
         if ("moveReq".equals(t)) { if (isPrincipal()) main.post(() -> MoveTo.request(app, this)); return; }
+        if ("moveAsk".equals(t)) { if (isPrincipal()) main.post(() -> MoveTo.reoffer(app, this)); return; }
         if ("exitNow".equals(t)) {   // el otro pidió que este también salga de ChronOS (menú Apagar)
             startOwn(new Intent(app, MainActivity.class).putExtra("exitNow", true).putExtra("both", m.optBoolean("both"))
                     .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), () -> false, 95, "Salir de ChronOS", "Toca para salir de ChronOS aquí");
