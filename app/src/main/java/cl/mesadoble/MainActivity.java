@@ -3908,6 +3908,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         new Ui.Sheet(this)
                 .option(Ui.FOLDER, "Crear grupo", "Una carpeta aquí; arrastra elementos de la mesa sobre ella para llenarla", () -> newGroup(x, y))
                 .option(Ui.IMAGE, "Cambiar fondo de mesa", "Imagen o color de fondo", this::wallMenu)
+                .option(Ui.GEAR, "Herramientas de ChronOS", "El mismo menú de Herramientas del inicio", this::toolsMenu)
                 .button("Cancelar", false, null).show();
     }
 
@@ -3932,21 +3933,87 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         main.postDelayed(() -> { name.requestFocus(); }, 300);
     }
 
-    /** Tocar un grupo: se abre como una carpeta (íconos en cuadrícula). */
+    /**
+     * Tocar un grupo: se abre como una carpeta de cristal al centro; todo lo de atrás queda borroso. Arriba a la
+     * izquierda, ⋯ con Cambiar nombre y Desarmar grupo. Los íconos van en la cuadrícula (por nombre).
+     */
     @Override public void onOpenGroup(Item g) {
         java.util.List<Item> m = desk.members(g);
-        Ui.Sheet sh = new Ui.Sheet(this).title(g.title.isEmpty() ? "Grupo" : g.title);
-        final android.app.Dialog[] dlg = new android.app.Dialog[1];
-        if (m.isEmpty()) sh.message("Está vacío: mantén presionado un elemento de la mesa y suéltalo sobre el grupo.");
-        else {
+        final java.text.Collator col = java.text.Collator.getInstance(new java.util.Locale("es"));
+        col.setStrength(java.text.Collator.PRIMARY);
+        java.util.Collections.sort(m, (p, q) -> col.compare(nameOf(p), nameOf(q)));
+        final android.app.Dialog dlg = new android.app.Dialog(this, android.R.style.Theme_Translucent_NoTitleBar_Fullscreen);
+        FrameLayout root = new FrameLayout(this);
+        // atrás: la pantalla actual, borrosa y un poco oscurecida
+        android.graphics.Bitmap back = blurredScreen();
+        if (back != null) {
+            android.widget.ImageView bg = new android.widget.ImageView(this);
+            bg.setScaleType(android.widget.ImageView.ScaleType.FIT_XY);
+            bg.setImageBitmap(back);
+            root.addView(bg, new FrameLayout.LayoutParams(-1, -1));
+        }
+        View dim = new View(this);
+        dim.setBackgroundColor(night ? 0x55000000 : 0x33000000);
+        root.addView(dim, new FrameLayout.LayoutParams(-1, -1));
+        root.setOnClickListener(v -> dlg.dismiss());   // tocar fuera cierra
+
+        // la carpeta: cuadro de cristal (degradado claro, brillo arriba, sombra suave por fuera, sin borde)
+        int sw = getResources().getDisplayMetrics().widthPixels, sh = getResources().getDisplayMetrics().heightPixels;
+        int side = Math.min(Math.round(Math.min(sw, sh) * 0.9f), dp(460));
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(14), dp(12), dp(14), dp(16));
+        GradientDrawable glass = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                night ? new int[]{0x66FFFFFF, 0x33FFFFFF, 0x26FFFFFF} : new int[]{0xB3FFFFFF, 0x80FFFFFF, 0x66FFFFFF});
+        glass.setCornerRadius(dp(30));
+        box.setBackground(glass);
+        box.setElevation(dp(24));
+        box.setClickable(true);   // tocar dentro no cierra
+
+        LinearLayout head = new LinearLayout(this);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        TextView more = new TextView(this);
+        more.setText("⋯");
+        more.setTextSize(24);
+        more.setGravity(Gravity.CENTER);
+        more.setTextColor(night ? 0xFFFFFFFF : 0xFF1D2733);
+        GradientDrawable mb = new GradientDrawable();
+        mb.setShape(GradientDrawable.OVAL);
+        mb.setColor(night ? 0x33FFFFFF : 0x40FFFFFF);
+        more.setBackground(mb);
+        more.setOnClickListener(v -> new Ui.Sheet(this).title(g.title.isEmpty() ? "Grupo" : g.title)
+                .option(Ui.NOTE, "Cambiar nombre", "", () -> { dlg.dismiss(); renameGroup(g); })
+                .option(Ui.GRID, "Desarmar grupo", "Todo vuelve a la mesa", () -> { dlg.dismiss(); ungroup(g); })
+                .button("Cerrar", false, null).show());
+        head.addView(more, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        TextView title = new TextView(this);
+        title.setText(g.title.isEmpty() ? "Grupo" : g.title);
+        title.setTextSize(19);
+        title.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
+        title.setTextColor(night ? 0xFFFFFFFF : 0xFF1D2733);
+        title.setGravity(Gravity.CENTER);
+        title.setShadowLayer(dp(3), 0, dp(1), night ? 0x66000000 : 0x55FFFFFF);
+        head.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        head.addView(new View(this), new LinearLayout.LayoutParams(dp(40), dp(40)));   // equilibra el ⋯
+        box.addView(head);
+
+        if (m.isEmpty()) {
+            TextView e = new TextView(this);
+            e.setText("Está vacío: mantén presionado un elemento de la mesa y suéltalo sobre el grupo.");
+            e.setTextSize(15);
+            e.setGravity(Gravity.CENTER);
+            e.setTextColor(night ? 0xDDFFFFFF : 0xCC1D2733);
+            e.setPadding(dp(16), dp(30), dp(16), dp(30));
+            box.addView(e, new LinearLayout.LayoutParams(-1, 0, 1));
+        } else {
+            int cols = 4, cw = (side - dp(28)) / cols;
             android.widget.GridLayout grid = new android.widget.GridLayout(this);
-            grid.setColumnCount(4);
-            int cw = dp(76);
+            grid.setColumnCount(cols);
             for (Item it : m) {
                 LinearLayout cell = new LinearLayout(this);
                 cell.setOrientation(LinearLayout.VERTICAL);
                 cell.setGravity(Gravity.CENTER_HORIZONTAL);
-                cell.setPadding(dp(4), dp(8), dp(4), dp(8));
+                cell.setPadding(dp(2), dp(10), dp(2), dp(6));
                 android.widget.ImageView iv = new android.widget.ImageView(this);
                 android.graphics.Bitmap b = it.bitmap();
                 if (b != null) iv.setImageBitmap(b);
@@ -3956,38 +4023,91 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                     gd.setColor(Item.NOTE.equals(it.kind) ? it.color : 0x55FFFFFF);
                     iv.setBackground(gd);
                 }
-                cell.addView(iv, new LinearLayout.LayoutParams(dp(48), dp(48)));
+                int is = Math.min(dp(56), cw - dp(16));
+                cell.addView(iv, new LinearLayout.LayoutParams(is, is));
                 TextView tv = new TextView(this);
-                String t = it.title.isEmpty() ? (it.text.isEmpty() ? it.kind : it.text) : it.title;
+                String t = nameOf(it);
                 tv.setText(t);
                 tv.setTextSize(12);
-                tv.setTextColor(night ? 0xFFE6EDF3 : 0xFF1D2733);
+                tv.setTextColor(night ? 0xFFFFFFFF : 0xFF1D2733);
+                tv.setShadowLayer(dp(2), 0, dp(1), night ? 0x88000000 : 0x66FFFFFF);
                 tv.setMaxLines(1);
                 tv.setEllipsize(android.text.TextUtils.TruncateAt.END);
                 tv.setGravity(Gravity.CENTER);
+                tv.setPadding(0, dp(4), 0, 0);
                 cell.addView(tv, new LinearLayout.LayoutParams(-1, -2));
                 cell.setOnClickListener(v -> {
-                    if (dlg[0] != null) dlg[0].dismiss();
+                    dlg.dismiss();
                     if (Item.APP.equals(it.kind)) onOpenApp(it);
                     else if (Item.LINK.equals(it.kind)) onOpenLink(it);
                     else if (Item.NOTE.equals(it.kind)) onEditNote(it);
                     else takeOut(it, g);   // lo demás (widgets, imágenes…) funciona en la mesa
                 });
                 cell.setOnLongClickListener(v -> {   // mantener: sacarlo a la mesa
-                    if (dlg[0] != null) dlg[0].dismiss();
+                    dlg.dismiss();
                     takeOut(it, g);
                     Toast.makeText(this, "«" + t + "» volvió a la mesa", Toast.LENGTH_SHORT).show();
                     return true;
                 });
                 grid.addView(cell, new android.widget.GridLayout.LayoutParams(new android.view.ViewGroup.LayoutParams(cw, -2)));
             }
-            sh.view(grid);
-            sh.message("Toca para abrir · mantén presionado para sacarlo a la mesa");
+            android.widget.ScrollView sv = new android.widget.ScrollView(this);
+            sv.setVerticalScrollBarEnabled(false);
+            sv.addView(grid);
+            box.addView(sv, new LinearLayout.LayoutParams(-1, 0, 1));
         }
-        sh.option(Ui.NOTE, "Cambiar nombre", "", () -> renameGroup(g))
-          .option(Ui.GRID, "Desarmar grupo", "Todo vuelve a la mesa", () -> ungroup(g))
-          .button("Cerrar", false, null);
-        dlg[0] = sh.show();
+        root.addView(box, new FrameLayout.LayoutParams(side, side, Gravity.CENTER));
+        dlg.setContentView(root);
+        box.setScaleX(0.9f); box.setScaleY(0.9f); box.setAlpha(0f);
+        box.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(180).start();
+        dlg.show();
+    }
+
+    private static String nameOf(Item it) { return it.title.isEmpty() ? (it.text.isEmpty() ? it.kind : it.text) : it.title; }
+
+    /** La pantalla de ahora, chica y borrosa (fondo de la carpeta abierta). */
+    private android.graphics.Bitmap blurredScreen() {
+        try {
+            View v = getWindow().getDecorView();
+            int w = v.getWidth(), h = v.getHeight();
+            if (w == 0 || h == 0) return null;
+            float k = 1 / 8f;
+            android.graphics.Bitmap small = android.graphics.Bitmap.createBitmap(Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)), android.graphics.Bitmap.Config.ARGB_8888);
+            android.graphics.Canvas c = new android.graphics.Canvas(small);
+            c.scale(k, k);
+            v.draw(c);
+            boxBlur(small, 6);
+            boxBlur(small, 6);
+            return small;
+        } catch (Throwable e) { return null; }
+    }
+
+    /** Desenfoque rápido (caja horizontal y vertical). */
+    private static void boxBlur(android.graphics.Bitmap b, int r) {
+        int w = b.getWidth(), h = b.getHeight();
+        int[] px = new int[w * h], out = new int[w * h];
+        b.getPixels(px, 0, w, 0, 0, w, h);
+        for (int pass = 0; pass < 2; pass++) {
+            boolean horiz = pass == 0;
+            int n = horiz ? w : h, lines = horiz ? h : w;
+            for (int L = 0; L < lines; L++) {
+                int sa = 0, sr = 0, sg = 0, sb = 0, cnt = 0;
+                for (int i = -r; i <= r; i++) {
+                    int j = Math.max(0, Math.min(n - 1, i));
+                    int c = px[horiz ? L * w + j : j * w + L];
+                    sa += c >>> 24; sr += (c >> 16) & 255; sg += (c >> 8) & 255; sb += c & 255; cnt++;
+                }
+                for (int i = 0; i < n; i++) {
+                    out[horiz ? L * w + i : i * w + L] = ((sa / cnt) << 24) | ((sr / cnt) << 16) | ((sg / cnt) << 8) | (sb / cnt);
+                    int o = Math.max(0, Math.min(n - 1, i - r)), nw = Math.max(0, Math.min(n - 1, i + r + 1));
+                    int co = px[horiz ? L * w + o : o * w + L], cn = px[horiz ? L * w + nw : nw * w + L];
+                    sa += (cn >>> 24) - (co >>> 24); sr += ((cn >> 16) & 255) - ((co >> 16) & 255);
+                    sg += ((cn >> 8) & 255) - ((co >> 8) & 255); sb += (cn & 255) - (co & 255);
+                }
+            }
+            int[] t = px; px = out; out = t;
+        }
+        b.setPixels(px, 0, w, 0, 0, w, h);
     }
 
     private void renameGroup(Item g) {

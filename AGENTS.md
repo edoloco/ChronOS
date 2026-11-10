@@ -108,7 +108,9 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   (`DeskView.appLike`: mismo cuadrado y tabla), siempre de cristal, con hasta 9 miniaturas (`drawGroup`).
   Arrastrar un elemento sobre un grupo (se agranda al pasar, `hoverGroup`) lo mete: `it.grp = id`, `page = -1`
   (fuera de la mesa; `Item.fromJson` respeta el -1 si tiene `grp`). Tocar el grupo → `onOpenGroup` (cuadrícula:
-  tocar abre, mantener saca a la mesa; Cambiar nombre, Desarmar). Borrar un grupo devuelve lo de adentro a la mesa.
+  carpeta de cristal al centro sobre la pantalla borrosa (`blurredScreen` + `boxBlur`), íconos por nombre en
+  cuadrícula de 4: tocar abre, mantener saca a la mesa; ⋯ arriba a la izquierda: Cambiar nombre, Desarmar).
+  Borrar un grupo devuelve lo de adentro a la mesa. El menú del espacio vacío también trae Herramientas.
 - **Botón Inicio** (`MainActivity.onNewIntent` con CATEGORY_HOME): cierra los teclados (`KeyboardActivity.closeAll`,
   cualquier modo) aquí y en el otro (`homeAll`; allá vuelve la mesa si había teclado). Si la mesa ya se veía
   (`stoppedSinceResume` falso), vuelve a la primera mesa.
