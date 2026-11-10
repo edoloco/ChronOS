@@ -961,7 +961,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         Ui.Sheet sh = new Ui.Sheet(this).title("Bat Op · Battery Optimizer")
                 .message("Si nadie lo toca y no muestra nada activo: primero pantalla negra con un reloj tenue y las baterías "
                         + "(un toque y vuelve al instante); después se apaga la pantalla. Despierta solo si el otro teléfono lo "
-                        + "necesita (teclado, llamada, video pasado…). Pensado para el extendido.");
+                        + "necesita (teclado, llamada, video pasado…). Pensado para el extendido.\n\nEn este teléfono: " + BatOp.status(this, hub));
         sh.option(Ui.BATTERY, -1, "En el extendido: " + (e ? "activo" : "apagado"), "Recomendado", e, () -> { setShared("batOpE", !e); batOpMenu(); });
         sh.option(Ui.BATTERY, -1, "En el principal: " + (p ? "activo" : "apagado"), "Opcional", p, () -> { setShared("batOpP", !p); batOpMenu(); });
         sh.option(Ui.CLOCK, -1, "Pantalla negra con reloj a los " + t1 + " min sin uso", "Toca para cambiar", true, () -> {

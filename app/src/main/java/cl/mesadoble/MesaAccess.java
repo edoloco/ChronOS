@@ -69,9 +69,12 @@ public class MesaAccess extends AccessibilityService {
     }
 
     @Override public void onAccessibilityEvent(AccessibilityEvent e) {
-        int et = e.getEventType();   // Bat Op: lo que hace el usuario cuenta como "en uso"
-        if (et == AccessibilityEvent.TYPE_VIEW_CLICKED || et == AccessibilityEvent.TYPE_VIEW_LONG_CLICKED || et == AccessibilityEvent.TYPE_VIEW_SCROLLED
-                || et == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED || et == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) BatOp.touch();
+        // Bat Op: solo lo que hace el usuario en otras apps cuenta como "en uso" (toques; no los cambios de pantalla
+        // que hacen solas, ni las ventanas de ChronOS: sus toques se ven en dispatchTouchEvent)
+        int et = e.getEventType();
+        CharSequence ep = e.getPackageName();
+        if ((et == AccessibilityEvent.TYPE_VIEW_CLICKED || et == AccessibilityEvent.TYPE_VIEW_LONG_CLICKED)
+                && ep != null && !getPackageName().contentEquals(ep)) BatOp.touch();
         // chat en vivo de YouTube: ¿quedó el video en pantalla flotante? (solo mira la lista de ventanas)
         if (e.getEventType() == AccessibilityEvent.TYPE_WINDOWS_CHANGED
                 || (e.getPackageName() != null && LiveChat.YT.equals(e.getPackageName().toString()))) LiveChat.get(this).windowsChanged();

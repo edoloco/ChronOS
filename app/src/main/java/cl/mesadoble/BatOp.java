@@ -58,6 +58,7 @@ final class BatOp {
     static void touch() {
         lastTouch = System.currentTimeMillis();
         slept = false;
+        testUntil = 0;
         if (dimmed) h.post(BatOp::undim);
     }
 
@@ -71,22 +72,45 @@ final class BatOp {
     }
 
     /** Probar: la pantalla negra ahora mismo. */
-    static void test() { h.post(() -> { if (!dimmed && app != null) dim(); }); }
+    static void test() { testUntil = System.currentTimeMillis() + 60_000; h.post(() -> { if (!dimmed && app != null) dim(); }); }
+    private static volatile long testUntil;
+    private static volatile String why = "";
+
+    /** Para el menú: qué está haciendo Bat Op en este teléfono ahora. */
+    static String status(Context c, Hub hb) {
+        if (!on(c, hb)) return "apagado en este teléfono";
+        if (dimmed) return "en reposo (pantalla negra)";
+        String b = busyWhy();
+        if (b != null) return "esperando: " + b;
+        long idle = (System.currentTimeMillis() - lastTouch) / 1000;
+        return "sin uso hace " + idle + " s (negro a los " + t1(c) * 60 + " s)";
+    }
 
     /** ¿Hay algo activo que no se debe tapar ni apagar? */
-    private static boolean busy() {
-        if (KeyboardActivity.showingMedia || KeyboardActivity.showingCamera || KeyboardActivity.showingAsist) return true;
-        if (hub != null && hub.keyboardVisible) return true;
-        if (CaptureService.running || DsMirror.running) return true;
+    private static boolean busy() { return busyWhy() != null; }
+
+    /** null = nada activo; si no, qué lo tiene ocupado (se muestra en el menú). */
+    private static String busyWhy() {
+        if (app == null) return null;
+        if (KeyboardActivity.showingMedia) return "control de video abierto";
+        if (KeyboardActivity.showingCamera) return "cámara abierta";
+        if (KeyboardActivity.showingAsist) return "Game-Asist abierto";
+        if (hub != null && hub.keyboardVisible) return "teclado abierto";
+        if (CaptureService.running) return "capturando sonido";
+        if (DsMirror.running) return "segunda pantalla del DS";
         AudioManager am = (AudioManager) app.getSystemService(Context.AUDIO_SERVICE);
-        if (am != null && (am.isMusicActive() || am.getMode() != AudioManager.MODE_NORMAL)) return true;   // sonido o llamada
+        if (am != null && am.isMusicActive()) return "hay sonido";
+        int md = am == null ? AudioManager.MODE_NORMAL : am.getMode();
+        if (md == AudioManager.MODE_IN_CALL || md == AudioManager.MODE_RINGTONE) return "llamada";
         String f = MesaAccess.front;
-        return f != null && (MoveTo.YT.equals(f) || MoveTo.isBrowser(app, f));   // video o página a la vista
+        if (f != null && (MoveTo.YT.equals(f) || MoveTo.isBrowser(app, f))) return "video o página a la vista";
+        return null;
     }
 
     private static final Runnable tick = new Runnable() {
         @Override public void run() {
             h.postDelayed(this, 10000);
+            if (System.currentTimeMillis() < testUntil) return;   // prueba: se queda hasta que la toquen
             if (app == null || hub == null || !on(app, hub)) { if (dimmed) undim(); return; }
             PowerManager pm = (PowerManager) app.getSystemService(Context.POWER_SERVICE);
             if (pm != null && !pm.isInteractive()) return;   // ya está apagada

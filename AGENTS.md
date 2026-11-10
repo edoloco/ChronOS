@@ -110,6 +110,9 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   tenue que se corre cada minuto y baterías P/E/accesorios (un toque la quita); `batOpT2` min después se bloquea
   (`ScreenSync.lockNow`; 0 = nunca). `Hub.WAKES` (teclado, llamada, video pasado, dos pantallas, Game-Asist…) lo
   despierta (`ScreenSync.wakeUnlocked`). "Probar ahora" → `batOpTest`.
+  Uso = solo toques de verdad: los de ChronOS (dispatchTouchEvent) y clics/clics largos de OTRAS apps (accesibilidad);
+  los cambios de pantalla que pasan solos no cuentan (antes nunca entraba en reposo). La prueba se queda 1 min o
+  hasta un toque. El menú muestra el estado de ese teléfono (`BatOp.status`: qué lo tiene ocupado o cuánto falta).
 - **Grupos (carpetas)** (`Item.GROUP`, título = nombre): mantener presionado un espacio vacío de la mesa
   (`DeskView.emptyLong` → `Host.onEmptyLongPress`) → Crear grupo / Cambiar fondo de mesa. Se ve como app
   (`DeskView.appLike`: mismo cuadrado y tabla), siempre de cristal, con hasta 9 miniaturas (`drawGroup`).
