@@ -69,6 +69,9 @@ public class MesaAccess extends AccessibilityService {
     }
 
     @Override public void onAccessibilityEvent(AccessibilityEvent e) {
+        int et = e.getEventType();   // Bat Op: lo que hace el usuario cuenta como "en uso"
+        if (et == AccessibilityEvent.TYPE_VIEW_CLICKED || et == AccessibilityEvent.TYPE_VIEW_LONG_CLICKED || et == AccessibilityEvent.TYPE_VIEW_SCROLLED
+                || et == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED || et == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) BatOp.touch();
         // chat en vivo de YouTube: ¿quedó el video en pantalla flotante? (solo mira la lista de ventanas)
         if (e.getEventType() == AccessibilityEvent.TYPE_WINDOWS_CHANGED
                 || (e.getPackageName() != null && LiveChat.YT.equals(e.getPackageName().toString()))) LiveChat.get(this).windowsChanged();

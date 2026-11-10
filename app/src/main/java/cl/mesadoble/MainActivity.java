@@ -285,6 +285,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     @Override public boolean dispatchTouchEvent(android.view.MotionEvent e) {
         if (e.getActionMasked() == android.view.MotionEvent.ACTION_DOWN && android.os.SystemClock.uptimeMillis() < blockTouchUntil) return true;
+        if (e.getActionMasked() == android.view.MotionEvent.ACTION_DOWN) BatOp.touch();
         return super.dispatchTouchEvent(e);
     }
 
@@ -870,7 +871,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         startPanel.addView(head);
         // orden: lo más usado arriba
         SquareButton[] order = {byKind(SquareButton.APPS), settingsBtn, byKind(SquareButton.DESKS), statusBtn,
-                byKind(SquareButton.TOOLS), phoneSettingsBtn(), soloBtn(), powerBtn(), null, aboutBtn()};   // Teléfono normal y Cerrar ChronOS: dentro de Apagar   // Archivos está en Herramientas
+                byKind(SquareButton.TOOLS), phoneSettingsBtn(), soloBtn(), powerBtn(), batOpBtn(), aboutBtn()};   // Teléfono normal y Cerrar ChronOS: dentro de Apagar   // Archivos está en Herramientas
         LinearLayout row = null;
         for (int i = 0; i < order.length; i++) {
             if (i % 4 == 0) {
@@ -940,6 +941,45 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
     }
 
     /** Menú inicio: centro de apagado. */
+    private SquareButton batOpSq;
+
+    /** Bat Op (Battery Optimizer): reposo cuando no se usa, pensado para el extendido. A la izquierda de Acerca de. */
+    private SquareButton batOpBtn() {
+        if (batOpSq == null) {
+            batOpSq = new SquareButton(this, SquareButton.BATTERY, "Bat Op", false, night);
+            batOpSq.setOnClickListener(v -> { showStart(false); batOpMenu(); });
+            squares.add(batOpSq);
+        }
+        if (batOpSq.getParent() instanceof android.view.ViewGroup) ((android.view.ViewGroup) batOpSq.getParent()).removeView(batOpSq);
+        return batOpSq;
+    }
+
+    private void batOpMenu() {
+        boolean e = prefs.getBoolean("batOpE", false), p = prefs.getBoolean("batOpP", false);
+        int t1 = BatOp.t1(this), t2 = BatOp.t2(this);
+        int[] o1 = {1, 2, 5, 10}, o2 = {5, 10, 30, 0};
+        Ui.Sheet sh = new Ui.Sheet(this).title("Bat Op · Battery Optimizer")
+                .message("Si nadie lo toca y no muestra nada activo: primero pantalla negra con un reloj tenue y las baterías "
+                        + "(un toque y vuelve al instante); después se apaga la pantalla. Despierta solo si el otro teléfono lo "
+                        + "necesita (teclado, llamada, video pasado…). Pensado para el extendido.");
+        sh.option(Ui.BATTERY, -1, "En el extendido: " + (e ? "activo" : "apagado"), "Recomendado", e, () -> { setShared("batOpE", !e); batOpMenu(); });
+        sh.option(Ui.BATTERY, -1, "En el principal: " + (p ? "activo" : "apagado"), "Opcional", p, () -> { setShared("batOpP", !p); batOpMenu(); });
+        sh.option(Ui.CLOCK, -1, "Pantalla negra con reloj a los " + t1 + " min sin uso", "Toca para cambiar", true, () -> {
+            int nx = o1[0];
+            for (int i = 0; i < o1.length; i++) if (o1[i] == t1) nx = o1[(i + 1) % o1.length];
+            setShared("batOpT1", nx); batOpMenu();
+        });
+        sh.option(Ui.LOCK, -1, t2 == 0 ? "Apagar la pantalla: nunca (solo negro)" : "Apagar la pantalla " + t2 + " min después", "Toca para cambiar", t2 > 0, () -> {
+            int nx = o2[0];
+            for (int i = 0; i < o2.length; i++) if (o2[i] == t2) nx = o2[(i + 1) % o2.length];
+            setShared("batOpT2", nx); batOpMenu();
+        });
+        sh.option(Ui.SEND, "Probar ahora en el extendido", "Muestra la pantalla negra con el reloj (un toque la quita)", () -> {
+            if (!hub.isPrincipal() || solo) BatOp.test(); else if (hub.connected()) hub.send("batOpTest");
+        });
+        sh.button("Cerrar", false, null).show();
+    }
+
     private SquareButton powerBtn() {
         if (powerSq == null) {
             powerSq = new SquareButton(this, SquareButton.POWER, "Apagar", false, night);

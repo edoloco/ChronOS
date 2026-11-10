@@ -18,7 +18,7 @@ import android.view.View;
 public class SquareButton extends View {
 
     public static final int NOTE = 0, IMAGE = 1, APPS = 2, KEYBOARD = 3, SETTINGS = 4, STATUS = 5,
-            BACK = 6, HOME = 7, RECENTS = 8, MENU = 9, DESKS = 10, WIDGET = 11, FILES = 12, TOOLS = 13, POWER = 14, EXIT = 15;
+            BACK = 6, HOME = 7, RECENTS = 8, MENU = 9, DESKS = 10, WIDGET = 11, FILES = 12, TOOLS = 13, POWER = 14, EXIT = 15, BATTERY = 16;
 
     private final int kind;
     public int kind() { return kind; }
@@ -232,6 +232,21 @@ public class SquareButton extends View {
                 c.drawLine(cx, cy - u * 1.2f, cx, cy + u * 0.3f, stroke);
                 c.drawRoundRect(new RectF(cx - u * 0.28f, cy + u * 0.3f, cx + u * 0.28f, cy + u * 1.25f), 2 * dp, 2 * dp, fill);
                 c.restore();
+                break;
+            }
+            case BATTERY: {   // Bat Op: pila acostada con carga a la mitad y un rayito
+                RectF body = new RectF(cx - u * 1.15f, cy - u * 0.6f, cx + u * 0.95f, cy + u * 0.6f);
+                c.drawRoundRect(body, u * 0.22f, u * 0.22f, stroke);
+                c.drawLine(cx + u * 1.2f, cy - u * 0.25f, cx + u * 1.2f, cy + u * 0.25f, stroke);
+                android.graphics.Path z = new android.graphics.Path();
+                z.moveTo(cx + u * 0.05f, cy - u * 0.42f);
+                z.lineTo(cx - u * 0.3f, cy + u * 0.05f);
+                z.lineTo(cx - u * 0.02f, cy + u * 0.05f);
+                z.lineTo(cx - u * 0.12f, cy + u * 0.42f);
+                z.lineTo(cx + u * 0.3f, cy - u * 0.08f);
+                z.lineTo(cx + u * 0.02f, cy - u * 0.08f);
+                z.close();
+                c.drawPath(z, stroke);
                 break;
             }
             case POWER:   // botón de encendido: círculo abierto arriba y una raya

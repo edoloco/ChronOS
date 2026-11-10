@@ -65,7 +65,8 @@ public class Hub implements Link.Listener {
         Proximity.update(c, this);   // separar al alejarlos (imán o Bluetooth), si está activado
         ForceView.apply(c);
         CallHub.listen(c, this);   // llamadas del principal → controles en el extendido
-        Peri.start(c, this);       // baterías de audífonos, gamepads y teclados
+        Peri.start(c, this);
+        BatOp.start(c, this);      // Bat Op: reposo cuando no se usa       // baterías de audífonos, gamepads y teclados
         // batería: la de este teléfono se comparte con el otro para el widget de baterías
         c.registerReceiver(new android.content.BroadcastReceiver() {
             @Override public void onReceive(Context cx, Intent i) {
@@ -341,8 +342,14 @@ public class Hub implements Link.Listener {
         for (Link.Listener l : listeners) l.onState(st, inf);
     }
 
+    /** Mensajes del otro teléfono que necesitan esta pantalla: Bat Op la despierta al instante. */
+    private static final java.util.Set<String> WAKES = new java.util.HashSet<>(java.util.Arrays.asList(
+            "openKb", "kbState", "moveOpen", "call", "dualOpen", "openAsist", "dsOn", "batOpWake", "exitNow", "pickReq"));
+
     @Override public void onMessage(JSONObject m) {
         String t = m.optString("t");
+        if (WAKES.contains(t) || ("mActive".equals(t) && m.optBoolean("fresh"))) BatOp.wake();
+        if ("batOpTest".equals(t)) { BatOp.test(); return; }
         if ("media".equals(t)) { media(m.optString("k")); return; }
         if ("installApp".equals(t)) { if (!isPrincipal()) main.post(() -> AppShare.install(app, this, m)); return; }
         // centro de apagado: el otro teléfono pide abrir aquí el menú de apagado o bloquear

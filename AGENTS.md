@@ -103,6 +103,13 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
 - Ajustes → Configuración → **Teclados automáticos** (`kbAutoMenu`, se copian al otro con `prefSet`): `autoKb`
   (cuadro de texto), `autoKbChat` (apps de chat, `openKb`), `autoVideo` 0 control de video / 1 teclado / 2 nada
   (`mActive` en Hub), `autoAsist` (RetroArch), `vertKbAuto`, `kbSpaceFix`.
+- **Bat Op** (`BatOp`, Inicio › Bat Op, a la izquierda de Acerca de; ícono `SquareButton.BATTERY`): reposo para el
+  teléfono que se elija (`batOpE` recomendado / `batOpP`). Sin toques (`touch()` desde `dispatchTouchEvent` de
+  MainActivity/KeyboardActivity y eventos de accesibilidad) y sin nada activo (`busy`: teclados, Boost/captura, DS,
+  sonido o llamada, video/navegador al frente): a los `batOpT1` min pantalla negra al mínimo de brillo con reloj
+  tenue que se corre cada minuto y baterías P/E/accesorios (un toque la quita); `batOpT2` min después se bloquea
+  (`ScreenSync.lockNow`; 0 = nunca). `Hub.WAKES` (teclado, llamada, video pasado, dos pantallas, Game-Asist…) lo
+  despierta (`ScreenSync.wakeUnlocked`). "Probar ahora" → `batOpTest`.
 - **Grupos (carpetas)** (`Item.GROUP`, título = nombre): mantener presionado un espacio vacío de la mesa
   (`DeskView.emptyLong` → `Host.onEmptyLongPress`) → Crear grupo / Cambiar fondo de mesa. Se ve como app
   (`DeskView.appLike`: mismo cuadrado y tabla), siempre de cristal, con hasta 9 miniaturas (`drawGroup`).

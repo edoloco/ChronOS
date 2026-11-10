@@ -289,6 +289,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
 
     @Override public boolean dispatchTouchEvent(android.view.MotionEvent e) {
         lastTouchAt = android.os.SystemClock.uptimeMillis();
+        if (e.getActionMasked() == android.view.MotionEvent.ACTION_DOWN) BatOp.touch();
         return super.dispatchTouchEvent(e);
     }
 

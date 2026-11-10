@@ -81,6 +81,9 @@ public class ScreenSync {
     /** Encender este teléfono (tapa abierta): queda en la pantalla de bloqueo. */
     static void wakeNow(Context app) { SleepActivity.close(); wake(app, false); }
 
+    /** Bat Op: encender y quitar el bloqueo (lo bloqueó ChronOS por no usarse; con PIN, ChronOS se ve encima). */
+    static void wakeUnlocked(Context app) { SleepActivity.close(); wake(app, true); }
+
     private static void lock(Context app, Hub hub) {
         PowerManager pm = (PowerManager) app.getSystemService(Context.POWER_SERVICE);
         if (pm != null && !pm.isInteractive()) return;   // ya está apagada
