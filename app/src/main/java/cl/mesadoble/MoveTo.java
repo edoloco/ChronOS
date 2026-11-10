@@ -109,8 +109,9 @@ final class MoveTo {
     }
 
     /** El extendido tocó la flecha: se lee el video o la página y se manda. */
-    static void request(Context c, Hub hub) {
-        String pkg = MesaAccess.front;
+    static void request(Context c, Hub hub, String asked) {
+        // la app a la que se le ofreció la flecha (al tocar puede estar al frente un aviso, el volumen, el teclado…)
+        String pkg = asked != null && !asked.isEmpty() && !"prueba".equals(asked) ? asked : offered != null ? offered : MesaAccess.front;
         if (YT.equals(pkg)) { ytLink(c, hub); return; }
         if (pkg != null && isBrowser(c, pkg)) {
             String url = browserUrl(pkg);
@@ -333,14 +334,17 @@ final class MoveTo {
         Point sc = new Point();
         awm = (WindowManager) ctx.getSystemService(Context.WINDOW_SERVICE);
         awm.getDefaultDisplay().getRealSize(sc);
-        // largo = 4 letras del teclado Android de ChronOS (cada tecla ≈ un décimo del ancho)
-        int letter = Math.min(sc.x, sc.y) / 10, len = letter * 4, wide = Math.round(letter * 2.6f);
+        // ancho = 4 teclas del teclado Android de ChronOS en horizontal (cada tecla ≈ un décimo del lado largo);
+        // triángulo ancho y bajo (punta hacia abajo), con aire alrededor para la sombra
+        float d = ctx.getResources().getDisplayMetrics().density;
+        int tri = Math.min(Math.round(Math.max(sc.x, sc.y) / 10f * 4), Math.round(sc.x * 0.9f));
+        int pad = Math.round(26 * d), wide = tri + 2 * pad, tall = Math.round(tri * 0.52f) + 2 * pad + Math.round(14 * d);
         arrow = new Arrow(ctx, hub, pkg);
-        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(wide, len + letter, type,
+        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(wide, tall, type,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, PixelFormat.TRANSLUCENT);
         lp.gravity = Gravity.TOP | Gravity.START;
         lp.x = (sc.x - wide) / 2;
-        lp.y = Math.round(sc.y * 0.08f);
+        lp.y = Math.round(sc.y * 0.04f);
         arrow.lp = lp;
         arrow.screen = sc;
         try { awm.addView(arrow, lp); diag(c, hub, "Mover a extendido: flecha arriba en esta pantalla"); }
@@ -357,36 +361,43 @@ final class MoveTo {
         arrow = null;
     }
 
-    /** La flecha: triángulo naranja estirado (punta hacia abajo) que flota; tocar = mover, arrastrar afuera = descartar. */
+    /**
+     * La flecha: triángulo naranja ancho (punta hacia abajo) que flota. Línea de ChronOS: degradado, brillo arriba y
+     * sombra suave por fuera, sin bordes; la sombra se achica cuando la flecha sube. Tocar = mover, arrastrar afuera =
+     * descartar.
+     */
     private static final class Arrow extends View {
         final Hub hub;
         String pkg;
         WindowManager.LayoutParams lp;
         Point screen;
         private final float dp;
-        private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG), edge = new Paint(Paint.ANTI_ALIAS_FLAG), txt = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG), gloss = new Paint(Paint.ANTI_ALIAS_FLAG),
+                shadow = new Paint(Paint.ANTI_ALIAS_FLAG), txt = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final ValueAnimator bob = ValueAnimator.ofFloat(0, 1);
         private float off;
         private boolean busy;
+        private int gw = -1;
 
         Arrow(Context c, Hub hub, String pkg) {
             super(c);
             this.hub = hub;
             this.pkg = pkg;
             dp = c.getResources().getDisplayMetrics().density;
-            fill.setColor(0xFFF57C1F);
-            fill.setShadowLayer(6 * dp, 0, 2 * dp, 0x80000000);
-            setLayerType(LAYER_TYPE_SOFTWARE, null);
-            edge.setStyle(Paint.Style.STROKE);
-            edge.setStrokeWidth(2 * dp);
-            edge.setColor(0xCCFFFFFF);
-            edge.setStrokeJoin(Paint.Join.ROUND);
+            setLayerType(LAYER_TYPE_SOFTWARE, null);   // para la sombra difuminada
+            android.graphics.CornerPathEffect round = new android.graphics.CornerPathEffect(16 * dp);
+            fill.setPathEffect(round);
+            gloss.setPathEffect(round);
+            shadow.setPathEffect(round);
+            shadow.setMaskFilter(new android.graphics.BlurMaskFilter(14 * dp, android.graphics.BlurMaskFilter.Blur.NORMAL));
             txt.setColor(Color.WHITE);
             txt.setTextAlign(Paint.Align.CENTER);
-            txt.setFakeBoldText(true);
-            bob.setDuration(1400);
+            txt.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
+            txt.setShadowLayer(3 * dp, 0, 1.5f * dp, 0x66000000);
+            bob.setDuration(1600);
             bob.setRepeatCount(ValueAnimator.INFINITE);
             bob.setRepeatMode(ValueAnimator.REVERSE);
+            bob.setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator());
             bob.addUpdateListener(a -> { off = (float) a.getAnimatedValue(); invalidate(); });
             bob.start();
         }
@@ -395,22 +406,44 @@ final class MoveTo {
         void busy(boolean b) { busy = b; invalidate(); }
 
         @Override protected void onDraw(Canvas c) {
-            float w = getWidth(), hh = getHeight(), m = 8 * dp;
-            float dy = off * (hh * 0.16f);   // sube y baja
-            float top = m + dy, bottom = hh * 0.84f - m + dy;
+            float w = getWidth(), hh = getHeight(), pad = 26 * dp, lift = 14 * dp;
+            float l = pad, r = w - pad, triH = (r - l) * 0.52f;
+            float up = off * lift;                       // sube y baja
+            float top = pad + lift - up, bottom = top + triH;
+            if (gw != getWidth()) {
+                gw = getWidth();
+                fill.setShader(new android.graphics.LinearGradient(0, 0, 0, triH, new int[]{0xFFFFB25E, 0xFFF57C1F, 0xFFD5530A},
+                        new float[]{0, 0.55f, 1}, android.graphics.Shader.TileMode.CLAMP));
+                gloss.setShader(new android.graphics.LinearGradient(0, 0, 0, triH * 0.5f, 0x66FFFFFF, 0x00FFFFFF, android.graphics.Shader.TileMode.CLAMP));
+            }
             Path p = new Path();
-            p.moveTo(m, top);
-            p.lineTo(w - m, top);
+            p.moveTo(l, top);
+            p.lineTo(r, top);
             p.lineTo(w / 2f, bottom);
             p.close();
-            c.drawPath(p, fill);
-            c.drawPath(p, edge);
-            txt.setTextSize(Math.max(10 * dp, w * 0.13f));
-            float ty = top + (bottom - top) * 0.22f;
-            if (busy) c.drawText("Moviendo…", w / 2f, ty + txt.getTextSize(), txt);
+            // sombra por fuera, más abajo y más suave cuando la flecha está arriba (parece que flota)
+            shadow.setColor(Color.argb(Math.round(110 - 45 * off), 0, 0, 0));
+            c.save();
+            c.translate(0, 9 * dp + up * 0.6f);
+            c.scale(1 - 0.06f * off, 1, w / 2f, top);
+            c.drawPath(p, shadow);
+            c.restore();
+            c.save();
+            c.translate(0, top);
+            Path q = new Path(p);
+            q.offset(0, -top);
+            c.drawPath(q, fill);
+            c.drawPath(q, gloss);   // brillo de arriba
+            c.restore();
+            // texto en la parte ancha
+            float ts = Math.max(12 * dp, (r - l) * 0.085f);
+            txt.setTextSize(ts);
+            String one = busy ? "Moviendo…" : "Mover a extendido";
+            float ty = top + triH * 0.3f + ts * 0.35f;
+            if (txt.measureText(one) < (r - l) * 0.62f) c.drawText(one, w / 2f, ty, txt);
             else {
-                c.drawText("Mover a", w / 2f, ty + txt.getTextSize(), txt);
-                c.drawText("extendido", w / 2f, ty + txt.getTextSize() * 2.1f, txt);
+                c.drawText("Mover a", w / 2f, ty - ts * 0.55f, txt);
+                c.drawText("extendido", w / 2f, ty + ts * 0.6f, txt);
             }
         }
 
@@ -434,7 +467,7 @@ final class MoveTo {
                         if (busy) return true;
                         if (!hub.connected()) { hub.toast("El principal no está conectado"); return true; }
                         busy(true);
-                        hub.send("moveReq");
+                        hub.send("moveReq", "pkg", pkg);
                         h.postDelayed(() -> busy(false), 8000);
                         return true;
                     }

@@ -104,7 +104,9 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   (cuadro de texto), `autoKbChat` (apps de chat, `openKb`), `autoVideo` 0 control de video / 1 teclado / 2 nada
   (`mActive` en Hub), `autoAsist` (RetroArch), `vertKbAuto`, `kbSpaceFix`.
 - **Mover a extendido** (`MoveTo`): con YouTube o un navegador al frente en el principal (`MesaAccess` → `onFront`),
-  en el extendido flota una flecha naranja (triángulo estirado, largo = 4 teclas del teclado Android, sube y baja).
+  en el extendido flota una flecha naranja: triángulo ancho (ancho = 4 teclas del teclado Android en horizontal),
+  degradado + brillo + sombra difuminada por fuera, sin bordes; sube y baja. `moveReq {pkg}` lleva la app ofrecida
+  (al tocar puede estar al frente otra ventana).
   Tocar → `moveReq`; arrastrar fuera de la pantalla la descarta para esa app. YouTube: Compartir › Copiar vínculo
   (accesibilidad, portapapeles vaciado antes) + segundo de su sesión (`NotifService`), se pausa y va al inicio;
   navegador: barra de direcciones (ids conocidos o texto con forma de dirección arriba). `moveOpen {url, pkg}` en el

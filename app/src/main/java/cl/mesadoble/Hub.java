@@ -496,7 +496,7 @@ public class Hub implements Link.Listener {
             if (!isPrincipal()) main.post(() -> MoveTo.onMessage(app, this, m));
             return;
         }
-        if ("moveReq".equals(t)) { if (isPrincipal()) main.post(() -> MoveTo.request(app, this)); return; }
+        if ("moveReq".equals(t)) { if (isPrincipal()) main.post(() -> MoveTo.request(app, this, m.optString("pkg"))); return; }
         if ("moveAsk".equals(t)) { if (isPrincipal()) main.post(() -> MoveTo.reoffer(app, this)); return; }
         if ("exitNow".equals(t)) {   // el otro pidió que este también salga de ChronOS (menú Apagar)
             startOwn(new Intent(app, MainActivity.class).putExtra("exitNow", true).putExtra("both", m.optBoolean("both"))
