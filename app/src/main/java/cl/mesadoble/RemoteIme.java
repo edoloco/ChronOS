@@ -217,23 +217,30 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
         // la k, j, l, f… también hacen cosas): se guardan, se busca el cuadro de texto y se escriben ahí
         boolean typing = "text".equals(a) || "key".equals(a) || "word".equals(a);
         long now0 = SystemClock.uptimeMillis();
-        if (typing && !waiting.isEmpty() && now0 - waitingAt <= 20000) {
-            // ya hay letras esperando: las nuevas van detrás (si no, "saludos" llegaba como "asludos")
+        // el cuadro ya se está escribiendo por accesibilidad (la app no le dio el teclado): se sigue igual
+        if (typing && noField() && now0 - directAt < 15000) {
             waiting.add(m);
-            waitingAt = now0;
+            if (MesaAccess.typeIntoField(waiting)) { waiting.clear(); directAt = now0; return; }
+        }
+        if (typing && !waiting.isEmpty() && now0 - waitingAt <= 8000) {
+            // ya hay letras esperando: las nuevas van detrás (si no, "saludos" llegaba como "asludos")
+            if (waiting.isEmpty() || waiting.get(waiting.size() - 1) != m) waiting.add(m);
             if (!noField()) flushWaiting();
             return;
         }
         if (typing && noField()) {
-            long now = now0;
-            if (now - waitingAt > 20000) waiting.clear();
+            if (now0 - waitingAt > 8000) waiting.clear();
             boolean first = waiting.isEmpty();
-            waiting.add(m);
-            waitingAt = now;
+            if (waiting.isEmpty() || waiting.get(waiting.size() - 1) != m) waiting.add(m);
             if (first) {
+                waitingAt = now0;   // (no se renueva con cada letra: antes podían quedar esperando para siempre)
                 boolean found = MesaAccess.focusTextField();
                 if (hub.connected()) hub.send("kbNoField", "found", found);
-                if (found) main.postDelayed(this::flushWaiting, 450);
+                // se mira varias veces si ya hay cuadro; si la app no le da el teclado (YouTube después de mandar
+                // un comentario), se escribe directo en el cuadro por accesibilidad
+                main.postDelayed(this::flushWaiting, 450);
+                main.postDelayed(this::flushWaiting, 900);
+                main.postDelayed(this::forceWaiting, 1400);
             }
             return;
         }
@@ -241,7 +248,19 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
     }
 
     private final java.util.ArrayList<JSONObject> waiting = new java.util.ArrayList<>();
-    private long waitingAt;
+    private long waitingAt, directAt;
+
+    /** Pasó un rato y la app no abrió el teclado: lo que espera se escribe directo en el cuadro (accesibilidad). */
+    private void forceWaiting() {
+        if (waiting.isEmpty()) return;
+        if (!noField()) { flushWaiting(); return; }
+        if (!MesaAccess.focusTextField()) { /* puede aparecer recién ahora */ }
+        main.postDelayed(() -> {
+            if (waiting.isEmpty()) return;
+            if (!noField()) { flushWaiting(); return; }
+            if (MesaAccess.typeIntoField(waiting)) { waiting.clear(); directAt = SystemClock.uptimeMillis(); }
+        }, 350);
+    }
     private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
 
     /** ¿No hay un cuadro de texto de verdad? (Android entrega una conexión "falsa" que convierte las letras en teclas). */
@@ -261,6 +280,7 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
 
     @Override public void onStartInput(EditorInfo info, boolean restarting) {
         super.onStartInput(info, restarting);
+        if (info != null && info.inputType != android.text.InputType.TYPE_NULL) directAt = 0;   // ya hay teclado de verdad
         if (info != null && info.inputType != android.text.InputType.TYPE_NULL && !waiting.isEmpty()) main.postDelayed(this::flushWaiting, 150);
     }
 

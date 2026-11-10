@@ -60,31 +60,71 @@ public class Dict {
     }
 
     /**
-     * Espacio que se apretó mal: "tengonsueño" → "tengo sueño" (la n, b, m, v o c están junto a la barra).
-     * Solo si la palabra entera no existe y las dos mitades sí. null si no hay arreglo seguro.
+     * Espacio que se apretó mal: "tengonsueño" → "tengo sueño", "tenamonmarcela" → "te amo marcela" (la n, b, m, v o c
+     * están junto a la barra, o faltó el espacio). Solo si la palabra entera NO existe, NO es un tipeo de una palabra
+     * que existe ("malabra" es "palabra" con una letra mal: no se parte) y TODAS las partes son palabras conocidas
+     * (las de 2 o 3 letras, solo si son muy comunes: "te", "de", "amo"…). null si no hay arreglo seguro.
      */
     String splitSpace(String w) {
-        if (!ready || w == null || w.length() < 5 || known(w)) return null;
-        String best = null; long bestScore = Long.MAX_VALUE;
-        for (int i = 2; i < w.length() - 2; i++) {
-            char ch = Character.toLowerCase(w.charAt(i));
-            if ("nmbvcñ".indexOf(ch) < 0) continue;
-            String a = w.substring(0, i), b = w.substring(i + 1);
-            if (!rank.containsKey(plain(a)) || !rank.containsKey(plain(b))) continue;
-            long sc = (long) rankOf(a) + rankOf(b);
-            String cand = a + " " + b;
-            // si la letra también calza en una de las palabras, faltó el espacio (no se apretó en su lugar): "vamosmal" → "vamos mal"
-            String a1 = w.substring(0, i + 1), b1 = w.substring(i);
-            if (rank.containsKey(plain(a1)) && rank.containsKey(plain(b))) { cand = a1 + " " + b; sc = (long) rankOf(a1) + rankOf(b); }
-            else if (rank.containsKey(plain(a)) && rank.containsKey(plain(b1))) { cand = a + " " + b1; sc = (long) rankOf(a) + rankOf(b1); }
-            if (sc < bestScore) { bestScore = sc; best = cand; }
+        if (!ready || w == null || w.length() < 6 || known(w)) return null;
+        if (nearKnown(w)) return null;   // es un tipeo, no un espacio
+        String[] best = seg(w, 0, 0, new java.util.HashMap<>());
+        if (best == null) return null;
+        String out = best[0];
+        // cada parte con sus tildes ("sueno" → "sueño")
+        StringBuilder sb = new StringBuilder();
+        for (String part : out.split(" ")) {
+            if (sb.length() > 0) sb.append(' ');
+            Integer r = rank.get(plain(part));
+            sb.append(r != null && plain(words[r]).equals(plain(part)) ? matchCase(part, words[r]) : part);
         }
-        if (best != null) {   // la segunda mitad con sus tildes ("sueno" → "sueño")
-            int sp = best.indexOf(' ');
-            String b = best.substring(sp + 1);
-            Integer r = rank.get(plain(b));
-            if (r != null && !words[r].equals(b.toLowerCase()) && plain(words[r]).equals(plain(b))) best = best.substring(0, sp + 1) + matchCase(b, words[r]);
+        return sb.toString();
+    }
+
+    /** ¿Hay una palabra conocida a una letra de distancia (cambiada, de más o de menos)? */
+    private boolean nearKnown(String w) {
+        String k = plain(w);
+        for (int i = 0; i < keys.length; i++) {
+            String x = keys[i];
+            if (Math.abs(x.length() - k.length()) > 1 || x.length() < 4) continue;
+            if (distance(k, x, 1) <= 1) return true;
         }
+        return false;
+    }
+
+    /** ¿Esta parte vale como palabra suelta? Las cortas solo si son de las más usadas. */
+    private boolean partOk(String p) {
+        if (p.length() < 2) return false;
+        Integer r = rank.get(plain(p));
+        if (r == null) return p.length() >= 4 && known(p);
+        if (p.length() == 2) return r < 300;
+        if (p.length() == 3) return r < 3000;
+        return true;
+    }
+
+    /** Mejor forma de partir w desde i en palabras: {texto, puntaje}; menos puntaje = mejor. Máx. 4 partes. */
+    private String[] seg(String w, int i, int parts, java.util.Map<Integer, String[]> memo) {
+        String rest = w.substring(i);
+        if (parts > 0 && partOk(rest)) return new String[]{rest, String.valueOf(rankOf(rest) / 50 + 20)};
+        if (parts >= 3) return null;
+        String[] m = memo.get(i * 8 + parts);
+        if (m != null) return m.length == 0 ? null : m;
+        String[] best = null;
+        long bs = Long.MAX_VALUE;
+        for (int j = i + 2; j <= w.length() - 2; j++) {
+            String a = w.substring(i, j);
+            if (!partOk(a)) continue;
+            // 1) la letra que sigue es la que se apretó en vez del espacio
+            char ch = Character.toLowerCase(w.charAt(j));
+            if (j + 1 < w.length() - 1 && "nmbvcñ".indexOf(ch) >= 0) {
+                String[] r = seg(w, j + 1, parts + 1, memo);
+                if (r != null) { long sc = rankOf(a) / 50 + 20 + Long.parseLong(r[1]); if (sc < bs) { bs = sc; best = new String[]{a + " " + r[0], String.valueOf(sc)}; } }
+            }
+            // 2) faltó el espacio (sin letra de más): un poco menos probable
+            String[] r = seg(w, j, parts + 1, memo);
+            if (r != null) { long sc = rankOf(a) / 50 + 35 + Long.parseLong(r[1]); if (sc < bs) { bs = sc; best = new String[]{a + " " + r[0], String.valueOf(sc)}; } }
+        }
+        memo.put(i * 8 + parts, best == null ? new String[0] : best);
         return best;
     }
 

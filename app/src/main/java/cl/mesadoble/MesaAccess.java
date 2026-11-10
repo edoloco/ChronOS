@@ -86,6 +86,8 @@ public class MesaAccess extends AccessibilityService {
         if (pkg.equals(getPackageName()) || getPackageManager().getLaunchIntentForPackage(pkg) != null) Sketch.front(h, pkg);
         // app de dos pantallas (DUAL Motion u otra que lo declare): en el extendido se abre su otra mitad
         if (Hub.isDualApp(this, pkg)) h.send("dualOpen", "pkg", pkg);
+        // YouTube o un navegador: en el extendido aparece la flecha "Mover a extendido"
+        MoveTo.onFront(this, h, pkg);
         // RetroArch al frente: en el extendido se abre Game-Asist
         if (pkg.startsWith("com.retroarch")) h.send("openAsist");
         if (CHAT_APPS.contains(pkg)) {
@@ -134,6 +136,59 @@ public class MesaAccess extends AccessibilityService {
         for (android.view.accessibility.AccessibilityNodeInfo n = hint; n != null; n = n.getParent())
             if (n.isClickable()) { n.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK); return true; }
         return false;
+    }
+
+    /**
+     * Escribir sin teclado: si la app no abrió el teclado en su cuadro (YouTube después de mandar un comentario), se
+     * aplica lo escrito (letras, sugerencias, borrar, Enviar) directo al cuadro con accesibilidad. false = no hay cuadro.
+     */
+    static boolean typeIntoField(java.util.List<org.json.JSONObject> ops) {
+        MesaAccess s = instance;
+        if (s == null || ops.isEmpty()) return false;
+        android.view.accessibility.AccessibilityNodeInfo f = null;
+        try {
+            android.view.accessibility.AccessibilityNodeInfo root = s.getRootInActiveWindow();
+            if (root != null) f = root.findFocus(android.view.accessibility.AccessibilityNodeInfo.FOCUS_INPUT);
+            if (f == null || !f.isEditable()) f = firstEditable(root);
+        } catch (Exception e) { return false; }
+        if (f == null) return false;
+        CharSequence cur = f.getText();
+        boolean hint = android.os.Build.VERSION.SDK_INT >= 26 && f.isShowingHintText();
+        StringBuilder b = new StringBuilder(cur == null || hint ? "" : cur);
+        boolean enter = false;
+        for (org.json.JSONObject m : ops) {
+            String a = m.optString("a");
+            if ("text".equals(a)) b.append(m.optString("s"));
+            else if ("word".equals(a)) {
+                String old = m.optString("old");
+                if (!old.isEmpty() && b.toString().toLowerCase(java.util.Locale.ROOT).endsWith(old.toLowerCase(java.util.Locale.ROOT))) b.setLength(b.length() - old.length());
+                b.append(m.optString("s"));
+            } else if ("key".equals(a)) {
+                int k = m.optInt("k"), n = Math.max(1, m.optInt("n", 1));
+                if (k == android.view.KeyEvent.KEYCODE_DEL) b.setLength(Math.max(0, b.length() - n));
+                else if (k == android.view.KeyEvent.KEYCODE_ENTER) enter = true;
+                else if (k == android.view.KeyEvent.KEYCODE_SPACE) b.append(' ');
+            }
+        }
+        android.os.Bundle args = new android.os.Bundle();
+        args.putCharSequence(android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, b.toString());
+        boolean ok = f.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT, args);
+        if (enter && android.os.Build.VERSION.SDK_INT >= 30) f.performAction(0x01020036 /* ACTION_IME_ENTER: Enviar */);
+        return ok;
+    }
+
+    private static android.view.accessibility.AccessibilityNodeInfo firstEditable(android.view.accessibility.AccessibilityNodeInfo root) {
+        if (root == null) return null;
+        java.util.ArrayDeque<android.view.accessibility.AccessibilityNodeInfo> q = new java.util.ArrayDeque<>();
+        q.add(root);
+        int seen = 0;
+        while (!q.isEmpty() && seen++ < 600) {
+            android.view.accessibility.AccessibilityNodeInfo n = q.poll();
+            if (n == null) continue;
+            if (n.isVisibleToUser() && n.isEditable()) return n;
+            for (int i = 0; i < n.getChildCount(); i++) q.add(n.getChild(i));
+        }
+        return null;
     }
 
     /** ¿La app pkg quedó en pantalla partida (su ventana ocupa menos de lo que mide la pantalla)? */

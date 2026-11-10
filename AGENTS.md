@@ -103,6 +103,23 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
 - Ajustes → Configuración → **Teclados automáticos** (`kbAutoMenu`, se copian al otro con `prefSet`): `autoKb`
   (cuadro de texto), `autoKbChat` (apps de chat, `openKb`), `autoVideo` 0 control de video / 1 teclado / 2 nada
   (`mActive` en Hub), `autoAsist` (RetroArch), `vertKbAuto`, `kbSpaceFix`.
+- **Mover a extendido** (`MoveTo`): con YouTube o un navegador al frente en el principal (`MesaAccess` → `onFront`),
+  en el extendido flota una flecha naranja (triángulo estirado, largo = 4 teclas del teclado Android, sube y baja).
+  Tocar → `moveReq`; arrastrar fuera de la pantalla la descarta para esa app. YouTube: Compartir › Copiar vínculo
+  (accesibilidad, portapapeles vaciado antes) + segundo de su sesión (`NotifService`), se pausa y va al inicio;
+  navegador: barra de direcciones (ids conocidos o texto con forma de dirección arriba). `moveOpen {url, pkg}` en el
+  extendido abre en la misma app o en la de siempre. Compartir › "Al extendido" (`MoveTo.ShareIn`) sirve a mano.
+- **Zona Wi-Fi de un toque** (`Hotspot`): Android no deja encenderla a una app; la accesibilidad abre su pantalla de
+  Ajustes, toca el interruptor de la fila "Zona Wi-Fi…" (o el de arriba) y vuelve atrás. Botón de la barra rápida.
+- **Menú Apagar** (único botón del inicio; ya no están "Teléfono normal" ni "Cerrar ChronOS"): Apagar teléfonos
+  (apagar/reiniciar/bloquear) o Salir de ChronOS; ambos preguntan Los dos / Principal / Extendido (`pickPhones`).
+  Salir (`exitHere`, al otro con `exitNow`): teléfono normal + se detiene la conexión; el principal pregunta si apaga
+  la zona Wi-Fi.
+- Teclado sin cuadro (`RemoteIme`): se busca el cuadro (450/900 ms) y, si la app no abre el teclado (YouTube después
+  de mandar un comentario), se escribe directo con accesibilidad (`MesaAccess.typeIntoField`, Enter = ACTION_IME_ENTER).
+- Espacios (`Dict.splitSpace`): solo si la palabra no existe, NO está a una letra de una que existe ("malabra" ≈
+  "palabra": no se toca) y todas las partes son conocidas (2 letras: top 300; 3 letras: top 3000); hasta 4 partes
+  ("tenamonmarcela" → "te amo marcela" si "marcela" ya se escribió varias veces).
 - **Baterías de accesorios** (`Peri`): cada teléfono mira sus accesorios (Bluetooth `getBatteryLevel` por reflexión;
   gamepads/teclados/mouse con `InputDevice.getBatteryState`, Android 12+), se los pasa al otro (`peri {l:[{n,k,p}]}`)
   y `ChronoBar.drawBatteries` los dibuja junto a P y E con un iconito (`periIcon`: h audífonos, g gamepad, k teclado,

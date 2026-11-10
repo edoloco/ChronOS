@@ -244,6 +244,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (getIntent().hasExtra("phoneAsk")) { String pt = getIntent().getStringExtra("phoneAsk"); getIntent().removeExtra("phoneAsk"); main.post(() -> phoneOffer(pt)); }
         if (getIntent().getBooleanExtra("forceLink", false)) { getIntent().removeExtra("forceLink"); main.post(() -> { hub.forceLink(); Toast.makeText(this, "Buscando al extendido…", Toast.LENGTH_SHORT).show(); }); }
         if (getIntent().getBooleanExtra("phoneNow", false)) { getIntent().removeExtra("phoneNow"); main.post(this::goNormal); }
+        if (getIntent().getBooleanExtra("exitNow", false)) { boolean bothX = getIntent().getBooleanExtra("both", false); getIntent().removeExtra("exitNow"); main.postDelayed(() -> exitHere(!bothX), 400); }
         if (getIntent().getBooleanExtra("sepPerm", false)) { getIntent().removeExtra("sepPerm"); askBtPerms(); }
         if (getIntent().getBooleanExtra("wallPick", false)) { getIntent().removeExtra("wallPick"); main.post(this::pickWall); }
     }
@@ -264,6 +265,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (intent.hasExtra("phoneAsk")) { String pt = intent.getStringExtra("phoneAsk"); intent.removeExtra("phoneAsk"); main.post(() -> phoneOffer(pt)); }
         if (intent.getBooleanExtra("forceLink", false)) { intent.removeExtra("forceLink"); main.post(() -> { hub.forceLink(); Toast.makeText(this, "Buscando al extendido…", Toast.LENGTH_SHORT).show(); }); }
         if (intent.getBooleanExtra("phoneNow", false)) { intent.removeExtra("phoneNow"); main.post(this::goNormal); }
+        if (intent.getBooleanExtra("exitNow", false)) { boolean b = intent.getBooleanExtra("both", false); intent.removeExtra("exitNow"); main.postDelayed(() -> exitHere(!b), 400); }
         if (intent.getBooleanExtra("sepPerm", false)) { intent.removeExtra("sepPerm"); askBtPerms(); }
         if (intent.getBooleanExtra("wallPick", false)) { intent.removeExtra("wallPick"); main.post(this::pickWall); }
         handleShare(intent);
@@ -852,7 +854,7 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         startPanel.addView(head);
         // orden: lo más usado arriba
         SquareButton[] order = {byKind(SquareButton.APPS), settingsBtn, byKind(SquareButton.DESKS), statusBtn,
-                byKind(SquareButton.TOOLS), phoneSettingsBtn(), phoneBtn(), soloBtn(), powerBtn(), side != 1 && !solo ? exitBtn() : null, null, aboutBtn()};   // Archivos está en Herramientas
+                byKind(SquareButton.TOOLS), phoneSettingsBtn(), soloBtn(), powerBtn(), null, aboutBtn()};   // Teléfono normal y Cerrar ChronOS: dentro de Apagar   // Archivos está en Herramientas
         LinearLayout row = null;
         for (int i = 0; i < order.length; i++) {
             if (i % 4 == 0) {
@@ -932,13 +934,62 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         return powerSq;
     }
 
-    /** Centro de apagado: primero cuál teléfono, después apagar, reiniciar o bloquear. */
+    /** Menú Apagar (todo junto): apagar los teléfonos o salir de ChronOS; después, en cuál. */
     private void powerCenter() {
-        Ui.Sheet sh = new Ui.Sheet(this).title("Centro de apagado").message("¿Qué teléfono?");
-        sh.option(Ui.LOCK, "Los dos", "Principal y extendido", () -> powerWhat(true, true));
-        sh.option(Ui.LOCK, "Principal", hub.isPrincipal() ? "Este teléfono" : "El de las apps", () -> powerWhat(true, false));
-        if (!solo) sh.option(Ui.LOCK, "Extendido", hub.isPrincipal() ? "El de los controles" : "Este teléfono", () -> powerWhat(false, true));
+        new Ui.Sheet(this).title("Apagar")
+                .option(Ui.LOCK, "Apagar teléfonos", "Apagar, reiniciar o bloquear la pantalla", () -> pickPhones("¿Qué teléfono apagar?", this::powerWhat))
+                .option(Ui.HOME, "Salir de ChronOS", "Vuelve al teléfono normal (los teléfonos se desvinculan)", () -> pickPhones("¿Salir de ChronOS en…?", this::exitWhat))
+                .button("Cancelar", false, null).show();
+    }
+
+    /** Los dos / Principal / Extendido. */
+    private void pickPhones(String title, java.util.function.BiConsumer<Boolean, Boolean> then) {
+        Ui.Sheet sh = new Ui.Sheet(this).title(title);
+        if (!solo) sh.option(Ui.LOCK, "Los dos", "Principal y extendido", () -> then.accept(true, true));
+        sh.option(Ui.LOCK, "Principal", hub.isPrincipal() || solo ? "Este teléfono" : "El de las apps", () -> then.accept(true, false));
+        if (!solo) sh.option(Ui.LOCK, "Extendido", hub.isPrincipal() ? "El de los controles" : "Este teléfono", () -> then.accept(false, true));
         sh.button("Cancelar", false, null).show();
+    }
+
+    /**
+     * Salir de ChronOS en el principal, el extendido o los dos: cada uno vuelve a ser teléfono normal y se desvinculan.
+     * Primero el otro teléfono (si va), después este.
+     */
+    private void exitWhat(boolean p, boolean e) {
+        boolean meP = hub.isPrincipal() || solo;
+        boolean other = !solo && ((p && !meP) || (e && meP)), me = (p && meP) || (e && !meP);
+        if (other) {
+            if (hub.connected()) hub.send("exitNow", "both", p && e);
+            else Toast.makeText(this, "El otro teléfono no está conectado", Toast.LENGTH_SHORT).show();
+        }
+        if (me) main.postDelayed(() -> exitHere(!(p && e)), other ? 700 : 0);
+    }
+
+    /**
+     * Este teléfono sale de ChronOS: teléfono normal, sin conexión. En el principal, si la zona Wi-Fi está encendida,
+     * pregunta si se apaga (ya no hace falta para el extendido). tellOther: avisarle al otro (si sale solo este).
+     */
+    void exitHere(boolean tellOther) {
+        Runnable go = () -> {
+            if (tellOther && hub.connected()) hub.send(hub.isPrincipal() ? "boostMsg" : "extClosed", "msg", "El principal salió de ChronOS");
+            PhoneMode.enter(this, hub);
+            main.postDelayed(() -> {
+                stopService(new Intent(this, LinkService.class));
+                finishAffinity();
+                main.postDelayed(() -> android.os.Process.killProcess(android.os.Process.myPid()), 600);
+            }, 900);
+        };
+        if ((hub.isPrincipal() || solo) && Hotspot.isOn(this)) {
+            new Ui.Sheet(this).title("¿Desactivar la zona Wi-Fi?")
+                    .message("Ya no hace falta para el extendido. Ahorra batería.")
+                    .button("No", false, go)
+                    .button("Sí, desactivar", true, () -> Hotspot.set(this, false, ok -> {
+                        if (!ok) Toast.makeText(this, "No se pudo apagar sola: apágala en Ajustes", Toast.LENGTH_LONG).show();
+                        go.run();
+                    })).show();
+            return;
+        }
+        go.run();
     }
 
     private void powerWhat(boolean p, boolean e) {

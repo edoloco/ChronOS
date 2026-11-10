@@ -347,9 +347,14 @@ public class QuickToggles extends View {
             case "cast":
                 if (!open(new Intent("android.settings.CAST_SETTINGS"))) open(new Intent(Settings.ACTION_WIRELESS_SETTINGS));
                 break;
-            case "hotspot": {
-                Intent i = new Intent().setComponent(new ComponentName("com.android.settings", "com.android.settings.TetherSettings"));
-                if (!open(i) && !open(new Intent("android.settings.TETHER_SETTINGS"))) open(new Intent(Settings.ACTION_WIRELESS_SETTINGS));
+            case "hotspot": {   // de una: ChronOS toca el interruptor por ti y vuelve (sin quedarse en Ajustes)
+                boolean want = !Hotspot.isOn(getContext());
+                toast(want ? "Encendiendo la zona Wi-Fi…" : "Apagando la zona Wi-Fi…");
+                Hotspot.set(getContext(), want, ok -> {
+                    if (ok) toast(want ? "Zona Wi-Fi encendida" : "Zona Wi-Fi apagada");
+                    else toast("Toca el interruptor de la zona Wi-Fi");
+                    invalidate();
+                });
                 break;
             }
             case "wifi":
