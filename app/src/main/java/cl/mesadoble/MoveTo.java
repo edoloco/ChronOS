@@ -61,6 +61,15 @@ final class MoveTo {
 
     // ======================= PRINCIPAL =======================
 
+    /** Avisos de diagnóstico: las primeras 4 veces en cada teléfono (para saber en qué paso falla). */
+    private static void diag(Context c, Hub hub, String msg) {
+        android.content.SharedPreferences p = c.getSharedPreferences("mesa", Context.MODE_PRIVATE);
+        int n = p.getInt("moveDiag", 0);
+        if (n >= 4) return;
+        p.edit().putInt("moveDiag", n + 1).apply();
+        hub.toast(msg);
+    }
+
     static boolean isBrowser(Context c, String pkg) {
         if (browsers == null) {
             browsers = new HashSet<>();
@@ -81,7 +90,9 @@ final class MoveTo {
         if (kind != null) {
             if (pkg.equals(offered)) return;
             offered = pkg;
+            if (!hub.connected()) { diag(c, hub, "Mover a extendido: el extendido no está conectado"); return; }
             hub.send("moveOffer", "pkg", pkg, "kind", kind);
+            diag(c, hub, "Mover a extendido: flecha enviada al extendido");
         } else if (offered != null) {
             // teclados, avisos y ventanas del sistema no cuentan como "otra app"
             if (pkg.startsWith("com.android.systemui") || pkg.contains("inputmethod")) return;
@@ -332,7 +343,7 @@ final class MoveTo {
         lp.y = Math.round(sc.y * 0.08f);
         arrow.lp = lp;
         arrow.screen = sc;
-        try { awm.addView(arrow, lp); }
+        try { awm.addView(arrow, lp); diag(c, hub, "Mover a extendido: flecha arriba en esta pantalla"); }
         catch (Exception e) {
             arrow = null;
             hub.toast("No se pudo mostrar la flecha «Mover a extendido»: " + e.getClass().getSimpleName());
