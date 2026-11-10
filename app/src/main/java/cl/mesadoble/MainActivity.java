@@ -254,8 +254,14 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         if (intent.getBooleanExtra("overLock", false)) showOverLock(true);
         // botón Inicio del sistema estando en ChronOS: se cierra el gestor de archivos (vuelve la mesa)
         if (Intent.ACTION_MAIN.equals(intent.getAction()) && intent.hasCategory(Intent.CATEGORY_HOME)) {
+            boolean wasFront = !stoppedSinceResume;   // ya se estaba viendo la mesa: segundo toque de Inicio
             if (fileMode) setFileMode(false, false);
             if (startOverlay != null && startOverlay.getVisibility() == View.VISIBLE) showStart(false);
+            // Inicio = todo al inicio: se cierran los teclados (aquí y en el otro teléfono)
+            KeyboardActivity.closeAll();
+            if (!solo && hub.connected()) hub.send("homeAll");
+            // estando en la mesa, Inicio otra vez lleva a la primera mesa
+            if (wasFront && desk.page() != 0) { desk.setPages(desk.pages(), 0, -1); onPageChange(0, desk.pages()); }
         }
         String bw = intent.getStringExtra("bindWidget");
         if (bw != null) { intent.removeExtra("bindWidget"); bindRequested(bw, 0); }
@@ -282,7 +288,16 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         return super.dispatchTouchEvent(e);
     }
 
+    /** ¿Se dejó de ver la mesa desde el último onResume? (para saber si Inicio se tocó estando ya en ella) */
+    private boolean stoppedSinceResume = true;
+
+    @Override protected void onStop() {
+        stoppedSinceResume = true;
+        super.onStop();
+    }
+
     @Override protected void onResume() {
+        stoppedSinceResume = false;
         super.onResume();
         blockTouchUntil = android.os.SystemClock.uptimeMillis() + 450;
         ForceView.apply(this);   // por si se acaba de dar el permiso
@@ -297,7 +312,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         main.postDelayed(this::reportHome, 1200);
         main.postDelayed(() -> refreshDeskIcons(false), 2500);   // íconos de apps actualizadas
         if (!lookSig.isEmpty()) applyLookIfChanged();   // cambios de apariencia llegados mientras no se veía
-        main.postDelayed(() -> desk.alignApps(), 1200);   // grilla invisible: las apps de esta pantalla, cada una en su celda
+        // (ya no se reacomodan las apps al volver: con otro tamaño de pantalla un instante —al actualizar o girar— se
+        // desordenaban; cada app queda en la celda donde la dejaste)
         String pend = prefs.getString("pendingDesk", "");   // se instaló una app mientras ChronOS no estaba a la vista
         if (!pend.isEmpty()) { prefs.edit().remove("pendingDesk").apply(); main.postDelayed(() -> askDeskShortcut(pend), 700); }
         PhoneMode.exit(this, hub);   // se volvió a ChronOS: deja el modo teléfono normal (principal, o extendido que se cerró)
@@ -1911,7 +1927,6 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         desk.setAppsMode(lock, auto);
         if (fromRemote) return;
         hub.send("apps", "lock", lock, "auto", auto);
-        if (auto) desk.arrangeApps();
         Toast.makeText(this, lock ? "Apps bloqueadas en su lugar" : auto ? "Las apps se ordenan solas" : "Apps libres", Toast.LENGTH_SHORT).show();
     }
 
@@ -2833,8 +2848,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         it.page = desk.page();
         addItem(it);
         sendImage(it);
-        if (prefs.getBoolean("appsAuto", true)) main.postDelayed(() -> desk.arrangeApps(), 250);
-        else main.postDelayed(() -> desk.startEditing(it.id), 200);
+        // queda en la primera celda libre; las demás no se mueven (antes se reordenaban todas por nombre)
+        if (!prefs.getBoolean("appsAuto", true)) main.postDelayed(() -> desk.startEditing(it.id), 200);
     }
 
     /** Catálogo: redes sociales hechas para el teléfono en vertical; al activarlas aparecen en tus apps. */
@@ -3828,7 +3843,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 addItem(it);
                 sendImage(it);
                 // con "ordenar apps" (por defecto) se acomoda en la grilla; si no, queda en modo edición para ubicarla
-                if (prefs.getBoolean("appsAuto", true)) main.postDelayed(() -> desk.arrangeApps(), 250);
+                // queda en la primera celda libre; las demás no se mueven (antes se reordenaban todas por nombre)
+                if (prefs.getBoolean("appsAuto", true)) { /* ya está en su celda */ }
                 else if (screen == deskSide()) main.postDelayed(() -> desk.startEditing(it.id), 200);
                 else if (hub.connected()) main.postDelayed(() -> hub.send("editItem", "id", it.id), 400);
             }

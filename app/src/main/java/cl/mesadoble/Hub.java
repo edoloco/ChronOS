@@ -496,6 +496,13 @@ public class Hub implements Link.Listener {
             if (!isPrincipal()) main.post(() -> MoveTo.onMessage(app, this, m));
             return;
         }
+        if ("homeAll".equals(t)) {   // se tocó Inicio en el otro teléfono: aquí se cierran los teclados y vuelve la mesa
+            main.post(() -> {
+                if (KeyboardActivity.closeAll())
+                    try { app.startActivity(new Intent(app, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)); } catch (Exception ignored) { }
+            });
+            return;
+        }
         if ("moveReq".equals(t)) { if (isPrincipal()) main.post(() -> MoveTo.request(app, this, m.optString("pkg"))); return; }
         if ("moveAsk".equals(t)) { if (isPrincipal()) main.post(() -> MoveTo.reoffer(app, this)); return; }
         if ("exitNow".equals(t)) {   // el otro pidió que este también salga de ChronOS (menú Apagar)

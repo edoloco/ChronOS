@@ -43,6 +43,15 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     static boolean showingVert;
     /** ¿Está a la vista el control de video? (para no abrirlo de nuevo) */
     static boolean showingMedia, showingCamera, showingAsist;
+    private static java.lang.ref.WeakReference<KeyboardActivity> live;
+
+    /** Botón Inicio: se cierran los teclados (cualquier modo: teclado, control de video, Game-Asist…). true si había. */
+    static boolean closeAll() {
+        KeyboardActivity a = live == null ? null : live.get();
+        if (a == null || a.isFinishing()) return false;
+        a.finish();
+        return true;
+    }
 
     private boolean night;
     private KbTheme th;
@@ -84,6 +93,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
             finish();
             return;
         }
+        live = new java.lang.ref.WeakReference<>(this);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         MainActivity.applyOrientation(this);   // misma orientación que la mesa
         prefs = getSharedPreferences("mesa", MODE_PRIVATE);

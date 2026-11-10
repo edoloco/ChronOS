@@ -103,6 +103,12 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
 - Ajustes → Configuración → **Teclados automáticos** (`kbAutoMenu`, se copian al otro con `prefSet`): `autoKb`
   (cuadro de texto), `autoKbChat` (apps de chat, `openKb`), `autoVideo` 0 control de video / 1 teclado / 2 nada
   (`mActive` en Hub), `autoAsist` (RetroArch), `vertKbAuto`, `kbSpaceFix`.
+- **Botón Inicio** (`MainActivity.onNewIntent` con CATEGORY_HOME): cierra los teclados (`KeyboardActivity.closeAll`,
+  cualquier modo) aquí y en el otro (`homeAll`; allá vuelve la mesa si había teclado). Si la mesa ya se veía
+  (`stoppedSinceResume` falso), vuelve a la primera mesa.
+- La mesa NO se reacomoda sola: ni al volver (antes `alignApps` en `onResume`, que con un tamaño de pantalla
+  pasajero —al actualizar o girar— desordenaba) ni al agregar una app (antes `arrangeApps` las reordenaba todas por
+  nombre). La app nueva va a la primera celda libre; ordenar es solo a mano (Escritorios › Ordenar y alinear).
 - **Mover a extendido** (`MoveTo`): con YouTube o un navegador al frente en el principal (`MesaAccess` → `onFront`),
   en el extendido flota una flecha naranja: triángulo ancho (ancho = 4 teclas del teclado Android en horizontal),
   degradado + brillo + sombra difuminada por fuera, sin bordes; sube y baja. `moveReq {pkg}` lleva la app ofrecida
