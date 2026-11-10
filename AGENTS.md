@@ -121,7 +121,9 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   del frente (`MesaAccess` → `onFront`, en los dos). Con YouTube o un navegador, ahí mismo sale una flecha naranja
   chica sin letras (1,6 teclas de ancho, degradado + brillo + sombra, flota): en el principal abajo a la izquierda
   apuntando abajo; en el extendido arriba a la izquierda apuntando arriba (devolver). Tocar → `request` local
-  (YouTube: Compartir › Copiar vínculo + segundo de su sesión, se pausa; navegador: barra de direcciones) →
+  (YouTube: primero el id de su sesión si lo trae; si no, Compartir › Copiar vínculo, y si no se ve: toque al
+  centro para mostrar controles y luego Atrás para salir de pantalla completa; el segundo se toma antes; se pausa.
+  Navegador: barra de direcciones) →
   `moveOpen {url, pkg}` al otro, que lo abre en su misma app o en la de siempre; aquí se va al inicio. Lanzarla fuera
   de la pantalla la descarta para esa app. Compartir › "Al otro teléfono" (`MoveTo.ShareIn`) sirve a mano.
 - **Zona Wi-Fi de un toque** (`Hotspot`): Android no deja encenderla a una app; la accesibilidad abre su pantalla de
