@@ -81,13 +81,13 @@ public class MesaAccess extends AccessibilityService {
         lastPkg = pkg;
         front = pkg;
         Hub h = Hub.get(this);
+        // YouTube o un navegador al frente (en cualquiera de los dos): la flecha chica para pasarlo al otro
+        if (h.connected()) MoveTo.onFront(this, h, pkg);
         if (!h.isPrincipal() || !h.connected()) return;
         // mesa de dibujo: Sketchbook al frente → el extendido se vuelve tableta (teclados y avisos del sistema no cuentan)
         if (pkg.equals(getPackageName()) || getPackageManager().getLaunchIntentForPackage(pkg) != null) Sketch.front(h, pkg);
         // app de dos pantallas (DUAL Motion u otra que lo declare): en el extendido se abre su otra mitad
         if (Hub.isDualApp(this, pkg)) h.send("dualOpen", "pkg", pkg);
-        // YouTube o un navegador: en el extendido aparece la flecha "Mover a extendido"
-        MoveTo.onFront(this, h, pkg);
         // RetroArch al frente: en el extendido se abre Game-Asist
         if (pkg.startsWith("com.retroarch")) h.send("openAsist");
         if (CHAT_APPS.contains(pkg)) {

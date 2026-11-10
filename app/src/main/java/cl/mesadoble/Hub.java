@@ -299,7 +299,7 @@ public class Hub implements Link.Listener {
             sendImeState();
             sendBattery();
             Peri.share();
-            if (isPrincipal()) main.postDelayed(() -> MoveTo.reoffer(app, this), 1500);   // flecha "Mover a extendido"
+            main.postDelayed(() -> MoveTo.reoffer(app, this), 1500);   // flecha para pasar videos y páginas
             if (prefs.getBoolean("forceViewPending", false)) {   // vista forzada elegida sin conexión
                 prefs.edit().putBoolean("forceViewPending", false).apply();
                 send("forceView", "v", ForceView.mode(app, true), "w", 1);
@@ -492,10 +492,7 @@ public class Hub implements Link.Listener {
                     .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), () -> false, 94, "Fondo de pantalla", "Toca para elegir la imagen"));
             return;
         }
-        if ("moveOffer".equals(t) || "moveOpen".equals(t) || "moveFail".equals(t)) {   // mover a extendido
-            if (!isPrincipal()) main.post(() -> MoveTo.onMessage(app, this, m));
-            return;
-        }
+        if ("moveOpen".equals(t)) { main.post(() -> MoveTo.onMessage(app, this, m)); return; }   // video o página del otro teléfono
         if ("homeAll".equals(t)) {   // se tocó Inicio en el otro teléfono: aquí se cierran los teclados y vuelve la mesa
             main.post(() -> {
                 if (KeyboardActivity.closeAll())
@@ -503,8 +500,8 @@ public class Hub implements Link.Listener {
             });
             return;
         }
-        if ("moveReq".equals(t)) { if (isPrincipal()) main.post(() -> MoveTo.request(app, this, m.optString("pkg"))); return; }
-        if ("moveAsk".equals(t)) { if (isPrincipal()) main.post(() -> MoveTo.reoffer(app, this)); return; }
+
+
         if ("exitNow".equals(t)) {   // el otro pidió que este también salga de ChronOS (menú Apagar)
             startOwn(new Intent(app, MainActivity.class).putExtra("exitNow", true).putExtra("both", m.optBoolean("both"))
                     .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), () -> false, 95, "Salir de ChronOS", "Toca para salir de ChronOS aquí");
@@ -641,6 +638,7 @@ public class Hub implements Link.Listener {
             if (m.has("b")) prefs.edit().putBoolean(k, m.optBoolean("b")).apply();
             else prefs.edit().putInt(k, m.optInt("i")).apply();
             if ("boost3d".equals(k)) Sound3D.live = m.optInt("i");
+            if ("moveArrow".equals(k)) main.post(() -> MoveTo.reoffer(app, this));
             return;
         }
         if ("vertKbPref".equals(t)) { prefs.edit().putBoolean("vertKbAuto", m.optBoolean("on")).apply(); return; }

@@ -117,16 +117,13 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
 - La mesa NO se reacomoda sola: ni al volver (antes `alignApps` en `onResume`, que con un tamaño de pantalla
   pasajero —al actualizar o girar— desordenaba) ni al agregar una app (antes `arrangeApps` las reordenaba todas por
   nombre). La app nueva va a la primera celda libre; ordenar es solo a mano (Escritorios › Ordenar y alinear).
-- **Mover a extendido** (`MoveTo`): con YouTube o un navegador al frente en el principal (`MesaAccess` → `onFront`),
-  en el extendido flota una flecha naranja: triángulo ancho (ancho = 4 teclas del teclado Android en horizontal),
-  degradado + brillo + sombra difuminada por fuera, sin bordes; sube y baja. `moveReq {pkg}` lleva la app ofrecida
-  (al tocar puede estar al frente otra ventana).
-  Tocar → `moveReq`; arrastrar fuera de la pantalla la descarta para esa app. YouTube: Compartir › Copiar vínculo
-  (accesibilidad, portapapeles vaciado antes) + segundo de su sesión (`NotifService`), se pausa y va al inicio;
-  navegador: barra de direcciones (ids conocidos o texto con forma de dirección arriba). `moveOpen {url, pkg}` en el
-  extendido abre en la misma app o en la de siempre. Compartir › "Al extendido" (`MoveTo.ShareIn`) sirve a mano.
-  Al conectarse se vuelve a ofrecer (`reoffer`); si no se puede mostrar, el extendido avisa por qué. Configuración ›
-  "Probar la flecha" la muestra a mano.
+- **Pasar videos y páginas** (`MoveTo`, pref `moveArrow`, en Configuración y pruebas): cada teléfono mira su app
+  del frente (`MesaAccess` → `onFront`, en los dos). Con YouTube o un navegador, ahí mismo sale una flecha naranja
+  chica sin letras (1,6 teclas de ancho, degradado + brillo + sombra, flota): en el principal abajo a la izquierda
+  apuntando abajo; en el extendido arriba a la izquierda apuntando arriba (devolver). Tocar → `request` local
+  (YouTube: Compartir › Copiar vínculo + segundo de su sesión, se pausa; navegador: barra de direcciones) →
+  `moveOpen {url, pkg}` al otro, que lo abre en su misma app o en la de siempre; aquí se va al inicio. Lanzarla fuera
+  de la pantalla la descarta para esa app. Compartir › "Al otro teléfono" (`MoveTo.ShareIn`) sirve a mano.
 - **Zona Wi-Fi de un toque** (`Hotspot`): Android no deja encenderla a una app; la accesibilidad abre su pantalla de
   Ajustes, toca el interruptor de la fila "Zona Wi-Fi…" (o el de arriba) y vuelve atrás. Botón de la barra rápida.
 - **Menú Apagar** (único botón del inicio; ya no están "Teléfono normal" ni "Cerrar ChronOS"): Apagar teléfonos

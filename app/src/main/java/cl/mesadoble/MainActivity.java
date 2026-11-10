@@ -2016,14 +2016,13 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
         sh.option(Ui.UNLOCK, -1, "Al separar los teléfonos: " + (sm == Proximity.MAG ? "por imán" : sm == Proximity.BT ? "por Bluetooth" : "no hacer nada"),
                 "Pasar solo a teléfono normal cuando se alejan" + (sm == Proximity.OFF ? "" : (Proximity.ask(this) ? " · pregunta" : " · sin preguntar")),
                 sm != Proximity.OFF, this::sepMenu);
-        sh.option(Ui.SEND, "Probar la flecha «Mover a extendido»", "La muestra en el extendido; con YouTube o un navegador al frente sale sola", () -> {
-            if (MesaAccess.instance == null && principal) Toast.makeText(this, "Falta la accesibilidad de ChronOS en el principal: sin ella no se sabe qué app está al frente", Toast.LENGTH_LONG).show();
-            try {
-                org.json.JSONObject t = new org.json.JSONObject().put("t", "moveOffer").put("pkg", "prueba").put("kind", "yt");
-                if (principal || solo) { if (hub.connected()) hub.send(t); else Toast.makeText(this, "El extendido no está conectado", Toast.LENGTH_SHORT).show(); }
-                else MoveTo.onMessage(this, hub, t);
-            } catch (Exception ignored) { }
-        });
+        boolean mv = MoveTo.enabled(this);
+        sh.option(Ui.SEND, -1, "Flecha para pasar videos y páginas: " + (mv ? "sí" : "no"),
+                "Con YouTube o un navegador: flecha chica para mandarlo al otro teléfono (y devolverlo)", mv, () -> {
+                    setShared("moveArrow", !mv);
+                    MoveTo.reoffer(this, hub);
+                    configMenu();
+                });
         boolean ycOn = LiveChat.enabled(this);
         sh.option(Ui.NOTE, -1, "Chat en vivo de YouTube: " + (ycOn ? "sí" : "no"),
                 "Con un directo o estreno en pantalla flotante, sale una burbuja para abrir su chat al lado", ycOn, () -> {
