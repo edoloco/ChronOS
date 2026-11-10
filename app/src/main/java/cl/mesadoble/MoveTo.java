@@ -188,48 +188,80 @@ final class MoveTo {
 
     private static long ytStart;
 
+    private static final Pattern SHARE = Pattern.compile("^(Compartir|Share)$", Pattern.CASE_INSENSITIVE);
+
     private static void ytLink(Context c, Hub hub) {
         MesaAccess s = MesaAccess.instance;
-        if (s == null) { fail(hub, "Falta la accesibilidad de ChronOS en el principal"); return; }
+        if (s == null) { fail(hub, "Falta la accesibilidad de ChronOS en este teléfono"); return; }
         ytStart = SystemClock.uptimeMillis();
+        final long sec = ytSecond(c);   // el segundo de ahora (antes de tocar nada)
+        // 1) si YouTube dice qué video es en su sesión, no hace falta tocar nada
+        MediaController mc = ytSession(c);
+        if (mc != null && mc.getMetadata() != null) {
+            android.media.MediaMetadata md = mc.getMetadata();
+            for (String k : new String[]{android.media.MediaMetadata.METADATA_KEY_MEDIA_ID, android.media.MediaMetadata.METADATA_KEY_MEDIA_URI}) {
+                String v = md.getString(k);
+                String id = v == null ? null : v.matches("[\\w-]{11}") ? v : ytId(v);
+                if (id != null) { openYt(c, hub, id, sec); return; }
+            }
+        }
         try {   // se vacía el portapapeles: así se sabe que lo que llegue es el enlace de este video
             ClipboardManager cm = (ClipboardManager) s.getSystemService(Context.CLIPBOARD_SERVICE);
             if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("", ""));
         } catch (Exception ignored) { }
-        if (!clickText(s, Pattern.compile("^(Compartir|Share)$", Pattern.CASE_INSENSITIVE), true)) {
-            // los controles del video pueden estar escondidos: un toque en el video los muestra
-            fail(hub, "Toca el video en el principal (para ver «Compartir») y vuelve a tocar la flecha");
+        // 2) Compartir › Copiar vínculo. Si "Compartir" no está a la vista (pantalla completa, controles escondidos):
+        //    un toque al video para mostrar los controles; si sigue sin estar, se sale de pantalla completa
+        shareTry(c, hub, s, sec, 0);
+    }
+
+    private static void shareTry(Context c, Hub hub, MesaAccess s, long sec, int step) {
+        if (clickText(s, SHARE, true)) { h.postDelayed(() -> copyLink(c, hub, s, sec), 900); return; }
+        if (step == 0) {   // un toque en el centro de la pantalla: aparecen los controles del video
+            Point sc = new Point();
+            ((WindowManager) s.getSystemService(Context.WINDOW_SERVICE)).getDefaultDisplay().getRealSize(sc);
+            android.graphics.Path tp = new android.graphics.Path();
+            tp.moveTo(sc.x / 2f, sc.y / 2f);
+            try {
+                s.dispatchGesture(new android.accessibilityservice.GestureDescription.Builder()
+                        .addStroke(new android.accessibilityservice.GestureDescription.StrokeDescription(tp, 0, 40)).build(), null, null);
+            } catch (Exception ignored) { }
+            h.postDelayed(() -> shareTry(c, hub, s, sec, 1), 600);
+        } else if (step == 1) {   // pantalla completa: Atrás la deja normal, y ahí "Compartir" está bajo el video
+            s.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK);
+            h.postDelayed(() -> shareTry(c, hub, s, sec, 2), 1100);
+        } else fail(hub, "No encontré «Compartir» en YouTube: ábrelo en la página del video y vuelve a tocar la flecha");
+    }
+
+    private static void copyLink(Context c, Hub hub, MesaAccess s, long sec) {
+        if (!clickText(s, Pattern.compile("^(Copiar v[ií]nculo|Copiar enlace|Copy link)$", Pattern.CASE_INSENSITIVE), false)) {
+            s.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK);
+            fail(hub, "No encontré «Copiar vínculo» en YouTube: usa Compartir › Al otro teléfono");
             return;
         }
         h.postDelayed(() -> {
-            if (!clickText(s, Pattern.compile("^(Copiar v[ií]nculo|Copiar enlace|Copy link)$", Pattern.CASE_INSENSITIVE), false)) {
-                s.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK);
-                fail(hub, "No encontré «Copiar vínculo» en YouTube: usa Compartir › Al extendido");
-                return;
-            }
-            h.postDelayed(() -> {
-                String id = ytId(clip(s));
-                if (id == null) {
-                    fail(hub, "No pude leer el enlace del video");
-                    return;
-                }
-                openYt(c, hub, id);
-            }, 500);
-        }, 900);
+            String id = ytId(clip(s));
+            if (id == null) { fail(hub, "No pude leer el enlace del video"); return; }
+            openYt(c, hub, id, sec);
+        }, 500);
+    }
+
+    /** El segundo en que va el video (de su sesión), o 0. */
+    private static long ytSecond(Context c) {
+        MediaController mc = ytSession(c);
+        if (mc == null || mc.getPlaybackState() == null) return 0;
+        PlaybackState st = mc.getPlaybackState();
+        long pos = st.getPosition();
+        if (st.getState() == PlaybackState.STATE_PLAYING)
+            pos += (long) ((SystemClock.elapsedRealtime() - st.getLastPositionUpdateTime()) * Math.max(0.1f, st.getPlaybackSpeed()));
+        return Math.max(0, pos / 1000);
     }
 
     /** Manda el video con el segundo actual y lo pausa aquí. */
-    static void openYt(Context c, Hub hub, String id) {
-        long sec = 0;
+    static void openYt(Context c, Hub hub, String id) { openYt(c, hub, id, ytSecond(c)); }
+
+    static void openYt(Context c, Hub hub, String id, long sec) {
         MediaController mc = ytSession(c);
-        if (mc != null && mc.getPlaybackState() != null) {
-            PlaybackState st = mc.getPlaybackState();
-            long pos = st.getPosition();
-            if (st.getState() == PlaybackState.STATE_PLAYING)
-                pos += (long) ((SystemClock.elapsedRealtime() - st.getLastPositionUpdateTime()) * Math.max(0.1f, st.getPlaybackSpeed()));
-            sec = Math.max(0, pos / 1000);
-            try { mc.getTransportControls().pause(); } catch (Exception ignored) { }
-        }
+        if (mc != null) try { mc.getTransportControls().pause(); } catch (Exception ignored) { }
         hub.send("moveOpen", "url", "https://www.youtube.com/watch?v=" + id + (sec > 0 ? "&t=" + sec + "s" : ""), "pkg", YT);
         done();
     }
