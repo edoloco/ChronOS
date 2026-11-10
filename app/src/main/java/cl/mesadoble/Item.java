@@ -13,7 +13,7 @@ import java.util.UUID;
 
 /** Un elemento del escritorio. x va de 0 a 2 (anchos de pantalla), y de 0 a 1 (alto de pantalla). */
 public class Item {
-    public static final String NOTE = "note", IMG = "img", LINK = "link", APP = "app", WIDGET = "widget", CLOCK = "clock", BATTERY = "battery", RECENTS = "recents", CAMERA = "camera", TORCH = "torch", BRIGHT = "bright", CALLS = "calls";
+    public static final String NOTE = "note", IMG = "img", LINK = "link", APP = "app", WIDGET = "widget", CLOCK = "clock", BATTERY = "battery", RECENTS = "recents", CAMERA = "camera", TORCH = "torch", BRIGHT = "bright", CALLS = "calls", GROUP = "group";
 
     public String id = UUID.randomUUID().toString();
     public String kind = NOTE;
@@ -34,6 +34,7 @@ public class Item {
     public boolean pin;                           // fijo: no se mueve y se ve en todos los escritorios
     public int page = 0;                          // escritorio (0 = el primero; los demás van a los lados)
     public int sz = 0;                            // apps: 0 = cuadrado estándar, 1 = cuadrado grande
+    public String grp = "";                       // dentro de un grupo (carpeta): su id. Mientras, page = -1 (no se ve en la mesa)
 
     // Estado solo local (no se envía)
     public float dx = Float.NaN, dy = Float.NaN;  // posición mostrada, animada
@@ -54,7 +55,7 @@ public class Item {
             o.put("id", id); o.put("kind", kind); o.put("text", text); o.put("url", url);
             o.put("title", title); o.put("color", color); o.put("pkg", pkg); o.put("ik", ik);
             if (withImg) o.put("img", img);
-            o.put("x", x); o.put("y", y); o.put("w", w); o.put("z", z); o.put("u", u); o.put("rev", rev); o.put("rot", (double) rot); o.put("page", page); o.put("ar", ar); o.put("wid", wid); o.put("pin", pin); o.put("sz", sz);
+            o.put("x", x); o.put("y", y); o.put("w", w); o.put("z", z); o.put("u", u); o.put("rev", rev); o.put("rot", (double) rot); o.put("page", page); o.put("ar", ar); o.put("wid", wid); o.put("pin", pin); o.put("sz", sz); o.put("grp", grp);
         } catch (JSONException ignored) { }
         return o;
     }
@@ -78,7 +79,8 @@ public class Item {
         it.u = o.optLong("u", 0);
         it.rev = o.optInt("rev", 1);
         it.rot = (float) o.optDouble("rot", 0);
-        it.page = Math.max(0, Math.min(49, o.optInt("page", 0)));
+        it.grp = o.optString("grp", "");
+        it.page = it.grp.isEmpty() ? Math.max(0, Math.min(49, o.optInt("page", 0))) : -1;   // en un grupo: fuera de la mesa
         it.sz = o.optInt("sz", 0);
         it.wid = o.optInt("wid", -1);
         it.pin = o.optBoolean("pin", false);
@@ -96,7 +98,7 @@ public class Item {
         kind = o.kind; text = o.text; url = o.url; title = o.title; color = o.color; pkg = o.pkg;
         if (!o.img.isEmpty()) { if (!o.img.equals(img)) bmp = null; img = o.img; ik = o.ik; }
         else if (!o.ik.equals(ik)) { img = ""; ik = o.ik; bmp = null; }   // cambió la imagen: llegará aparte
-        x = o.x; y = o.y; w = o.w; z = o.z; u = o.u; rev = o.rev; rot = o.rot; page = o.page; ar = o.ar; wid = o.wid; pin = o.pin; sz = o.sz;
+        x = o.x; y = o.y; w = o.w; z = o.z; u = o.u; rev = o.rev; rot = o.rot; page = o.page; ar = o.ar; wid = o.wid; pin = o.pin; sz = o.sz; grp = o.grp;
     }
 
     public void setImage(String b64) {

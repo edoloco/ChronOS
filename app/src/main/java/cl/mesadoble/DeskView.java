@@ -82,7 +82,14 @@ public class DeskView extends View {
         void onCalls(String what, String num);
         /** Botón ⋯ de un elemento en modo edición: sus opciones (en las apps, el tamaño del cuadrado). */
         void onItemMenu(Item it);
+        /** Grupo (carpeta) tocado: abrirlo. */
+        void onOpenGroup(Item g);
+        /** Mantener presionado un espacio vacío de la mesa (x, y en pantallas): crear grupo o cambiar el fondo. */
+        void onEmptyLongPress(double x, double y);
     }
+
+    /** Apps y grupos: cuadrados del mismo tamaño, en la tabla de apps. */
+    static boolean appLike(Item it) { return Item.APP.equals(it.kind) || Item.GROUP.equals(it.kind); }
 
     // ---------------- widget de cámara: visor y botones de la cámara del principal ----------------
 
@@ -607,7 +614,7 @@ public class DeskView extends View {
         col.setStrength(Collator.PRIMARY);
         for (int s = 0; s < 2; s++) {
             List<Item> apps = new ArrayList<>();
-            for (Item it : items) if (Item.APP.equals(it.kind) && it.page == page && screenOf(it) == s && it != dragging) apps.add(it);
+            for (Item it : items) if (appLike(it) && it.page == page && screenOf(it) == s && it != dragging) apps.add(it);
             if (apps.isEmpty()) continue;
             Collections.sort(apps, (p, q) -> col.compare(p.title, q.title));
             float[] g = appGrid(s);
@@ -821,7 +828,7 @@ public class DeskView extends View {
             for (Item it : list) {
                 it.page = -(it.page + 1000);
                 int[] sp = span(it, g);
-                int st = Item.APP.equals(it.kind) ? 2 : 1;
+                int st = appLike(it) ? 2 : 1;
                 boolean done = false;
                 for (int r = 0; r + sp[1] <= (int) g[4] && !done; r += st) for (int c = 0; c + sp[0] <= (int) g[3] && !done; c += st)
                     if (!blockTaken(it, s, it.page, c, r, sp[0], sp[1], g)) { place(it, s, c, r, g); done = true; }
@@ -1138,11 +1145,69 @@ public class DeskView extends View {
     /** Regla para las apps: siempre cuadradas, de tamaño fijo (estándar o grande), en cualquier modo. */
     static final float APP_STD = 104, APP_BIG = 152;
 
+    /** Los elementos que están dentro del grupo g. */
+    public List<Item> members(Item g) {
+        List<Item> l = new ArrayList<>();
+        for (Item it : items) if (g.id.equals(it.grp)) l.add(it);
+        Collections.sort(l, (p, q) -> Long.compare(p.z, q.z));
+        return l;
+    }
+
+    /** Grupo: hasta 9 miniaturas (3 × 3) de lo que tiene adentro, y su nombre abajo como una app. */
+    private void drawGroup(Canvas c, Item g, float width, float h) {
+        List<Item> m = members(g);
+        float area = Math.min(width, h) * 0.58f, cell = area / 3f, gap = cell * 0.12f;
+        float x0 = width / 2 - area / 2, y0 = h * 0.40f - area / 2;
+        for (int i = 0; i < Math.min(9, m.size()); i++) {
+            Item it = m.get(i);
+            RectF d = new RectF(x0 + (i % 3) * cell + gap / 2, y0 + (i / 3) * cell + gap / 2, x0 + (i % 3 + 1) * cell - gap / 2, y0 + (i / 3 + 1) * cell - gap / 2);
+            Bitmap b = bitmapOf(it);
+            if (b != null) c.drawBitmap(b, new Rect(0, 0, b.getWidth(), b.getHeight()), d, bmpPaint);
+            else {   // sin ícono: un cuadradito con su inicial
+                btn.setColor(Item.NOTE.equals(it.kind) ? (it.color & 0x00FFFFFF) | 0xDD000000 : 0x66FFFFFF);
+                c.drawRoundRect(d, d.width() * 0.25f, d.width() * 0.25f, btn);
+                String t = (it.title.isEmpty() ? it.text : it.title).trim();
+                if (!t.isEmpty()) {
+                    small.setColor(fg);
+                    small.setTextSize(d.height() * 0.55f);
+                    String ch = t.substring(0, 1).toUpperCase();
+                    c.drawText(ch, d.centerX() - small.measureText(ch) / 2, d.centerY() + small.getTextSize() * 0.36f, small);
+                }
+            }
+        }
+        if (m.isEmpty()) {   // vacío: un contorno punteado invitando a arrastrar algo
+            dashed.setColor((fg & 0x00FFFFFF) | 0x66000000);
+            c.drawRoundRect(new RectF(x0, y0, x0 + area, y0 + area), cell * 0.3f, cell * 0.3f, dashed);
+        }
+        small.setColor(fg);
+        small.setTextSize(Math.max(12 * dp, Math.min(16 * dp, width * 0.07f)));
+        String t = ellipsize(g.title.isEmpty() ? "Grupo" : g.title, small, width - 16 * dp);
+        c.drawText(t, width / 2 - small.measureText(t) / 2, h - 16 * dp, small);
+    }
+
+    private final Paint dashed = new Paint(Paint.ANTI_ALIAS_FLAG);
+    { dashed.setStyle(Paint.Style.STROKE); dashed.setStrokeWidth(1.5f); dashed.setPathEffect(new android.graphics.DashPathEffect(new float[]{8, 6}, 0)); }
+
+    /** El grupo bajo el dedo (para meter lo que se arrastra), o null. */
+    private Item groupAt(float px, float py, Item except) {
+        for (Item g : items) {
+            if (!Item.GROUP.equals(g.kind) || g == except || !onPage(g)) continue;
+            float[] l = toLocal(g, px, py);
+            if (l[0] >= 0 && l[0] <= l[2] && l[1] >= 0 && l[1] <= l[3]) return g;
+        }
+        return null;
+    }
+
+    private Item hoverGroup;
+
+    /** Un elemento recién agregado va a la celda de la tabla más cercana a donde está. */
+    public void snapNew(Item it) { snapApp(it); invalidate(); }
+
     private float appPx(Item it, int W) { return Math.min(W * 0.46f, (it.sz == 1 ? APP_BIG : APP_STD) * dp); }
 
     private void squareApps(int W) {
         if (W <= 0) return;
-        for (Item it : items) if (Item.APP.equals(it.kind)) it.w = appPx(it, W) / W;
+        for (Item it : items) if (appLike(it)) it.w = appPx(it, W) / W;
     }
 
     private float measure(Item it, float width) {
@@ -1162,8 +1227,8 @@ public class DeskView extends View {
             float inner = width - 16 * dp;
             float ih = b != null ? inner * b.getHeight() / (float) b.getWidth() : inner * 0.7f;
             it.hPx = 8 * dp + ih + 36 * dp;
-        } else if (Item.APP.equals(it.kind)) {
-            it.hPx = width;   // cuadrada
+        } else if (appLike(it)) {
+            it.hPx = width;   // cuadrada (apps y grupos)
         } else if (Item.WIDGET.equals(it.kind)) {
             it.hPx = widgetBar() + (float) (width * it.ar);
         } else if (Item.CLOCK.equals(it.kind)) {
@@ -1233,19 +1298,21 @@ public class DeskView extends View {
         float appTurn = Item.APP.equals(it.kind) ? glyphRot : 0;
         c.rotate(it.rot + wig + appTurn, width / 2, h / 2);
         if (lifted) c.scale(1.03f, 1.03f, width / 2, h / 2);
+        if (it == hoverGroup) c.scale(1.12f, 1.12f, width / 2, h / 2);   // "suelta aquí": el grupo se agranda
         RectF box = new RectF(0, 0, width, h);
 
         boolean isNote = Item.NOTE.equals(it.kind), isImg = Item.IMG.equals(it.kind), isApp = Item.APP.equals(it.kind),
-                isWidget = Item.WIDGET.equals(it.kind), isClock = Item.CLOCK.equals(it.kind), isBatt = Item.BATTERY.equals(it.kind), isRec = Item.RECENTS.equals(it.kind), isCam = Item.CAMERA.equals(it.kind), isTorch = Item.TORCH.equals(it.kind), isBright = Item.BRIGHT.equals(it.kind), isCalls = Item.CALLS.equals(it.kind);
-        boolean glassCard = CardTheme.isGlass() && !isNote && !isImg;
+                isWidget = Item.WIDGET.equals(it.kind), isClock = Item.CLOCK.equals(it.kind), isBatt = Item.BATTERY.equals(it.kind), isRec = Item.RECENTS.equals(it.kind), isCam = Item.CAMERA.equals(it.kind), isTorch = Item.TORCH.equals(it.kind), isBright = Item.BRIGHT.equals(it.kind), isCalls = Item.CALLS.equals(it.kind), isGroup = Item.GROUP.equals(it.kind);
+        // los grupos son siempre de cristal (carpeta cuadrada y transparente), con cualquier tema
+        boolean glassCard = (CardTheme.isGlass() || isGroup) && !isNote && !isImg;
         boolean aeroCard = glassCard && CardTheme.isAero();
         boolean intense = glassCard && CardTheme.isIntense();
         // Aero: texto oscuro con halo blanco (como los títulos de Windows 7)
         for (Paint tp : new Paint[]{small, label, clockPaint}) {
             if (aeroCard) Aero.glowText(tp, dp); else if (intense) Glass.text(tp, dp); else tp.clearShadowLayer();
         }
-        float rr = isApp ? 18 * dp : glassCard ? 14 * dp : r;
-        card.setColor(isNote ? it.color : isImg ? 0xFFFFFFFF : linkBg);
+        float rr = isApp || isGroup ? 18 * dp : glassCard ? 14 * dp : r;
+        card.setColor(isNote ? it.color : isImg ? 0xFFFFFFFF : isGroup && !CardTheme.isGlass() ? 0x38FFFFFF : linkBg);
         if (glassCard) card.clearShadowLayer();   // una sombra se vería como mancha detrás del vidrio
         else card.setShadowLayer((lifted ? 18 : 10) * dp, 0, (lifted ? 10 : 5) * dp, 0x55000000);
         if (intense) {
@@ -1370,6 +1437,8 @@ public class DeskView extends View {
                 String t = it.img.isEmpty() ? "Recibiendo imagen…" : "Cargando…";
                 c.drawText(t, dst.centerX() - small.measureText(t) / 2, dst.centerY(), small);
             }
+        } else if (isGroup) {
+            drawGroup(c, it, width, h);
         } else if (isApp) {
             Bitmap b = bitmapOf(it);
             float is = Math.min(width, h) * 0.46f;
@@ -1749,7 +1818,7 @@ public class DeskView extends View {
         float[] l = toLocal(it, px, py);
         float hr = 24 * dp;
         if (Math.hypot(l[0] - l[2] / 2, l[1] + 30 * dp) < hr) return "rotate";
-        if (!Item.APP.equals(it.kind) && Math.hypot(l[0] - l[2] - 5 * dp, l[1] - l[3] - 5 * dp) < hr) return "resize";
+        if (!appLike(it) && Math.hypot(l[0] - l[2] - 5 * dp, l[1] - l[3] - 5 * dp) < hr) return "resize";
         return null;
     }
 
@@ -1766,6 +1835,14 @@ public class DeskView extends View {
         it.touch();
         invalidate();
         if (host != null) host.onItemChanged(it);
+    }
+
+    private Runnable emptyLong;
+
+    /** x de un punto de la pantalla, en el sistema de la mesa (0..2 de lado a lado de las dos pantallas). */
+    private double xOfPx(float px) {
+        int W = Math.max(1, getWidth());
+        return vertical ? px / W : (side == 1 ? 1 : 0) + px / W;
     }
 
     private void onLongPress() {
@@ -1802,7 +1879,18 @@ public class DeskView extends View {
                 vt.addMovement(e);
                 if (slideAnim != null && slideAnim.isRunning()) slideAnim.cancel();
                 slide = 0;
-                if (pressed == null) { mode = SWIPE; return true; }   // espacio vacío: deslizar cambia de escritorio
+                if (pressed == null) {   // espacio vacío: deslizar cambia de escritorio; mantener = crear grupo o fondo
+                    mode = SWIPE;
+                    final float ex = e.getX(), ey = e.getY();
+                    emptyLong = () -> {
+                        if (moved || mode != SWIPE) return;
+                        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                        mode = NONE;
+                        if (host != null) host.onEmptyLongPress(xOfPx(ex), (vertical ? side : 0) + ey / Math.max(1, getHeight()));
+                    };
+                    postDelayed(emptyLong, 550);
+                    return true;
+                }
                 float[] l = toLocal(pressed, e.getX(), e.getY());
                 downLocal = l;
                 if (Item.RECENTS.equals(pressed.kind) && editing == null && recentsAccess && strip.size() > 1
@@ -1865,7 +1953,8 @@ public class DeskView extends View {
                 if (mode == SWIPE) {
                     if (vt != null) vt.addMovement(e);
                     float sx = e.getX() - downX;
-                    if (!moved && Math.abs(sx) < touchSlop) return true;
+                    if (!moved && Math.abs(sx) < touchSlop && Math.abs(e.getY() - downY) < touchSlop) return true;
+                    if (emptyLong != null) removeCallbacks(emptyLong);
                     moved = true;
                     boolean can = sx < 0 ? page < pages - 1 : page > 0;
                     slide = can ? sx : sx * 0.25f;   // en el último escritorio se resiste
@@ -1876,7 +1965,7 @@ public class DeskView extends View {
                 if (mode == PINCH && e.getPointerCount() >= 2) {
                     double d = Math.hypot(e.getX(0) - e.getX(1), e.getY(0) - e.getY(1));
                     double ang = Math.toDegrees(Math.atan2(e.getY(1) - e.getY(0), e.getX(1) - e.getX(0)));
-                    if (!Item.APP.equals(pressed.kind)) pressed.w = clampW(startW * d / Math.max(1, startDist));   // apps: tamaño desde ⋯
+                    if (!appLike(pressed)) pressed.w = clampW(startW * d / Math.max(1, startDist));   // apps: tamaño desde ⋯
                     pressed.rot = snap((float) (startRot + ang - startAngle));
                     invalidate();
                     return true;
@@ -1922,6 +2011,7 @@ public class DeskView extends View {
                 int ed = ex < edgeW && (vertical || side == 0) ? -1 : ex > W - edgeW && (vertical || side == 1) ? 1 : 0;
                 if (ed != edgeDir) { edgeDir = ed; removeCallbacks(edgeFlip); if (ed != 0) postDelayed(edgeFlip, 650); }
                 if (host != null) host.onDrag(dragging, dragX, dragY);
+                hoverGroup = Item.GROUP.equals(dragging.kind) || Item.WIDGET.equals(dragging.kind) ? null : groupAt(e.getX(), e.getY(), dragging);
                 invalidate();
                 return true;
             }
@@ -1932,6 +2022,7 @@ public class DeskView extends View {
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL: {
                 removeCallbacks(longPress);
+                if (emptyLong != null) removeCallbacks(emptyLong);
                 removeCallbacks(edgeFlip);
                 edgeDir = 0;
                 Item it = pressed; pressed = null;
@@ -1977,6 +2068,18 @@ public class DeskView extends View {
                     return true;
                 }
                 dragging = null;
+                Item into = hoverGroup;
+                hoverGroup = null;
+                if (into != null && e.getActionMasked() == MotionEvent.ACTION_UP) {   // soltado sobre un grupo: adentro
+                    if (it == editing) editing = null;
+                    it.grp = into.id; it.page = -1; it.pin = false;
+                    it.z = System.currentTimeMillis();
+                    commit(it);
+                    performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+                    if (host != null) host.onDragEnd(it);
+                    invalidate();
+                    return true;
+                }
                 double a = vertical ? dragY : dragX, b = vertical ? dragX : dragY, sz = alongSize(it);
                 double szB = vertical ? it.w : it.hPx / H;
                 double over = side == 0 ? (a + sz) - 1 : 1 - a;   // cuánto pasó al otro teléfono
@@ -2022,6 +2125,7 @@ public class DeskView extends View {
         else if (Item.NOTE.equals(it.kind)) { if (host != null) host.onEditNote(it); }
         else if (Item.LINK.equals(it.kind) && "open".equals(pressedBtn)) { if (host != null) host.onOpenLink(it); }
         else if (Item.APP.equals(it.kind)) { if (host != null) host.onOpenApp(it); }
+        else if (Item.GROUP.equals(it.kind)) { if (host != null) host.onOpenGroup(it); }
         else if (Item.WIDGET.equals(it.kind)) {
             if (host == null) return;
             float bar = widgetBar();

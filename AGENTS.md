@@ -103,6 +103,12 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
 - Ajustes → Configuración → **Teclados automáticos** (`kbAutoMenu`, se copian al otro con `prefSet`): `autoKb`
   (cuadro de texto), `autoKbChat` (apps de chat, `openKb`), `autoVideo` 0 control de video / 1 teclado / 2 nada
   (`mActive` en Hub), `autoAsist` (RetroArch), `vertKbAuto`, `kbSpaceFix`.
+- **Grupos (carpetas)** (`Item.GROUP`, título = nombre): mantener presionado un espacio vacío de la mesa
+  (`DeskView.emptyLong` → `Host.onEmptyLongPress`) → Crear grupo / Cambiar fondo de mesa. Se ve como app
+  (`DeskView.appLike`: mismo cuadrado y tabla), siempre de cristal, con hasta 9 miniaturas (`drawGroup`).
+  Arrastrar un elemento sobre un grupo (se agranda al pasar, `hoverGroup`) lo mete: `it.grp = id`, `page = -1`
+  (fuera de la mesa; `Item.fromJson` respeta el -1 si tiene `grp`). Tocar el grupo → `onOpenGroup` (cuadrícula:
+  tocar abre, mantener saca a la mesa; Cambiar nombre, Desarmar). Borrar un grupo devuelve lo de adentro a la mesa.
 - **Botón Inicio** (`MainActivity.onNewIntent` con CATEGORY_HOME): cierra los teclados (`KeyboardActivity.closeAll`,
   cualquier modo) aquí y en el otro (`homeAll`; allá vuelve la mesa si había teclado). Si la mesa ya se veía
   (`stoppedSinceResume` falso), vuelve a la primera mesa.

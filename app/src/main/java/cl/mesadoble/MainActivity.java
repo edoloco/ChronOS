@@ -3901,6 +3901,129 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     @Override public void onOpenApp(Item it) { openOnPrincipal(it.pkg, it.title); }
 
+    // ---------------- grupos (carpetas de la mesa) ----------------
+
+    /** Mantener presionado un espacio vacío: crear un grupo ahí o cambiar el fondo de la mesa. */
+    @Override public void onEmptyLongPress(double x, double y) {
+        new Ui.Sheet(this)
+                .option(Ui.FOLDER, "Crear grupo", "Una carpeta aquí; arrastra elementos de la mesa sobre ella para llenarla", () -> newGroup(x, y))
+                .option(Ui.IMAGE, "Cambiar fondo de mesa", "Imagen o color de fondo", this::wallMenu)
+                .button("Cancelar", false, null).show();
+    }
+
+    private void newGroup(double x, double y) {
+        final EditText name = field("Nombre del grupo");
+        new Ui.Sheet(this).title("Nuevo grupo").view(name)
+                .button("Cancelar", false, null)
+                .button("Crear", true, () -> {
+                    Item g = new Item();
+                    g.kind = Item.GROUP;
+                    String t = name.getText().toString().trim();
+                    g.title = t.isEmpty() ? "Grupo" : t;
+                    double w = Math.min(0.46, 110.0 * getResources().getDisplayMetrics().density / Math.max(1, desk.getWidth()));
+                    g.w = w;
+                    g.x = x - w / 2; g.y = y - w * desk.getWidth() / Math.max(1, desk.getHeight()) / 2;
+                    addItem(g);
+                    desk.snapNew(g);
+                    g.touch();
+                    onItemChanged(g);
+                    Toast.makeText(this, "Mantén presionado un elemento y arrástralo sobre «" + g.title + "»", Toast.LENGTH_LONG).show();
+                }).show();
+        main.postDelayed(() -> { name.requestFocus(); }, 300);
+    }
+
+    /** Tocar un grupo: se abre como una carpeta (íconos en cuadrícula). */
+    @Override public void onOpenGroup(Item g) {
+        java.util.List<Item> m = desk.members(g);
+        Ui.Sheet sh = new Ui.Sheet(this).title(g.title.isEmpty() ? "Grupo" : g.title);
+        final android.app.Dialog[] dlg = new android.app.Dialog[1];
+        if (m.isEmpty()) sh.message("Está vacío: mantén presionado un elemento de la mesa y suéltalo sobre el grupo.");
+        else {
+            android.widget.GridLayout grid = new android.widget.GridLayout(this);
+            grid.setColumnCount(4);
+            int cw = dp(76);
+            for (Item it : m) {
+                LinearLayout cell = new LinearLayout(this);
+                cell.setOrientation(LinearLayout.VERTICAL);
+                cell.setGravity(Gravity.CENTER_HORIZONTAL);
+                cell.setPadding(dp(4), dp(8), dp(4), dp(8));
+                android.widget.ImageView iv = new android.widget.ImageView(this);
+                android.graphics.Bitmap b = it.bitmap();
+                if (b != null) iv.setImageBitmap(b);
+                else {
+                    GradientDrawable gd = new GradientDrawable();
+                    gd.setCornerRadius(dp(14));
+                    gd.setColor(Item.NOTE.equals(it.kind) ? it.color : 0x55FFFFFF);
+                    iv.setBackground(gd);
+                }
+                cell.addView(iv, new LinearLayout.LayoutParams(dp(48), dp(48)));
+                TextView tv = new TextView(this);
+                String t = it.title.isEmpty() ? (it.text.isEmpty() ? it.kind : it.text) : it.title;
+                tv.setText(t);
+                tv.setTextSize(12);
+                tv.setTextColor(night ? 0xFFE6EDF3 : 0xFF1D2733);
+                tv.setMaxLines(1);
+                tv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                tv.setGravity(Gravity.CENTER);
+                cell.addView(tv, new LinearLayout.LayoutParams(-1, -2));
+                cell.setOnClickListener(v -> {
+                    if (dlg[0] != null) dlg[0].dismiss();
+                    if (Item.APP.equals(it.kind)) onOpenApp(it);
+                    else if (Item.LINK.equals(it.kind)) onOpenLink(it);
+                    else if (Item.NOTE.equals(it.kind)) onEditNote(it);
+                    else takeOut(it, g);   // lo demás (widgets, imágenes…) funciona en la mesa
+                });
+                cell.setOnLongClickListener(v -> {   // mantener: sacarlo a la mesa
+                    if (dlg[0] != null) dlg[0].dismiss();
+                    takeOut(it, g);
+                    Toast.makeText(this, "«" + t + "» volvió a la mesa", Toast.LENGTH_SHORT).show();
+                    return true;
+                });
+                grid.addView(cell, new android.widget.GridLayout.LayoutParams(new android.view.ViewGroup.LayoutParams(cw, -2)));
+            }
+            sh.view(grid);
+            sh.message("Toca para abrir · mantén presionado para sacarlo a la mesa");
+        }
+        sh.option(Ui.NOTE, "Cambiar nombre", "", () -> renameGroup(g))
+          .option(Ui.GRID, "Desarmar grupo", "Todo vuelve a la mesa", () -> ungroup(g))
+          .button("Cerrar", false, null);
+        dlg[0] = sh.show();
+    }
+
+    private void renameGroup(Item g) {
+        final EditText name = field("Nombre del grupo");
+        name.setText(g.title);
+        new Ui.Sheet(this).title("Cambiar nombre").view(name)
+                .button("Cancelar", false, null)
+                .button("Listo", true, () -> {
+                    String t = name.getText().toString().trim();
+                    g.title = t.isEmpty() ? "Grupo" : t;
+                    g.touch();
+                    desk.invalidate();
+                    onItemChanged(g);
+                }).show();
+    }
+
+    /** Sacar un elemento del grupo: vuelve a la mesa en una celda libre (o junto al grupo). */
+    private void takeOut(Item it, Item g) {
+        it.grp = "";
+        it.page = g.page >= 0 ? g.page : desk.page();
+        double[] p = desk.freeAppCell(deskSide(), it.page);
+        if (p != null) { it.x = p[0]; it.y = p[1]; } else { it.x = g.x + g.w * 0.3; it.y = g.y + 0.05; }
+        it.z = System.currentTimeMillis();
+        it.touch();
+        desk.invalidate();
+        onItemChanged(it);
+    }
+
+    /** Desarmar: todo afuera y el grupo se quita. */
+    private void ungroup(Item g) {
+        for (Item it : desk.members(g)) takeOut(it, g);
+        desk.items.remove(g);
+        desk.invalidate();
+        onItemDeleted(g);
+    }
+
     @Override protected void onDestroy() {
         widgetLayer.removeAllViews();   // los widgets siguen vivos en WidgetHub
         hub.remove(this);   // la conexión sigue viva para el teclado
@@ -4269,6 +4392,8 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
 
     @Override public void onItemDeleted(Item it) {
         if (Item.WIDGET.equals(it.kind)) releaseWidget(it);
+        // se borró un grupo con cosas adentro: no se pierden, vuelven a la mesa
+        if (Item.GROUP.equals(it.kind)) for (Item m : desk.members(it)) takeOut(m, it);
         if (solo) { scheduleSave(); return; }
         JSONObject m = new JSONObject();
         try { m.put("t", "del"); m.put("id", it.id); } catch (JSONException ignored) { }
