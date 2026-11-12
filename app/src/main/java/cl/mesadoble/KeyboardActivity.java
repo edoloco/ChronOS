@@ -736,6 +736,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
             } catch (Exception ignored) { }
         });
         if ("kbState".equals(t) || "kbAck".equals(t)) updateStatus();
+        if ("kbField".equals(t)) h.post(this::forgetWord);
         // el principal se puso de pie o se acostó: el teclado lo sigue (vertical ↔ normal)
         if ("pPortrait".equals(t)) h.post(() -> {
             boolean up = hub.wantVertKb();
@@ -835,7 +836,15 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         refreshSuggestions();
     }
 
-    @Override public void action(String what) { hub.send("kb", "a", "act", "x", what); word.setLength(0); refreshSuggestions(); }
+    @Override public void action(String what) { hub.send("kb", "a", "act", "x", what); forgetWord(); }
+
+    /** Se mandó el texto o el cuadro cambió: nada de la palabra anterior sigue (si no, se repetía en el siguiente). */
+    private void forgetWord() {
+        word.setLength(0);
+        lastWord = null; lastFixFrom = null; prevDot = null; corrOld = null; justSep = false;
+        fix = null;
+        refreshSuggestions();
+    }
     @Override public void media(String what) { hub.send("media", "k", what); }
 
     // sugerencias del corrector del propio principal (Gboard / Xiaomi) para la palabra que se escribe

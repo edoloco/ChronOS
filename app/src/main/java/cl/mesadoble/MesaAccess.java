@@ -166,9 +166,10 @@ public class MesaAccess extends AccessibilityService {
             String a = m.optString("a");
             if ("text".equals(a)) b.append(m.optString("s"));
             else if ("word".equals(a)) {
-                String old = m.optString("old");
-                if (!old.isEmpty() && b.toString().toLowerCase(java.util.Locale.ROOT).endsWith(old.toLowerCase(java.util.Locale.ROOT))) b.setLength(b.length() - old.length());
-                b.append(m.optString("s"));
+                String old = m.optString("old"), nw = m.optString("s");
+                if (!old.isEmpty() && b.toString().toLowerCase(java.util.Locale.ROOT).endsWith(old.toLowerCase(java.util.Locale.ROOT))) { b.setLength(b.length() - old.length()); b.append(nw); }
+                else if (nw.trim().contains(" ")) { if (nw.endsWith(" ")) b.append(' '); }   // arreglo de espacio sobre texto que ya no está
+                else b.append(nw);
             } else if ("key".equals(a)) {
                 int k = m.optInt("k"), n = Math.max(1, m.optInt("n", 1));
                 if (k == android.view.KeyEvent.KEYCODE_DEL) b.setLength(Math.max(0, b.length() - n));

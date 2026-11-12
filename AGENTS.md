@@ -149,6 +149,10 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   (apagar/reiniciar/bloquear) o Salir de ChronOS; ambos preguntan Los dos / Principal / Extendido (`pickPhones`).
   Salir (`exitHere`, al otro con `exitNow`): teléfono normal + se detiene la conexión; el principal pregunta si apaga
   la zona Wi-Fi.
+- Palabra a medias: si el texto se mandó desde el principal (o la app vació el cuadro), el teclado del extendido
+  aún tenía la última palabra y la juntaba con la siguiente; el arreglo de espacio la repetía. Ahora `RemoteIme`
+  avisa `kbField` en cada cuadro nuevo → `KeyboardActivity.forgetWord` (también al mandar con su botón), y la
+  acción `word` nunca inventa texto que ya no está (si no calza y era un arreglo de espacio, solo va el espacio).
 - Teclado sin cuadro (`RemoteIme`): se busca el cuadro (450/900 ms) y, si la app no abre el teclado (YouTube después
   de mandar un comentario), se escribe directo con accesibilidad (`MesaAccess.typeIntoField`, Enter = ACTION_IME_ENTER).
 - Espacios (`Dict.splitSpace`): solo si la palabra no existe, NO está a una letra de una que existe ("malabra" ≈

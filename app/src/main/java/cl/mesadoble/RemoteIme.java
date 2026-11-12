@@ -281,6 +281,8 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
     @Override public void onStartInput(EditorInfo info, boolean restarting) {
         super.onStartInput(info, restarting);
         if (info != null && info.inputType != android.text.InputType.TYPE_NULL) directAt = 0;   // ya hay teclado de verdad
+        // cuadro nuevo (o el mismo, vaciado al mandar): el teclado del extendido olvida la palabra a medias
+        if (!restarting && hub != null && hub.connected()) hub.send("kbField");
         if (info != null && info.inputType != android.text.InputType.TYPE_NULL && !waiting.isEmpty()) main.postDelayed(this::flushWaiting, 150);
     }
 
@@ -307,7 +309,11 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
                     if (b.endsWith(old)) del = old.length();
                     else if (b.toLowerCase(java.util.Locale.ROOT).endsWith(old.toLowerCase(java.util.Locale.ROOT))) del = old.length();
                     else if (b.endsWith(old + " ")) del = old.length() + 1;
-                    else {   // no calza (la app cambió el texto): se borra solo la palabra que hay antes del cursor
+                    else if (nw.trim().contains(" ")) {
+                        // un arreglo de espacio ("tengonsueño" → "tengo sueño") sobre texto que ya no está (se mandó o
+                        // se borró en el principal): no se inventa nada, solo va el espacio (antes repetía la palabra)
+                        nw = nw.endsWith(" ") ? " " : "";
+                    } else {   // no calza (la app cambió el texto): se borra solo la palabra que hay antes del cursor
                         int i = b.length();
                         while (i > 0 && Character.isLetterOrDigit(b.charAt(i - 1))) i--;
                         del = b.length() - i;
