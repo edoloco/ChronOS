@@ -311,7 +311,8 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
                 ic.beginBatchEdit();
                 ic.finishComposingText();
                 CharSequence before = ic.getTextBeforeCursor(Math.max(1, old.length() + 2), 0);
-                if (before == null) {   // terminal: no deja leer el texto; se borra la palabra con teclas y va la nueva
+                EditorInfo wei = getCurrentInputEditorInfo();
+                if (before == null || (wei != null && wei.inputType == android.text.InputType.TYPE_NULL)) {   // terminal: no deja leer el texto; se borra la palabra con teclas y va la nueva
                     ic.endBatchEdit();
                     for (int i = 0; i < old.codePointCount(0, old.length()); i++) sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL);
                     ic.commitText(nw, 1);
@@ -345,8 +346,11 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
                     if (sel != null && sel.length() > 0) { ic.commitText("", 1); n--; }
                     if (n > 0) {
                         CharSequence bf = ic.getTextBeforeCursor(1, 0);
-                        if (bf == null) { ic.beginBatchEdit(); for (int i = 0; i < n; i++) sendDownUpKeyEvents(code); ic.endBatchEdit(); }
-                        else if (bf.length() > 0) ic.deleteSurroundingTextInCodePoints(n, 0);
+                        EditorInfo ei = getCurrentInputEditorInfo();
+                        boolean terminal = ei != null && ei.inputType == android.text.InputType.TYPE_NULL;
+                        // terminal (Termux) o cuadro que no deja leer su texto: tecla Borrar de verdad (antes no borraba)
+                        if (terminal || bf == null || bf.length() == 0) { for (int i = 0; i < n; i++) sendDownUpKeyEvents(code); }
+                        else ic.deleteSurroundingTextInCodePoints(n, 0);
                     }
                     break;
                 }
