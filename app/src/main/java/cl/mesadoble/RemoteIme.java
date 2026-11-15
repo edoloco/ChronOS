@@ -93,6 +93,7 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
 
     @Override public void onStartInputView(EditorInfo info, boolean restarting) {
         super.onStartInputView(info, restarting);
+        viewOn = true;
         hub.setImeReady(true);
         updateLabel();
         hideFix();
@@ -172,6 +173,7 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
     }
 
     @Override public void onFinishInputView(boolean finishing) {
+        viewOn = false;
         hub.setImeReady(false);
         super.onFinishInputView(finishing);
     }
@@ -266,8 +268,14 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
     /** ¿No hay un cuadro de texto de verdad? (Android entrega una conexión "falsa" que convierte las letras en teclas). */
     private boolean noField() {
         EditorInfo ei = getCurrentInputEditorInfo();
-        return ei == null || ei.inputType == android.text.InputType.TYPE_NULL || getCurrentInputConnection() == null;
+        if (ei == null || getCurrentInputConnection() == null) return true;
+        // TYPE_NULL con el teclado a la vista = una terminal (Termux) o un juego que recibe teclas: SÍ hay dónde
+        // escribir (antes se tomaba como "sin cuadro" y lo escrito quedaba esperando)
+        if (ei.inputType == android.text.InputType.TYPE_NULL) return !viewOn;
+        return false;
     }
+
+    private boolean viewOn;
 
     /** Ya hay cuadro de texto: se escribe lo que quedó esperando (si no pasó mucho rato). */
     private void flushWaiting() {
@@ -303,7 +311,13 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
                 ic.beginBatchEdit();
                 ic.finishComposingText();
                 CharSequence before = ic.getTextBeforeCursor(Math.max(1, old.length() + 2), 0);
-                String b = before == null ? "" : before.toString();
+                if (before == null) {   // terminal: no deja leer el texto; se borra la palabra con teclas y va la nueva
+                    ic.endBatchEdit();
+                    for (int i = 0; i < old.codePointCount(0, old.length()); i++) sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL);
+                    ic.commitText(nw, 1);
+                    break;
+                }
+                String b = before.toString();
                 int del = 0;
                 if (!old.isEmpty()) {
                     if (b.endsWith(old)) del = old.length();

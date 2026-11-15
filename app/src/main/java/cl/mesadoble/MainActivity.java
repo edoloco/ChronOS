@@ -2197,9 +2197,6 @@ public class MainActivity extends Activity implements DeskView.Host, Link.Listen
                 "Partidas guardadas, rebobinar y la segunda pantalla del DS", asist, () -> { setShared("autoAsist", !asist); kbAutoMenu(); });
         sh.option(Ui.KB_TOUCHPAD, -1, "Teclado vertical con el principal de pie: " + (vert ? "sí" : "no"),
                 "Arriba deslizas, abajo escribes", vert, () -> { setShared("vertKbAuto", !vert); hub.send("vertKbPref", "on", !vert); kbAutoMenu(); });
-        sh.option(Ui.CHECK, -1, "Arreglar espacios mal apretados: " + (fixSp ? "sí" : "no"),
-                "«tengonsueño» → «tengo sueño», «hola.como» → «hola como» (borrando el espacio se puede deshacer)", fixSp,
-                () -> { setShared("kbSpaceFix", !fixSp); kbAutoMenu(); });
         sh.button("Volver", false, this::configMenu).show();
     }
 

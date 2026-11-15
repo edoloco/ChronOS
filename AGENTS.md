@@ -155,9 +155,11 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   acción `word` nunca inventa texto que ya no está (si no calza y era un arreglo de espacio, solo va el espacio).
 - Teclado sin cuadro (`RemoteIme`): se busca el cuadro (450/900 ms) y, si la app no abre el teclado (YouTube después
   de mandar un comentario), se escribe directo con accesibilidad (`MesaAccess.typeIntoField`, Enter = ACTION_IME_ENTER).
-- Espacios (`Dict.splitSpace`): solo si la palabra no existe, NO está a una letra de una que existe ("malabra" ≈
-  "palabra": no se toca) y todas las partes son conocidas (2 letras: top 300; 3 letras: top 3000); hasta 4 partes
-  ("tenamonmarcela" → "te amo marcela" si "marcela" ya se escribió varias veces).
+- Espacios: el arreglo AUTOMÁTICO se quitó (nov. 2026; `KeyboardActivity.spaceFix()` = false, sin opción en el
+  menú): el diseño del teclado (franja sobre el espacio, coma/punto angostos) ya lo resolvió y cambiar palabras solas
+  molestaba ("tecleo" → "te leo"). `Dict.splitSpace` queda solo como una de las correcciones al borrar el espacio.
+- Terminales (Termux): su cuadro es TYPE_NULL pero con el teclado a la vista (`RemoteIme.viewOn`) → sí es cuadro;
+  se escribe con commitText y, como no deja leer el texto, `word` borra con teclas DEL.
 - **Baterías de accesorios** (`Peri`): cada teléfono mira sus accesorios (Bluetooth `getBatteryLevel` por reflexión;
   gamepads/teclados/mouse con `InputDevice.getBatteryState`, Android 12+), se los pasa al otro (`peri {l:[{n,k,p}]}`)
   y `ChronoBar.drawBatteries` los dibuja junto a P y E con un iconito (`periIcon`: h audífonos, g gamepad, k teclado,

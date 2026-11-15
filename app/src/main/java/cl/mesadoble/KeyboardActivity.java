@@ -777,7 +777,9 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
     private int suggestFg = 0xFFFFFFFF;
     private List<String> corrOpts = new java.util.ArrayList<>();
 
-    private boolean spaceFix() { return getSharedPreferences("mesa", MODE_PRIVATE).getBoolean("kbSpaceFix", true); }
+    /** Arreglo automático de espacios: quitado (el diseño nuevo del teclado ya evita apretar la n o el punto por el
+     *  espacio, y cambiar palabras solas molestaba: "tecleo" → "te leo"). Las correcciones al borrar el espacio siguen. */
+    private boolean spaceFix() { return false; }
 
     private static final java.util.Set<String> DOMAINS = new java.util.HashSet<>(java.util.Arrays.asList(
             "com", "cl", "net", "org", "es", "ar", "mx", "io", "app", "gob", "edu", "co", "pe", "uy", "html", "php", "jpg", "png", "pdf"));
