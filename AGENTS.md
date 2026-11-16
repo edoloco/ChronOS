@@ -158,7 +158,9 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
 - Espacios: el arreglo AUTOMÁTICO se quitó (nov. 2026; `KeyboardActivity.spaceFix()` = false, sin opción en el
   menú): el diseño del teclado (franja sobre el espacio, coma/punto angostos) ya lo resolvió y cambiar palabras solas
   molestaba ("tecleo" → "te leo"). `Dict.splitSpace` queda solo como una de las correcciones al borrar el espacio.
-- Terminales (Termux): su cuadro es TYPE_NULL pero con el teclado a la vista (`RemoteIme.viewOn`) → sí es cuadro;
+- Terminales (Termux): su cuadro es TYPE_NULL con el teclado a la vista (`RemoteIme.viewOn`) → es cuadro SOLO si es
+  una terminal conocida (`TERMINALS`) o si en pantalla no hay cuadro de texto ni "Agrega un comentario…"
+  (`MesaAccess.hasTextField`); si lo hay (YouTube tras comentar), se va a ese cuadro como antes;
   se escribe con commitText y, como no deja leer el texto, Borrar y `word` mandan teclas DEL de verdad.
 - **Baterías de accesorios** (`Peri`): cada teléfono mira sus accesorios (Bluetooth `getBatteryLevel` por reflexión;
   gamepads/teclados/mouse con `InputDevice.getBatteryState`, Android 12+), se los pasa al otro (`peri {l:[{n,k,p}]}`)

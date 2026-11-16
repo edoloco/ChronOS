@@ -271,8 +271,27 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
         if (ei == null || getCurrentInputConnection() == null) return true;
         // TYPE_NULL con el teclado a la vista = una terminal (Termux) o un juego que recibe teclas: SÍ hay dónde
         // escribir (antes se tomaba como "sin cuadro" y lo escrito quedaba esperando)
-        if (ei.inputType == android.text.InputType.TYPE_NULL) return !viewOn;
+        if (ei.inputType == android.text.InputType.TYPE_NULL) return !viewOn || !terminal(ei);
         return false;
+    }
+
+    private static final java.util.Set<String> TERMINALS = new java.util.HashSet<>(java.util.Arrays.asList(
+            "com.termux", "jackpal.androidterm", "yarolegovich.androidterm", "com.offsec.nhterm", "org.connectbot", "com.sonelli.juicessh"));
+    private String termPkg;
+    private boolean termIs;
+    private long termAt;
+
+    /**
+     * ¿Este cuadro "sin tipo" es una terminal que recibe teclas (Termux)? Sí si es una terminal conocida, o si en la
+     * pantalla no hay ningún cuadro de texto de verdad. Si lo hay (YouTube después de mandar un comentario), no: hay
+     * que ir a ese cuadro (antes, con el arreglo de Termux, lo escrito se perdía en YouTube).
+     */
+    private boolean terminal(EditorInfo ei) {
+        String pkg = ei.packageName == null ? "" : ei.packageName;
+        if (TERMINALS.contains(pkg)) return true;
+        long now = SystemClock.uptimeMillis();
+        if (!pkg.equals(termPkg) || now - termAt > 1500) { termPkg = pkg; termAt = now; termIs = !MesaAccess.hasTextField(); }
+        return termIs;
     }
 
     private boolean viewOn;

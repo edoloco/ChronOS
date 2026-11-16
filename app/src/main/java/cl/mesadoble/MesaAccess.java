@@ -184,6 +184,28 @@ public class MesaAccess extends AccessibilityService {
         return ok;
     }
 
+    /** ¿Hay un cuadro de texto (o el "Agrega un comentario…" que lo abre) en la pantalla del frente? */
+    static boolean hasTextField() {
+        MesaAccess s = instance;
+        if (s == null) return false;
+        try {
+            android.view.accessibility.AccessibilityNodeInfo root = s.getRootInActiveWindow();
+            if (firstEditable(root) != null) return true;
+            // "Di algo…", "Agrega un comentario…": el cuadro aparece al tocarlo
+            java.util.ArrayDeque<android.view.accessibility.AccessibilityNodeInfo> q = new java.util.ArrayDeque<>();
+            if (root != null) q.add(root);
+            int seen = 0;
+            while (!q.isEmpty() && seen++ < 600) {
+                android.view.accessibility.AccessibilityNodeInfo n = q.poll();
+                if (n == null) continue;
+                CharSequence t = n.getText();
+                if (n.isVisibleToUser() && t != null && t.length() < 40 && CHAT_HINT.matcher(t).find()) return true;
+                for (int i = 0; i < n.getChildCount(); i++) q.add(n.getChild(i));
+            }
+            return false;
+        } catch (Exception e) { return false; }
+    }
+
     private static android.view.accessibility.AccessibilityNodeInfo firstEditable(android.view.accessibility.AccessibilityNodeInfo root) {
         if (root == null) return null;
         java.util.ArrayDeque<android.view.accessibility.AccessibilityNodeInfo> q = new java.util.ArrayDeque<>();
