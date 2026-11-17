@@ -246,11 +246,17 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
             }
             return;
         }
+        // el cuadro sigue conectado pero la app lo cerró/escondió (YouTube después de mandar un comentario): lo
+        // escrito llegaba al cuadro escondido y solo se veía al tocarlo. Se "toca" el cuadro por ti para que se abra.
+        if (typing && !viewOn && now0 - pokeAt > 2500) {
+            pokeAt = now0;
+            MesaAccess.focusTextField();
+        }
         process(m);
     }
 
     private final java.util.ArrayList<JSONObject> waiting = new java.util.ArrayList<>();
-    private long waitingAt, directAt;
+    private long waitingAt, directAt, pokeAt;
 
     /** Pasó un rato y la app no abrió el teclado: lo que espera se escribe directo en el cuadro (accesibilidad). */
     private void forceWaiting() {
