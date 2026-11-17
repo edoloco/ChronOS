@@ -153,13 +153,12 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   aún tenía la última palabra y la juntaba con la siguiente; el arreglo de espacio la repetía. Ahora `RemoteIme`
   avisa `kbField` en cada cuadro nuevo → `KeyboardActivity.forgetWord` (también al mandar con su botón), y la
   acción `word` nunca inventa texto que ya no está (si no calza y era un arreglo de espacio, solo va el espacio).
-- Cuadro conectado pero escondido (YouTube tras mandar: el teclado se cerró, `viewOn` falso, pero la conexión
-  sigue): lo escrito llegaba al cuadro escondido y solo se veía al tocarlo. Ahora, al escribir con el teclado
-  cerrado, `RemoteIme` toca el cuadro por ti (`MesaAccess.focusTextField`, máx. cada 2,5 s): además del clic de
-  accesibilidad (que en YouTube no abre el teclado) hace un toque real con gesto (`tapNode`) al final del cuadro
-  o sobre "Di algo…".
-- Teclado sin cuadro (`RemoteIme`): se busca el cuadro (450/900 ms) y, si la app no abre el teclado (YouTube después
-  de mandar un comentario), se escribe directo con accesibilidad (`MesaAccess.typeIntoField`, Enter = ACTION_IME_ENTER).
+- Teclado sin cuadro (`RemoteIme.onMessage`), VUELTO a la versión que funcionaba en YouTube (fb3d415): sin cuadro
+  (TYPE_NULL), las letras se guardan (`waiting`, 20 s, se renueva con cada letra), `focusTextField` hace clic en el
+  cuadro o en "Di algo…" y se escriben al aparecer (`onStartInput` / 450 ms). Único agregado: si hay cuadro y
+  quedaron letras esperando, primero esas ("asludos"). Se probaron y se quitaron: escribir por accesibilidad
+  (`typeIntoField`), toques con gesto y vencer la espera a los 8 s — empeoraban YouTube. Terminales: solo las de
+  la lista `TERMINALS` (Termux…).
 - Espacios: el arreglo AUTOMÁTICO se quitó (nov. 2026; `KeyboardActivity.spaceFix()` = false, sin opción en el
   menú): el diseño del teclado (franja sobre el espacio, coma/punto angostos) ya lo resolvió y cambiar palabras solas
   molestaba ("tecleo" → "te leo"). `Dict.splitSpace` queda solo como una de las correcciones al borrar el espacio.

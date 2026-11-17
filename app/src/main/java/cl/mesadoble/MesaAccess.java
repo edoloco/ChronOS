@@ -128,9 +128,6 @@ public class MesaAccess extends AccessibilityService {
                 if (n.isEditable()) {
                     n.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_FOCUS);
                     n.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK);
-                    // "clic" de accesibilidad no abre el teclado en YouTube: un toque de verdad (como el dedo), al final
-                    // del cuadro para que el cursor quede después de lo escrito
-                    tapNode(s, n, true);
                     return true;
                 }
                 if (hint == null) {
@@ -142,7 +139,8 @@ public class MesaAccess extends AccessibilityService {
             for (int i = 0; i < n.getChildCount(); i++) q.add(n.getChild(i));
         }
         // no hay cuadro a la vista: el botón que lo abre (o su contenedor que se puede tocar)
-        if (hint != null) { tapNode(s, hint, false); return true; }   // toque de verdad sobre "Di algo…"
+        for (android.view.accessibility.AccessibilityNodeInfo n = hint; n != null; n = n.getParent())
+            if (n.isClickable()) { n.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK); return true; }
         return false;
     }
 
