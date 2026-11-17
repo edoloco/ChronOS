@@ -155,7 +155,9 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   acción `word` nunca inventa texto que ya no está (si no calza y era un arreglo de espacio, solo va el espacio).
 - Cuadro conectado pero escondido (YouTube tras mandar: el teclado se cerró, `viewOn` falso, pero la conexión
   sigue): lo escrito llegaba al cuadro escondido y solo se veía al tocarlo. Ahora, al escribir con el teclado
-  cerrado, `RemoteIme` toca el cuadro por ti (`MesaAccess.focusTextField`, máx. cada 2,5 s) y se abre.
+  cerrado, `RemoteIme` toca el cuadro por ti (`MesaAccess.focusTextField`, máx. cada 2,5 s): además del clic de
+  accesibilidad (que en YouTube no abre el teclado) hace un toque real con gesto (`tapNode`) al final del cuadro
+  o sobre "Di algo…".
 - Teclado sin cuadro (`RemoteIme`): se busca el cuadro (450/900 ms) y, si la app no abre el teclado (YouTube después
   de mandar un comentario), se escribe directo con accesibilidad (`MesaAccess.typeIntoField`, Enter = ACTION_IME_ENTER).
 - Espacios: el arreglo AUTOMÁTICO se quitó (nov. 2026; `KeyboardActivity.spaceFix()` = false, sin opción en el

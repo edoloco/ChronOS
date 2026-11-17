@@ -128,6 +128,9 @@ public class MesaAccess extends AccessibilityService {
                 if (n.isEditable()) {
                     n.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_FOCUS);
                     n.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK);
+                    // "clic" de accesibilidad no abre el teclado en YouTube: un toque de verdad (como el dedo), al final
+                    // del cuadro para que el cursor quede después de lo escrito
+                    tapNode(s, n, true);
                     return true;
                 }
                 if (hint == null) {
@@ -139,9 +142,22 @@ public class MesaAccess extends AccessibilityService {
             for (int i = 0; i < n.getChildCount(); i++) q.add(n.getChild(i));
         }
         // no hay cuadro a la vista: el botón que lo abre (o su contenedor que se puede tocar)
-        for (android.view.accessibility.AccessibilityNodeInfo n = hint; n != null; n = n.getParent())
-            if (n.isClickable()) { n.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK); return true; }
+        if (hint != null) { tapNode(s, hint, false); return true; }   // toque de verdad sobre "Di algo…"
         return false;
+    }
+
+    /** Toque real (gesto) sobre un elemento: al final (end) o al centro. */
+    private static void tapNode(MesaAccess s, android.view.accessibility.AccessibilityNodeInfo n, boolean end) {
+        try {
+            android.graphics.Rect b = new android.graphics.Rect();
+            n.getBoundsInScreen(b);
+            if (b.isEmpty()) return;
+            float x = end ? Math.max(b.left + 4, b.right - Math.min(24, b.width() / 6f)) : b.exactCenterX(), y = b.exactCenterY();
+            android.graphics.Path p = new android.graphics.Path();
+            p.moveTo(x, y);
+            s.dispatchGesture(new android.accessibilityservice.GestureDescription.Builder()
+                    .addStroke(new android.accessibilityservice.GestureDescription.StrokeDescription(p, 0, 50)).build(), null, null);
+        } catch (Exception ignored) { }
     }
 
     /**
