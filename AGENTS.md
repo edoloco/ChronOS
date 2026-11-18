@@ -169,6 +169,9 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   (el título "Chat en vivo" arriba también dice chat). Clic y, si no, toque real (`tapTextField`). Si aun así no
   se abre: `kbDump` (máx. 1 por minuto) muestra en el extendido `MesaAccess.dump()` (ventanas y elementos de la
   mitad de abajo) con botón Copiar, para pegarlo en el chat con Claude.
+  CAUSA REAL (nov. 17): el dump dijo "sin accesibilidad" — `MesaAccess` estaba APAGADA en el principal (Xiaomi la
+  apaga a veces tras actualizar). Sin ella no se encuentra ni abre ningún cuadro. Ahora `RemoteIme` avisa en el
+  extendido y pone en el principal un aviso que abre Ajustes › Accesibilidad (máx. cada 2 min).
   El cuadro se busca en la ventana de la APP DEL FRENTE (`MesaAccess.appRoot`, entre todas las ventanas), no en la
   "ventana activa" (podía ser una burbuja o el chat flotante y no encontraba nada). La accesibilidad recibe además
   clics (typeViewClicked/LongClicked) para que Bat Op cuente el uso en otras apps.

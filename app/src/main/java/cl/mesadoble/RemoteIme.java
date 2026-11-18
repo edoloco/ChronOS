@@ -241,6 +241,18 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
             waiting.add(m);
             waitingAt = now;
             waitingPkg = fp;
+            if (first && MesaAccess.instance == null) {
+                // sin la accesibilidad de ChronOS no se puede buscar ni abrir el cuadro (Xiaomi a veces la apaga sola)
+                long t = SystemClock.uptimeMillis();
+                if (t - accWarnAt > 120000) {
+                    accWarnAt = t;
+                    if (hub.connected()) hub.send("kbNoField", "found", false, "diag",
+                            "La accesibilidad de ChronOS está APAGADA en el principal. Actívala: Ajustes › Accesibilidad › ChronOS (en el principal sale un aviso para ir directo).");
+                    hub.startOrNotify(new android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK), 66,
+                            "Activa la accesibilidad de ChronOS", "Sin ella el teclado del extendido no puede abrir los cuadros de texto");
+                }
+            }
             if (first) {
                 boolean found = MesaAccess.focusTextField();
                 if (hub.connected()) hub.send("kbNoField", "found", found);
@@ -323,7 +335,7 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
 
     private boolean viewOn;
     private String waitingPkg = "";
-    private long diagAt, dumpAt;
+    private long diagAt, dumpAt, accWarnAt;
 
     /** Escribir con teclas de verdad (al cuadro que tiene el foco aunque el teclado esté cerrado). */
     private void asKeys(JSONObject m) {
