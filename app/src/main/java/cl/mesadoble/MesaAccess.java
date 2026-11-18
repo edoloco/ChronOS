@@ -105,12 +105,31 @@ public class MesaAccess extends AccessibilityService {
     @Override public void onInterrupt() { }
 
     private static final java.util.regex.Pattern CHAT_HINT = java.util.regex.Pattern.compile(
-            "(?i)(di algo|chatea|chat|say something|escribe|comenta|comentario|add a comment|mensaje|message|reply|responder)");
+            "(?i)(di algo|chatea|chat|say something|escribe|comenta|comentario|add a comment|añade|agrega|mensaje|message|reply|responder|publica|envía)");
 
     /**
      * Teclado: se escribió sin un cuadro de texto elegido. Busca en la pantalla del principal el cuadro de texto (o el
      * botón "Di algo…/Chatea…" que lo abre) y lo toca. Solo mira la ventana activa, y solo en ese momento.
      */
+    /**
+     * La ventana de la app del frente. La "ventana activa" a veces es otra (una burbuja o un aviso encima, el chat
+     * flotante…) y ahí no está el cuadro de YouTube: se busca entre todas la que es de la app del frente.
+     */
+    static android.view.accessibility.AccessibilityNodeInfo appRoot(MesaAccess s) {
+        android.view.accessibility.AccessibilityNodeInfo act = null;
+        try { act = s.getRootInActiveWindow(); } catch (Exception ignored) { }
+        String f = front;
+        if (f == null || (act != null && act.getPackageName() != null && f.contentEquals(act.getPackageName()))) return act;
+        try {
+            for (android.view.accessibility.AccessibilityWindowInfo w : s.getWindows()) {
+                if (w.getType() != android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+                android.view.accessibility.AccessibilityNodeInfo r = w.getRoot();
+                if (r != null && r.getPackageName() != null && f.contentEquals(r.getPackageName())) return r;
+            }
+        } catch (Exception ignored) { }
+        return act;
+    }
+
     /** Qué encontró la última búsqueda del cuadro (para el aviso de diagnóstico en el extendido). */
     static volatile String lastField = "";
 
@@ -119,7 +138,7 @@ public class MesaAccess extends AccessibilityService {
         MesaAccess s = instance;
         if (s == null) return false;
         try {
-            android.view.accessibility.AccessibilityNodeInfo root = s.getRootInActiveWindow();
+            android.view.accessibility.AccessibilityNodeInfo root = appRoot(s);
             android.view.accessibility.AccessibilityNodeInfo n = firstEditable(root);
             if (n == null && root != null) {
                 java.util.ArrayDeque<android.view.accessibility.AccessibilityNodeInfo> q = new java.util.ArrayDeque<>();
@@ -148,7 +167,7 @@ public class MesaAccess extends AccessibilityService {
         MesaAccess s = instance;
         if (s == null) return false;
         android.view.accessibility.AccessibilityNodeInfo root;
-        try { root = s.getRootInActiveWindow(); } catch (Exception e) { return false; }
+        try { root = appRoot(s); } catch (Exception e) { return false; }
         if (root == null) return false;
         java.util.ArrayDeque<android.view.accessibility.AccessibilityNodeInfo> q = new java.util.ArrayDeque<>();
         q.add(root);
@@ -208,7 +227,7 @@ public class MesaAccess extends AccessibilityService {
         if (s == null || ops.isEmpty()) return false;
         android.view.accessibility.AccessibilityNodeInfo f = null;
         try {
-            android.view.accessibility.AccessibilityNodeInfo root = s.getRootInActiveWindow();
+            android.view.accessibility.AccessibilityNodeInfo root = appRoot(s);
             if (root != null) f = root.findFocus(android.view.accessibility.AccessibilityNodeInfo.FOCUS_INPUT);
             if (f == null || !f.isEditable()) f = firstEditable(root);
         } catch (Exception e) { return false; }
@@ -244,7 +263,7 @@ public class MesaAccess extends AccessibilityService {
         MesaAccess s = instance;
         if (s == null) return false;
         try {
-            android.view.accessibility.AccessibilityNodeInfo root = s.getRootInActiveWindow();
+            android.view.accessibility.AccessibilityNodeInfo root = appRoot(s);
             if (firstEditable(root) != null) return true;
             // "Di algo…", "Agrega un comentario…": el cuadro aparece al tocarlo
             java.util.ArrayDeque<android.view.accessibility.AccessibilityNodeInfo> q = new java.util.ArrayDeque<>();

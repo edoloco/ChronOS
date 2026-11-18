@@ -164,6 +164,9 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   (`focusTextField`), luego toques reales (`MesaAccess.tapTextField`, 550 ms y +700 ms) y se escribe al abrirse el
   teclado (`onStartInputView` → `flush`). Si a los ~2 s hay cuadro pero el teclado nunca se muestra, se escribe
   igual y esa app queda exenta 2 min (`noViewPkg`). Si no hay cuadro: aviso con diagnóstico (`diag`) en el extendido.
+  El cuadro se busca en la ventana de la APP DEL FRENTE (`MesaAccess.appRoot`, entre todas las ventanas), no en la
+  "ventana activa" (podía ser una burbuja o el chat flotante y no encontraba nada). La accesibilidad recibe además
+  clics (typeViewClicked/LongClicked) para que Bat Op cuente el uso en otras apps.
 - Espacios: el arreglo AUTOMÁTICO se quitó (nov. 2026; `KeyboardActivity.spaceFix()` = false, sin opción en el
   menú): el diseño del teclado (franja sobre el espacio, coma/punto angostos) ya lo resolvió y cambiar palabras solas
   molestaba ("tecleo" → "te leo"). `Dict.splitSpace` queda solo como una de las correcciones al borrar el espacio.
