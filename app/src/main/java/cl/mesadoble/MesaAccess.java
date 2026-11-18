@@ -151,18 +151,7 @@ public class MesaAccess extends AccessibilityService {
         try {
             android.view.accessibility.AccessibilityNodeInfo root = appRoot(s);
             android.view.accessibility.AccessibilityNodeInfo n = firstEditable(root);
-            if (n == null && root != null) {
-                java.util.ArrayDeque<android.view.accessibility.AccessibilityNodeInfo> q = new java.util.ArrayDeque<>();
-                q.add(root);
-                int seen = 0;
-                while (!q.isEmpty() && seen++ < 600 && n == null) {
-                    android.view.accessibility.AccessibilityNodeInfo x = q.poll();
-                    if (x == null) continue;
-                    CharSequence t = x.getText() != null ? x.getText() : x.getContentDescription();
-                    if (x.isVisibleToUser() && t != null && t.length() < 40 && CHAT_HINT.matcher(t).find()) n = x;
-                    for (int i = 0; i < x.getChildCount(); i++) q.add(x.getChild(i));
-                }
-            }
+            if (n == null) n = findChatBox(root);
             if (n == null) return false;
             android.graphics.Rect b = new android.graphics.Rect();
             n.getBoundsInScreen(b);
@@ -194,18 +183,52 @@ public class MesaAccess extends AccessibilityService {
                     n.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK);
                     return true;
                 }
-                if (hint == null) {
-                    CharSequence t = n.getText() != null ? n.getText() : n.getContentDescription();
-                    if (t == null && android.os.Build.VERSION.SDK_INT >= 26) t = n.getHintText();
-                    if (t != null && t.length() < 40 && CHAT_HINT.matcher(t).find()) hint = n;
-                }
+
             }
             for (int i = 0; i < n.getChildCount(); i++) q.add(n.getChild(i));
         }
         // no hay cuadro a la vista: el botón que lo abre (o su contenedor que se puede tocar)
+        hint = findChatBox(root);
         lastField = hint != null ? "«" + (hint.getText() != null ? hint.getText() : hint.getContentDescription()) + "»" : "nada";
         for (android.view.accessibility.AccessibilityNodeInfo n = hint; n != null; n = n.getParent())
             if (n.isClickable()) { n.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK); return true; }
+        return hint != null;   // sin nada que se pueda "clic": el toque de verdad viene después (RemoteIme)
+    }
+
+    /**
+     * ¿Es el cuadro de chat cerrado? ("Chat…" de YouTube en vivo, "Agrega un comentario…"). Se mira el texto, la
+     * descripción Y la pista (antes solo la pista si el texto era null; el de YouTube tiene texto vacío y pista "Chat…",
+     * así que no se encontraba), y cualquier EditText aunque no se pueda editar todavía.
+     */
+    /** El cuadro de chat cerrado más abajo en la pantalla (el título "Chat en vivo" también dice "chat", arriba). */
+    static android.view.accessibility.AccessibilityNodeInfo findChatBox(android.view.accessibility.AccessibilityNodeInfo root) {
+        if (root == null) return null;
+        java.util.ArrayDeque<android.view.accessibility.AccessibilityNodeInfo> q = new java.util.ArrayDeque<>();
+        q.add(root);
+        android.view.accessibility.AccessibilityNodeInfo best = null;
+        int bestScore = Integer.MIN_VALUE, seen = 0;
+        android.graphics.Rect b = new android.graphics.Rect();
+        while (!q.isEmpty() && seen++ < 900) {
+            android.view.accessibility.AccessibilityNodeInfo n = q.poll();
+            if (n == null) continue;
+            if (isChatBox(n)) {
+                n.getBoundsInScreen(b);
+                CharSequence cls = n.getClassName();
+                int sc = b.top + (cls != null && cls.toString().endsWith("EditText") ? 100000 : 0);   // los EditText primero
+                if (sc > bestScore) { bestScore = sc; best = n; }
+            }
+            for (int i = 0; i < n.getChildCount(); i++) q.add(n.getChild(i));
+        }
+        return best;
+    }
+
+    static boolean isChatBox(android.view.accessibility.AccessibilityNodeInfo n) {
+        if (n == null || !n.isVisibleToUser()) return false;
+        CharSequence cls = n.getClassName();
+        if (cls != null && cls.toString().endsWith("EditText")) return true;
+        CharSequence[] ts = {n.getText(), n.getContentDescription(), android.os.Build.VERSION.SDK_INT >= 26 ? n.getHintText() : null,
+                android.os.Build.VERSION.SDK_INT >= 30 ? n.getStateDescription() : null};
+        for (CharSequence t : ts) if (t != null && t.length() > 0 && t.length() < 40 && CHAT_HINT.matcher(t).find()) return true;
         return false;
     }
 
@@ -283,8 +306,7 @@ public class MesaAccess extends AccessibilityService {
             while (!q.isEmpty() && seen++ < 600) {
                 android.view.accessibility.AccessibilityNodeInfo n = q.poll();
                 if (n == null) continue;
-                CharSequence t = n.getText();
-                if (n.isVisibleToUser() && t != null && t.length() < 40 && CHAT_HINT.matcher(t).find()) return true;
+                if (isChatBox(n)) return true;
                 for (int i = 0; i < n.getChildCount(); i++) q.add(n.getChild(i));
             }
             return false;

@@ -163,6 +163,10 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   YouTube tras mandar) → las letras van como teclas de verdad (`RemoteIme.asKeys`), como al principio. Lo que espera
   se guarda solo para la misma app (`waitingPkg`, 15 s): ya no se pega en otra app al volver. Diagnóstico temporal
   `kbDiag` (cada 8 s, toast en el extendido) con el estado del cuadro cuando no está listo.
+  Video del usuario (nov. 17): tras mandar en el chat en vivo, YouTube queda "sin tipo", con conexión, teclado
+  cerrado y sin foco; el cuadro se ve como la píldora "Chat…" (texto vacío + pista "Chat…"), que no se reconocía.
+  `MesaAccess.isChatBox` mira texto, descripción, pista y estado, y todo EditText; `findChatBox` elige el más abajo
+  (el título "Chat en vivo" arriba también dice chat). Clic y, si no, toque real (`tapTextField`).
   El cuadro se busca en la ventana de la APP DEL FRENTE (`MesaAccess.appRoot`, entre todas las ventanas), no en la
   "ventana activa" (podía ser una burbuja o el chat flotante y no encontraba nada). La accesibilidad recibe además
   clics (typeViewClicked/LongClicked) para que Bat Op cuente el uso en otras apps.
