@@ -261,6 +261,7 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
                                 return;
                             }
                             if (!hub.connected()) return;   // sigue sin abrirse: aviso con lo que se vio (para arreglarlo)
+                            if (SystemClock.uptimeMillis() - dumpAt > 60000) { dumpAt = SystemClock.uptimeMillis(); hub.send("kbDump", "msg", MesaAccess.dump()); }
                             EditorInfo ei = getCurrentInputEditorInfo();
                             hub.send("kbNoField", "found", false, "diag", "Vi: " + MesaAccess.lastField + " · toque: " + (tapped ? "sí" : "no")
                                     + " · app: " + (ei == null ? "-" : ei.packageName) + " · teclado: " + (viewOn ? "abierto" : "cerrado"));
@@ -322,7 +323,7 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
 
     private boolean viewOn;
     private String waitingPkg = "";
-    private long diagAt;
+    private long diagAt, dumpAt;
 
     /** Escribir con teclas de verdad (al cuadro que tiene el foco aunque el teclado esté cerrado). */
     private void asKeys(JSONObject m) {

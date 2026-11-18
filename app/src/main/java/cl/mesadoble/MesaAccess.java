@@ -200,6 +200,43 @@ public class MesaAccess extends AccessibilityService {
      * descripción Y la pista (antes solo la pista si el texto era null; el de YouTube tiene texto vacío y pista "Chat…",
      * así que no se encontraba), y cualquier EditText aunque no se pueda editar todavía.
      */
+    /** Diagnóstico: lo que hay en la mitad de abajo de la app del frente (clase, textos, si se puede tocar, posición). */
+    static String dump() {
+        MesaAccess s = instance;
+        if (s == null) return "sin accesibilidad";
+        StringBuilder out = new StringBuilder();
+        try {
+            android.view.accessibility.AccessibilityNodeInfo act = s.getRootInActiveWindow();
+            out.append("activa: ").append(act == null ? "-" : act.getPackageName()).append(" · frente: ").append(front).append('\n');
+            for (android.view.accessibility.AccessibilityWindowInfo w : s.getWindows())
+                out.append("ventana ").append(w.getType()).append(w.isActive() ? " activa" : "").append(w.isFocused() ? " foco" : "")
+                        .append(": ").append(w.getRoot() == null ? "-" : w.getRoot().getPackageName()).append('\n');
+            android.view.accessibility.AccessibilityNodeInfo root = appRoot(s);
+            if (root == null) return out.append("sin raíz").toString();
+            android.graphics.Rect rb = new android.graphics.Rect(), b = new android.graphics.Rect();
+            root.getBoundsInScreen(rb);
+            java.util.ArrayDeque<android.view.accessibility.AccessibilityNodeInfo> q = new java.util.ArrayDeque<>();
+            q.add(root);
+            int seen = 0;
+            while (!q.isEmpty() && seen++ < 900 && out.length() < 3500) {
+                android.view.accessibility.AccessibilityNodeInfo n = q.poll();
+                if (n == null) continue;
+                n.getBoundsInScreen(b);
+                CharSequence t = n.getText(), d = n.getContentDescription(), hh = android.os.Build.VERSION.SDK_INT >= 26 ? n.getHintText() : null;
+                boolean low = b.top > rb.top + rb.height() * 0.55f, interesting = (t != null && t.length() > 0) || (d != null && d.length() > 0) || hh != null
+                        || n.isEditable() || n.isClickable() || n.isFocusable();
+                if (low && interesting && n.isVisibleToUser())
+                    out.append(shortName(n.getClassName())).append(n.isEditable() ? " ED" : "").append(n.isClickable() ? " CL" : "").append(n.isFocusable() ? " FO" : "")
+                            .append(" t=").append(t == null ? "" : cut(t)).append(" d=").append(d == null ? "" : cut(d)).append(" h=").append(hh == null ? "" : cut(hh))
+                            .append(" @").append(b.left).append(',').append(b.top).append('-').append(b.right).append(',').append(b.bottom).append('\n');
+                for (int i = 0; i < n.getChildCount(); i++) q.add(n.getChild(i));
+            }
+        } catch (Exception e) { out.append("error ").append(e); }
+        return out.toString();
+    }
+
+    private static String cut(CharSequence c) { String s = c.toString().replace('\n', ' '); return s.length() > 30 ? s.substring(0, 30) + "…" : s; }
+
     /** El cuadro de chat cerrado más abajo en la pantalla (el título "Chat en vivo" también dice "chat", arriba). */
     static android.view.accessibility.AccessibilityNodeInfo findChatBox(android.view.accessibility.AccessibilityNodeInfo root) {
         if (root == null) return null;

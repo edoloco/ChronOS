@@ -166,7 +166,9 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   Video del usuario (nov. 17): tras mandar en el chat en vivo, YouTube queda "sin tipo", con conexión, teclado
   cerrado y sin foco; el cuadro se ve como la píldora "Chat…" (texto vacío + pista "Chat…"), que no se reconocía.
   `MesaAccess.isChatBox` mira texto, descripción, pista y estado, y todo EditText; `findChatBox` elige el más abajo
-  (el título "Chat en vivo" arriba también dice chat). Clic y, si no, toque real (`tapTextField`).
+  (el título "Chat en vivo" arriba también dice chat). Clic y, si no, toque real (`tapTextField`). Si aun así no
+  se abre: `kbDump` (máx. 1 por minuto) muestra en el extendido `MesaAccess.dump()` (ventanas y elementos de la
+  mitad de abajo) con botón Copiar, para pegarlo en el chat con Claude.
   El cuadro se busca en la ventana de la APP DEL FRENTE (`MesaAccess.appRoot`, entre todas las ventanas), no en la
   "ventana activa" (podía ser una burbuja o el chat flotante y no encontraba nada). La accesibilidad recibe además
   clics (typeViewClicked/LongClicked) para que Bat Op cuente el uso en otras apps.

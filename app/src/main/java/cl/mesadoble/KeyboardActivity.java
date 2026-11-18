@@ -719,6 +719,19 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         String t = m.optString("t");
         if ("navAck".equals(t) && !m.optBoolean("ok"))
             android.widget.Toast.makeText(this, "Recientes necesita la versión completa en el principal", android.widget.Toast.LENGTH_SHORT).show();
+        if ("kbDump".equals(t)) {   // diagnóstico del cuadro: para copiarlo y mandárselo a quien lo arregla
+            String dm = m.optString("msg");
+            h.post(() -> new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                    .setTitle("Diagnóstico del cuadro de texto")
+                    .setMessage("Toca «Copiar» y pégalo en el chat con Claude.\n\n" + dm)
+                    .setPositiveButton("Copiar", (d, w) -> {
+                        android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                        if (cm != null) cm.setPrimaryClip(android.content.ClipData.newPlainText("diagnóstico", dm));
+                        android.widget.Toast.makeText(this, "Copiado", android.widget.Toast.LENGTH_SHORT).show();
+                    })
+                    .setNegativeButton("Cerrar", null).show());
+            return;
+        }
         if ("kbDiag".equals(t)) { String dm = m.optString("msg"); h.post(() -> android.widget.Toast.makeText(this, dm, android.widget.Toast.LENGTH_LONG).show()); return; }
         if ("kbNoField".equals(t)) {   // escribiste sin un cuadro de texto elegido en el principal
             boolean f = m.optBoolean("found");
