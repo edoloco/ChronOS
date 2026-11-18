@@ -111,6 +111,39 @@ public class MesaAccess extends AccessibilityService {
      * Teclado: se escribió sin un cuadro de texto elegido. Busca en la pantalla del principal el cuadro de texto (o el
      * botón "Di algo…/Chatea…" que lo abre) y lo toca. Solo mira la ventana activa, y solo en ese momento.
      */
+    /** Qué encontró la última búsqueda del cuadro (para el aviso de diagnóstico en el extendido). */
+    static volatile String lastField = "";
+
+    /** Toque real (como el dedo) en el centro del cuadro de texto o de "Di algo…". true si había dónde. */
+    static boolean tapTextField() {
+        MesaAccess s = instance;
+        if (s == null) return false;
+        try {
+            android.view.accessibility.AccessibilityNodeInfo root = s.getRootInActiveWindow();
+            android.view.accessibility.AccessibilityNodeInfo n = firstEditable(root);
+            if (n == null && root != null) {
+                java.util.ArrayDeque<android.view.accessibility.AccessibilityNodeInfo> q = new java.util.ArrayDeque<>();
+                q.add(root);
+                int seen = 0;
+                while (!q.isEmpty() && seen++ < 600 && n == null) {
+                    android.view.accessibility.AccessibilityNodeInfo x = q.poll();
+                    if (x == null) continue;
+                    CharSequence t = x.getText() != null ? x.getText() : x.getContentDescription();
+                    if (x.isVisibleToUser() && t != null && t.length() < 40 && CHAT_HINT.matcher(t).find()) n = x;
+                    for (int i = 0; i < x.getChildCount(); i++) q.add(x.getChild(i));
+                }
+            }
+            if (n == null) return false;
+            android.graphics.Rect b = new android.graphics.Rect();
+            n.getBoundsInScreen(b);
+            if (b.isEmpty()) return false;
+            android.graphics.Path p = new android.graphics.Path();
+            p.moveTo(b.exactCenterX(), b.exactCenterY());
+            return s.dispatchGesture(new android.accessibilityservice.GestureDescription.Builder()
+                    .addStroke(new android.accessibilityservice.GestureDescription.StrokeDescription(p, 0, 60)).build(), null, null);
+        } catch (Exception e) { return false; }
+    }
+
     static boolean focusTextField() {
         MesaAccess s = instance;
         if (s == null) return false;
@@ -126,6 +159,7 @@ public class MesaAccess extends AccessibilityService {
             if (n == null) continue;
             if (n.isVisibleToUser()) {
                 if (n.isEditable()) {
+                    lastField = "cuadro " + shortName(n.getClassName()) + (n.isFocused() ? " (ya con foco)" : "");
                     n.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_FOCUS);
                     n.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK);
                     return true;
@@ -139,9 +173,16 @@ public class MesaAccess extends AccessibilityService {
             for (int i = 0; i < n.getChildCount(); i++) q.add(n.getChild(i));
         }
         // no hay cuadro a la vista: el botón que lo abre (o su contenedor que se puede tocar)
+        lastField = hint != null ? "«" + (hint.getText() != null ? hint.getText() : hint.getContentDescription()) + "»" : "nada";
         for (android.view.accessibility.AccessibilityNodeInfo n = hint; n != null; n = n.getParent())
             if (n.isClickable()) { n.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK); return true; }
         return false;
+    }
+
+    private static String shortName(CharSequence c) {
+        if (c == null) return "?";
+        String s = c.toString();
+        return s.substring(s.lastIndexOf('.') + 1);
     }
 
     /** Toque real (gesto) sobre un elemento: al final (end) o al centro. */

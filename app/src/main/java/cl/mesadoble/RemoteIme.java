@@ -94,6 +94,7 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
     @Override public void onStartInputView(EditorInfo info, boolean restarting) {
         super.onStartInputView(info, restarting);
         viewOn = true;
+        if (!waiting.isEmpty()) main.postDelayed(this::flushWaiting, 120);   // se abrió el cuadro: lo que esperaba va ahí
         hub.setImeReady(true);
         updateLabel();
         hideFix();
@@ -219,7 +220,9 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
         // la k, j, l, f… también hacen cosas): se guardan, se busca el cuadro de texto y se escriben ahí
         boolean typing = "text".equals(a) || "key".equals(a) || "word".equals(a);
         // (vuelta a como funcionaba bien en YouTube: guardar, buscar el cuadro y escribir ahí al aparecer)
-        if (typing && noField()) {
+        // también si el cuadro sigue conectado pero el teclado del principal se cerró (YouTube después de mandar un
+        // comentario: lo escrito iba a un cuadro escondido y solo aparecía al tocarlo)
+        if (typing && (noField() || hiddenField())) {
             long now = SystemClock.uptimeMillis();
             if (now - waitingAt > 20000) waiting.clear();
             boolean first = waiting.isEmpty();
@@ -229,6 +232,28 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
                 boolean found = MesaAccess.focusTextField();
                 if (hub.connected()) hub.send("kbNoField", "found", found);
                 if (found) main.postDelayed(this::flushWaiting, 450);
+                // si el clic no abrió el cuadro (YouTube después de mandar): un toque de verdad, como el dedo
+                main.postDelayed(() -> {
+                    if (waiting.isEmpty() || ready()) return;
+                    boolean tapped = MesaAccess.tapTextField();
+                    main.postDelayed(() -> {
+                        if (waiting.isEmpty() || ready()) return;
+                        MesaAccess.tapTextField();   // otro intento
+                        main.postDelayed(() -> {
+                            if (waiting.isEmpty()) return;
+                            if (!noField()) {   // hay cuadro conectado pero esta app no muestra el teclado: se escribe igual
+                                EditorInfo e2 = getCurrentInputEditorInfo();
+                                noViewPkg = e2 == null ? null : e2.packageName; noViewAt = SystemClock.uptimeMillis();
+                                flush(true);
+                                return;
+                            }
+                            if (!hub.connected()) return;   // sigue sin abrirse: aviso con lo que se vio (para arreglarlo)
+                            EditorInfo ei = getCurrentInputEditorInfo();
+                            hub.send("kbNoField", "found", false, "diag", "Vi: " + MesaAccess.lastField + " · toque: " + (tapped ? "sí" : "no")
+                                    + " · app: " + (ei == null ? "-" : ei.packageName) + " · teclado: " + (viewOn ? "abierto" : "cerrado"));
+                        }, 900);
+                    }, 700);
+                }, 550);
             }
             return;
         }
@@ -285,8 +310,24 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
     private boolean viewOn;
 
     /** Ya hay cuadro de texto: se escribe lo que quedó esperando (si no pasó mucho rato). */
-    private void flushWaiting() {
-        if (waiting.isEmpty() || noField()) return;
+    /** ¿Cuadro conectado pero con el teclado del principal cerrado? (no en terminales: ahí no hace falta) */
+    private String noViewPkg;
+    private long noViewAt;
+
+    private boolean hiddenField() {
+        if (viewOn || noField()) return false;
+        EditorInfo ei = getCurrentInputEditorInfo();
+        if (ei != null && ei.packageName != null && ei.packageName.equals(noViewPkg) && SystemClock.uptimeMillis() - noViewAt < 120000) return false;
+        return ei == null || !TERMINALS.contains(ei.packageName == null ? "" : ei.packageName);
+    }
+
+    /** Listo para escribir: cuadro conectado y con el teclado abierto. */
+    private boolean ready() { return !noField() && viewOn; }
+
+    private void flushWaiting() { flush(false); }
+
+    private void flush(boolean force) {
+        if (waiting.isEmpty() || noField() || (!force && !viewOn)) return;
         if (SystemClock.uptimeMillis() - waitingAt > 20000) { waiting.clear(); return; }
         java.util.ArrayList<JSONObject> l = new java.util.ArrayList<>(waiting);
         waiting.clear();

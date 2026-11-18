@@ -721,7 +721,9 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
             android.widget.Toast.makeText(this, "Recientes necesita la versión completa en el principal", android.widget.Toast.LENGTH_SHORT).show();
         if ("kbNoField".equals(t)) {   // escribiste sin un cuadro de texto elegido en el principal
             boolean f = m.optBoolean("found");
-            h.post(() -> android.widget.Toast.makeText(this, f ? "Abriendo el cuadro de texto del principal…"
+            String diag = m.optString("diag");
+            h.post(() -> android.widget.Toast.makeText(this, !diag.isEmpty() ? "No se abrió el cuadro del principal. " + diag
+                    : f ? "Abriendo el cuadro de texto del principal…"
                     : "No hay un cuadro de texto elegido en el principal: tócalo y lo que escribiste aparece ahí", android.widget.Toast.LENGTH_LONG).show());
             return;
         }

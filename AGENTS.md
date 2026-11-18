@@ -159,6 +159,11 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   quedaron letras esperando, primero esas ("asludos"). Se probaron y se quitaron: escribir por accesibilidad
   (`typeIntoField`), toques con gesto y vencer la espera a los 8 s — empeoraban YouTube. Terminales: solo las de
   la lista `TERMINALS` (Termux…).
+  Nov 17: también cuenta como "sin cuadro" el cuadro conectado con el teclado del principal CERRADO
+  (`hiddenField`: YouTube tras mandar un comentario; lo escrito iba al cuadro escondido). Se guarda, clic
+  (`focusTextField`), luego toques reales (`MesaAccess.tapTextField`, 550 ms y +700 ms) y se escribe al abrirse el
+  teclado (`onStartInputView` → `flush`). Si a los ~2 s hay cuadro pero el teclado nunca se muestra, se escribe
+  igual y esa app queda exenta 2 min (`noViewPkg`). Si no hay cuadro: aviso con diagnóstico (`diag`) en el extendido.
 - Espacios: el arreglo AUTOMÁTICO se quitó (nov. 2026; `KeyboardActivity.spaceFix()` = false, sin opción en el
   menú): el diseño del teclado (franja sobre el espacio, coma/punto angostos) ya lo resolvió y cambiar palabras solas
   molestaba ("tecleo" → "te leo"). `Dict.splitSpace` queda solo como una de las correcciones al borrar el espacio.
