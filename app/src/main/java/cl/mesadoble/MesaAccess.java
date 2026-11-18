@@ -130,6 +130,17 @@ public class MesaAccess extends AccessibilityService {
         return act;
     }
 
+    /** ¿Hay un cuadro de texto con el foco en la app del frente (aunque el teclado esté cerrado)? */
+    static boolean focusedEditable() {
+        MesaAccess s = instance;
+        if (s == null) return false;
+        try {
+            android.view.accessibility.AccessibilityNodeInfo r = appRoot(s);
+            android.view.accessibility.AccessibilityNodeInfo f = r == null ? null : r.findFocus(android.view.accessibility.AccessibilityNodeInfo.FOCUS_INPUT);
+            return f != null && f.isEditable() && f.isVisibleToUser();
+        } catch (Exception e) { return false; }
+    }
+
     /** Qué encontró la última búsqueda del cuadro (para el aviso de diagnóstico en el extendido). */
     static volatile String lastField = "";
 

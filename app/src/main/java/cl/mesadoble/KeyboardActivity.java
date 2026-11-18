@@ -719,6 +719,7 @@ public class KeyboardActivity extends Activity implements Link.Listener, Keyboar
         String t = m.optString("t");
         if ("navAck".equals(t) && !m.optBoolean("ok"))
             android.widget.Toast.makeText(this, "Recientes necesita la versión completa en el principal", android.widget.Toast.LENGTH_SHORT).show();
+        if ("kbDiag".equals(t)) { String dm = m.optString("msg"); h.post(() -> android.widget.Toast.makeText(this, dm, android.widget.Toast.LENGTH_LONG).show()); return; }
         if ("kbNoField".equals(t)) {   // escribiste sin un cuadro de texto elegido en el principal
             boolean f = m.optBoolean("found");
             String diag = m.optString("diag");

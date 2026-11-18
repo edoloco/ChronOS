@@ -222,12 +222,25 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
         // (vuelta a como funcionaba bien en YouTube: guardar, buscar el cuadro y escribir ahí al aparecer)
         // también si el cuadro sigue conectado pero el teclado del principal se cerró (YouTube después de mandar un
         // comentario: lo escrito iba a un cuadro escondido y solo aparecía al tocarlo)
-        if (typing && (noField() || hiddenField())) {
+        // diagnóstico (temporal): cómo ve ChronOS el cuadro cuando no está listo para escribir
+        if (typing && (noField() || !viewOn) && hub.connected() && SystemClock.uptimeMillis() - diagAt > 8000) {
+            diagAt = SystemClock.uptimeMillis();
+            EditorInfo de = getCurrentInputEditorInfo();
+            hub.send("kbDiag", "msg", "cuadro: " + (de == null ? "ninguno" : (de.inputType == 0 ? "sin tipo" : "tipo " + de.inputType) + " de " + de.packageName)
+                    + " · conexión: " + (getCurrentInputConnection() != null ? "sí" : "no") + " · teclado principal: " + (viewOn ? "abierto" : "cerrado")
+                    + " · foco en cuadro: " + (MesaAccess.focusedEditable() ? "sí" : "no") + " · al frente: " + MesaAccess.front);
+        }
+        // YouTube después de mandar: Android dice "sin cuadro" pero su cuadro de chat SIGUE con el foco (solo se cerró
+        // el teclado). Así funcionaba al principio: las letras van como teclas de verdad y caen en ese cuadro.
+        if (typing && noField() && waiting.isEmpty() && MesaAccess.focusedEditable()) { asKeys(m); return; }
+        if (typing && noField()) {
             long now = SystemClock.uptimeMillis();
-            if (now - waitingAt > 20000) waiting.clear();
+            String fp = MesaAccess.front == null ? "" : MesaAccess.front;
+            if (now - waitingAt > 15000 || !fp.equals(waitingPkg)) waiting.clear();   // solo en la misma app
             boolean first = waiting.isEmpty();
             waiting.add(m);
             waitingAt = now;
+            waitingPkg = fp;
             if (first) {
                 boolean found = MesaAccess.focusTextField();
                 if (hub.connected()) hub.send("kbNoField", "found", found);
@@ -308,6 +321,22 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
     }
 
     private boolean viewOn;
+    private String waitingPkg = "";
+    private long diagAt;
+
+    /** Escribir con teclas de verdad (al cuadro que tiene el foco aunque el teclado esté cerrado). */
+    private void asKeys(JSONObject m) {
+        String a = m.optString("a");
+        if ("text".equals(a)) { String t = m.optString("s"); for (int i = 0; i < t.length(); i++) sendKeyChar(t.charAt(i)); }
+        else if ("word".equals(a)) {
+            String old = m.optString("old"), nw = m.optString("s");
+            for (int i = 0; i < old.length(); i++) sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL);
+            for (int i = 0; i < nw.length(); i++) sendKeyChar(nw.charAt(i));
+        } else if ("key".equals(a)) {
+            int k = m.optInt("k"), n = Math.max(1, Math.min(500, m.optInt("n", 1)));
+            for (int i = 0; i < n; i++) sendDownUpKeyEvents(k);
+        }
+    }
 
     /** Ya hay cuadro de texto: se escribe lo que quedó esperando (si no pasó mucho rato). */
     /** ¿Cuadro conectado pero con el teclado del principal cerrado? (no en terminales: ahí no hace falta) */
@@ -328,6 +357,11 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
 
     private void flush(boolean force) {
         if (waiting.isEmpty() || noField() || (!force && !viewOn)) return;
+        EditorInfo fe = getCurrentInputEditorInfo();
+        if (fe != null && fe.packageName != null && !waitingPkg.isEmpty() && !fe.packageName.equals(waitingPkg)) {
+            waiting.clear();   // es otra app: lo escrito para YouTube no se pega aquí (antes se replicaba)
+            return;
+        }
         if (SystemClock.uptimeMillis() - waitingAt > 20000) { waiting.clear(); return; }
         java.util.ArrayList<JSONObject> l = new java.util.ArrayList<>(waiting);
         waiting.clear();
