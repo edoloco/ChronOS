@@ -161,14 +161,12 @@ ChronOS une **dos teléfonos Android como si fueran uno** (unidos por el lado la
   la lista `TERMINALS` (Termux…).
   Nov 17 (2.ª vuelta): sin cuadro (TYPE_NULL) pero con un cuadro con FOCO en la app (`MesaAccess.focusedEditable`,
   YouTube tras mandar) → las letras van como teclas de verdad (`RemoteIme.asKeys`), como al principio. Lo que espera
-  se guarda solo para la misma app (`waitingPkg`, 15 s): ya no se pega en otra app al volver. Diagnóstico temporal
-  `kbDiag` (cada 8 s, toast en el extendido) con el estado del cuadro cuando no está listo.
+  se guarda solo para la misma app (`waitingPkg`, 15 s): ya no se pega en otra app al volver.
   Video del usuario (nov. 17): tras mandar en el chat en vivo, YouTube queda "sin tipo", con conexión, teclado
   cerrado y sin foco; el cuadro se ve como la píldora "Chat…" (texto vacío + pista "Chat…"), que no se reconocía.
   `MesaAccess.isChatBox` mira texto, descripción, pista y estado, y todo EditText; `findChatBox` elige el más abajo
-  (el título "Chat en vivo" arriba también dice chat). Clic y, si no, toque real (`tapTextField`). Si aun así no
-  se abre: `kbDump` (máx. 1 por minuto) muestra en el extendido `MesaAccess.dump()` (ventanas y elementos de la
-  mitad de abajo) con botón Copiar, para pegarlo en el chat con Claude.
+  (el título "Chat en vivo" arriba también dice chat). Clic y, si no, toque real (`tapTextField`).  (Los diagnósticos
+  `kbDiag`/`kbDump` se quitaron al resolverse; `MesaAccess.dump()` queda en el código por si hace falta.)
   CAUSA REAL (nov. 17): el dump dijo "sin accesibilidad" — `MesaAccess` estaba APAGADA en el principal (Xiaomi la
   apaga a veces tras actualizar). Sin ella no se encuentra ni abre ningún cuadro. Ahora `RemoteIme` avisa en el
   extendido y pone en el principal un aviso que abre Ajustes › Accesibilidad (máx. cada 2 min).

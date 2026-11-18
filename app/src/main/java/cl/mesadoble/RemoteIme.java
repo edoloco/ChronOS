@@ -222,14 +222,6 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
         // (vuelta a como funcionaba bien en YouTube: guardar, buscar el cuadro y escribir ahí al aparecer)
         // también si el cuadro sigue conectado pero el teclado del principal se cerró (YouTube después de mandar un
         // comentario: lo escrito iba a un cuadro escondido y solo aparecía al tocarlo)
-        // diagnóstico (temporal): cómo ve ChronOS el cuadro cuando no está listo para escribir
-        if (typing && (noField() || !viewOn) && hub.connected() && SystemClock.uptimeMillis() - diagAt > 8000) {
-            diagAt = SystemClock.uptimeMillis();
-            EditorInfo de = getCurrentInputEditorInfo();
-            hub.send("kbDiag", "msg", "cuadro: " + (de == null ? "ninguno" : (de.inputType == 0 ? "sin tipo" : "tipo " + de.inputType) + " de " + de.packageName)
-                    + " · conexión: " + (getCurrentInputConnection() != null ? "sí" : "no") + " · teclado principal: " + (viewOn ? "abierto" : "cerrado")
-                    + " · foco en cuadro: " + (MesaAccess.focusedEditable() ? "sí" : "no") + " · al frente: " + MesaAccess.front);
-        }
         // YouTube después de mandar: Android dice "sin cuadro" pero su cuadro de chat SIGUE con el foco (solo se cerró
         // el teclado). Así funcionaba al principio: las letras van como teclas de verdad y caen en ese cuadro.
         if (typing && noField() && waiting.isEmpty() && MesaAccess.focusedEditable()) { asKeys(m); return; }
@@ -272,11 +264,6 @@ public class RemoteIme extends InputMethodService implements Link.Listener {
                                 flush(true);
                                 return;
                             }
-                            if (!hub.connected()) return;   // sigue sin abrirse: aviso con lo que se vio (para arreglarlo)
-                            if (SystemClock.uptimeMillis() - dumpAt > 60000) { dumpAt = SystemClock.uptimeMillis(); hub.send("kbDump", "msg", MesaAccess.dump()); }
-                            EditorInfo ei = getCurrentInputEditorInfo();
-                            hub.send("kbNoField", "found", false, "diag", "Vi: " + MesaAccess.lastField + " · toque: " + (tapped ? "sí" : "no")
-                                    + " · app: " + (ei == null ? "-" : ei.packageName) + " · teclado: " + (viewOn ? "abierto" : "cerrado"));
                         }, 900);
                     }, 700);
                 }, 550);
